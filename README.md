@@ -6,15 +6,18 @@ native egui desktop app (`envctl-gui`). It manages the box declaratively — eve
 a TOML **component** whose lifecycle hooks *wrap the proven bash* from the Desktop kit
 (`yazelix-setup.sh`, `ubuntu-boot-repair.sh`, …) rather than rewriting it.
 
-## Five verbs
+## Verbs
 
-| verb | phase | what it does | default |
-|---|---|---|---|
-| `auto-detect` | Detect | read-only inventory: host, GPU (works pre-driver), tools, component drift | — |
-| `install` | Install | bring components to present+verified, in dependency order; **idempotent** | acts |
-| `auto-fix` | Fix | repair broken/partial components | **dry-run** (`--apply`) |
-| `reset` | Remove | uninstall + unwire back toward baseline | **dry-run** (`--apply`) |
-| `add-repo` | — | turn an upstream git repo into a managed, build-from-source component | — |
+| verb | what it does | default |
+|---|---|---|
+| `auto-detect` | read-only inventory: host, GPU (works pre-driver), tools, component drift | — |
+| `install` | bring components to present+verified, in dependency order; **idempotent** | acts |
+| `auto-fix` | repair broken/partial components | **dry-run** (`--apply`) |
+| `reset` | uninstall + unwire back toward baseline; gates `--all/--confirm/--cascade/--purge` | **dry-run** (`--apply`) |
+| `add-repo` | build any repo from source (as-is / cherry-pick / rename / **AI port-to-Rust**) + wire-in; `--connect` for a supervised agent session | **preview** (`--build`) |
+| `graph` | dependency-DAG intelligence: summary, `--impact` blast-radius, `--why` paths, `--dot`/`--json` | — |
+| `lock` | content-hashed `envctl.lock` (reproducible) + `--check` CI gate (exit 1 on drift) | writes |
+| `doctor` | read-only health: writability, toolchains, sudo, UEFI/Secure-Boot, GPU, last-op | — |
 
 ## Quick start
 
