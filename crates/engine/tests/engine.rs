@@ -184,6 +184,91 @@ fn manifest_phase3_wiring_loads() {
     assert!(!nct.wiring.apt_repos.is_empty() && !nct.wiring.cdi_specs.is_empty());
 }
 
+/// Regression for the audit BLOCKER: a REFUSED targeted reset must NOT delete the
+/// refused target's now-orphaned prerequisites. Chain capp -> cweb -> clib; capp
+/// is "live" (detected). `reset cweb` is refused (live capp depends on it) — and
+/// clib (cweb's prereq) must be left untouched, not removed.
+#[test]
+fn reset_refusal_does_not_orphan_remove_prereqs() {
+    use envctl_engine::{Engine, EventSink, HookRunner, OpResult, OpStatus, Phase, RunPlan};
+    use std::collections::HashSet;
+
+    // a runner where only `capp` detects as present (live).
+    struct LiveRunner {
+        live: HashSet<String>,
+    }
+    impl HookRunner for LiveRunner {
+        fn run(&self, comp: &str, phase: Phase, _h: &envctl_engine::Hook, _d: bool, _s: &EventSink) -> OpResult {
+            let status = if phase == Phase::Detect && self.live.contains(comp) {
+                OpStatus::Ok
+            } else {
+                OpStatus::DryRun
+            };
+            OpResult { component: comp.into(), phase, status, exit_code: None, duration_ms: 0, message: String::new(), dry_run: false }
+        }
+    }
+
+    // temp manifest with the 3-component chain.
+    let dir = std::env::temp_dir().join(format!(
+        "envctl-reset-test-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("chain.toml"),
+        r#"
+[[component]]
+id = "clib"
+name = "clib"
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "cweb"
+name = "cweb"
+requires = ["clib"]
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "capp"
+name = "capp"
+requires = ["cweb"]
+[component.detect]
+kind = "command"
+command = "true"
+"#,
+    )
+    .unwrap();
+
+    let runner = LiveRunner { live: HashSet::from(["capp".to_string()]) };
+    let eng = Engine::with_runner(dir.clone(), Box::new(runner)).unwrap();
+    let sink = EventSink::null();
+    let summary = eng
+        .run(RunPlan::new(Phase::Remove, vec!["cweb".to_string()], false), &sink)
+        .unwrap();
+
+    // cweb refused (live capp depends on it)…
+    assert!(summary.refused.iter().any(|x| x == "cweb"), "cweb must be refused: {:?}", summary.refused);
+    // …and clib (cweb's orphaned prereq) must NOT have been processed for removal.
+    let clib_removed = summary
+        .results
+        .iter()
+        .any(|r| r.component == "clib" && r.phase == Phase::Remove && r.status != OpStatus::NoHook);
+    assert!(!clib_removed, "BLOCKER REGRESSION: clib (orphaned prereq) was removed: {:?}", summary.results);
+    assert!(!summary.ok());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn dropin_filters_injection_in_relinks() {
     use envctl_engine::register::{synth_dropin, RegisterSpec};
