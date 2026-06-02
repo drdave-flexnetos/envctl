@@ -1,0 +1,15 @@
+[package]
+name = "envctl-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "envctl-gui"
+path = "src/main.rs"
+
+[dependencies]
+envctl-engine = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui_extras = { workspace = true }

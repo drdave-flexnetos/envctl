@@ -1,0 +1,214 @@
+# Nix + yazelix stack (yazelix-setup.sh sections 4-8). Strict order:
+#   nix -> nix-yazelix-cache (+restart daemon) -> home-manager -> yazelix
+#   -> yazelix-desktop -> yazelix-config, plus the shell auto-enter + default terminal.
+
+[[component]]
+id = "nix"
+name = "Nix (Determinate, flakes)"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v nix || [ -e /nix ]"]
+[component.install]
+kind = "script"
+script = "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix --version"]
+[component.fix]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; sudo systemctl restart nix-daemon; nix --version"
+[component.remove]
+kind = "script"
+script = "/nix/nix-installer uninstall --no-confirm 2>/dev/null || (sudo rm -rf /nix /etc/nix)"
+
+
+[[component]]
+id = "nix-yazelix-cache"
+name = "yazelix Cachix cache + eval-cores"
+description = "Appends eval-cores + yazelix substituter to /etc/nix/nix.custom.conf."
+requires = ["nix"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "grep -q 'yazelix.cachix.org' /etc/nix/nix.custom.conf 2>/dev/null"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+sudo install -dm 755 /etc/nix
+sudo touch /etc/nix/nix.custom.conf
+add(){ grep -qF -- "$1" /etc/nix/nix.custom.conf || echo "$1" | sudo tee -a /etc/nix/nix.custom.conf >/dev/null; }
+add "eval-cores = 0"
+add "extra-substituters = https://yazelix.cachix.org"
+add "extra-trusted-public-keys = yazelix.cachix.org-1:ZgxIjQvaP0VTWL8Racx27mpUNzDJ97xC2y7QWYjmGNM="
+sudo systemctl restart nix-daemon 2>/dev/null || true
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "nix config show 2>/dev/null | grep -qE 'yazelix\\.cachix\\.org'"]
+[component.fix]
+kind = "script"
+script = '''
+set -e
+add(){ grep -qF -- "$1" /etc/nix/nix.custom.conf || echo "$1" | sudo tee -a /etc/nix/nix.custom.conf >/dev/null; }
+add "extra-substituters = https://yazelix.cachix.org"
+sudo systemctl restart nix-daemon 2>/dev/null || true
+'''
+[component.remove]
+kind = "script"
+script = "sudo sed -i '/yazelix.cachix.org/d; /eval-cores = 0/d' /etc/nix/nix.custom.conf; sudo systemctl restart nix-daemon 2>/dev/null || true"
+
+
+[[component]]
+id = "home-manager"
+name = "home-manager"
+requires = ["nix"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; command -v home-manager"]
+[component.install]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile install nixpkgs#home-manager"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; home-manager --version"]
+[component.fix]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile upgrade home-manager || nix profile install nixpkgs#home-manager"
+[component.remove]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile remove home-manager"
+
+
+[[component]]
+id = "yazelix"
+name = "yazelix (Ghostty variant)"
+description = "nix profile github:luccahuguet/yazelix#yazelix; bundles nushell+mise."
+requires = ["nix", "nix-yazelix-cache", "home-manager", "ghostty"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; command -v yzx"]
+[component.install]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile add --refresh github:luccahuguet/yazelix#yazelix"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; yzx --version 2>/dev/null || command -v yzx"]
+[component.fix]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; nix profile upgrade yazelix 2>/dev/null || nix profile add --refresh github:luccahuguet/yazelix#yazelix; yzx doctor || true"
+[component.remove]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile remove yazelix"
+
+
+[[component]]
+id = "yazelix-desktop"
+name = "yazelix desktop launcher"
+requires = ["yazelix"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "ls \"$HOME/.local/share/applications/\"*[yY]azelix* >/dev/null 2>&1"]
+[component.install]
+kind = "script"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; yzx desktop install"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "ls \"$HOME/.local/share/applications/\"*[yY]azelix* >/dev/null 2>&1"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; yzx desktop install"
+[component.remove]
+kind = "script"
+script = "export PATH=\"$HOME/.nix-profile/bin:$PATH\"; yzx desktop uninstall 2>/dev/null || rm -f \"$HOME/.local/share/applications/\"*[yY]azelix*.desktop"
+
+
+# Wiring-owned: the guarded ~/.bashrc auto-enter block (Wiring::apply/revert owns
+# the marker block — no hand-rolled sed). Makes yazelix the default everyday shell.
+[[component]]
+id = "yazelix-shell"
+name = "yazelix auto-enter"
+requires = ["yazelix"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "grep -q 'BEGIN yazelix auto-enter' \"$HOME/.bashrc\""]
+[[component.wiring.shell_rc]]
+file = "~/.bashrc"
+marker = "yazelix auto-enter"
+content = '''
+if [ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+export PATH="$HOME/.nix-profile/bin:$PATH"
+if [[ $- == *i* ]] && [[ -z "${ZELLIJ:-}" ]] && [[ -z "${YAZELIX_ACTIVE:-}" ]] && [[ "${TERM:-dumb}" != "dumb" ]] && command -v yzx >/dev/null 2>&1; then
+  export YAZELIX_ACTIVE=1
+  yzx enter
+fi
+'''
+
+
+[[component]]
+id = "ghostty-default-terminal"
+name = "Ghostty as default terminal"
+requires = ["ghostty"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "update-alternatives --query x-terminal-emulator 2>/dev/null | grep -qi ghostty"]
+[component.install]
+kind = "script"
+script = "command -v ghostty >/dev/null && { sudo update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator \"$(command -v ghostty)\" 60 >/dev/null 2>&1 || true; sudo update-alternatives --set x-terminal-emulator \"$(command -v ghostty)\" >/dev/null 2>&1 || true; }"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "update-alternatives --query x-terminal-emulator 2>/dev/null | grep -qi ghostty"]
+[component.remove]
+kind = "script"
+script = "sudo update-alternatives --remove x-terminal-emulator \"$(command -v ghostty)\" 2>/dev/null || true"
+
+
+[[component]]
+id = "yazelix-config"
+name = "yazelix settings.jsonc"
+description = "Restores ~/.config/yazelix/settings.jsonc via the shipped helper (install-if-missing)."
+requires = ["yazelix"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -f \"$HOME/.config/yazelix/settings.jsonc\" ]"]
+[component.install]
+kind = "shipped_script"
+path = "/usr/local/bin/yazelix-config.sh"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -f \"$HOME/.config/yazelix/settings.jsonc\" ] && grep -q '\"default_shell\"' \"$HOME/.config/yazelix/settings.jsonc\""]
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/yazelix-config.sh"
+args = ["--force"]
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "mv \"$HOME/.config/yazelix/settings.jsonc\" \"$HOME/.config/yazelix/settings.jsonc.removed.$(date +%s)\" 2>/dev/null || true"]
+
+
+# Group/meta: the whole Nix+yazelix stack in order.
+[[component]]
+id = "group-nix-yazelix"
+name = "Full Nix + yazelix stack"
+requires = ["nix", "nix-yazelix-cache", "home-manager", "yazelix", "yazelix-desktop", "yazelix-shell", "ghostty-default-terminal", "yazelix-config"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v nix >/dev/null && bash -lc 'command -v yzx' >/dev/null 2>&1"]

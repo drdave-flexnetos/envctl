@@ -1,0 +1,138 @@
+# Core dev base: fonts, JS runtime (+ node-via-bun), Rust toolchain, rtk.
+# Maps yazelix-setup.sh sections 1-3.
+
+[[component]]
+id = "nerd-fonts"
+name = "Nerd Fonts (JetBrainsMono, FiraCode)"
+description = "Patched fonts for the terminal/editor UI."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "fc-list 2>/dev/null | grep -qiE 'JetBrainsMono Nerd|FiraCode Nerd'"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+FD="$HOME/.local/share/fonts"; mkdir -p "$FD"; cd "$(mktemp -d)"
+base="https://github.com/ryanoasis/nerd-fonts/releases/latest/download"
+for f in JetBrainsMono FiraCode; do
+  curl -fsSL -o "$f.zip" "$base/$f.zip"
+  unzip -oq "$f.zip" -d "$FD/$f-NerdFont"
+done
+fc-cache -f >/dev/null
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "fc-list | grep -qiE 'JetBrainsMono Nerd Font|FiraCode Nerd Font'"]
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "rm -rf \"$HOME/.local/share/fonts/JetBrainsMono-NerdFont\" \"$HOME/.local/share/fonts/FiraCode-NerdFont\"; fc-cache -f >/dev/null"]
+
+
+[[component]]
+id = "bun"
+name = "Bun JS runtime"
+description = "JS runtime + package manager; provides node via a bun symlink."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v bun || [ -x \"$HOME/.bun/bin/bun\" ]"]
+[component.install]
+kind = "script"
+script = "curl -fsSL https://bun.sh/install | bash"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; bun --version"]
+[component.fix]
+kind = "script"
+script = "curl -fsSL https://bun.sh/install | bash"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "rm -rf \"$HOME/.bun\""]
+[component.wiring]
+path_entries = ["~/.bun/bin", "~/.local/bin"]
+[[component.wiring.shell_rc]]
+file = "~/.bashrc"
+marker = "bun path"
+content = 'export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"'
+
+
+[[component]]
+id = "node-via-bun"
+name = "node → bun symlink"
+description = "Exposes `node` as a symlink to bun (node-compat mode)."
+requires = ["bun"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v node >/dev/null && readlink -f \"$(command -v node)\" 2>/dev/null | grep -q bun"]
+[component.install]
+kind = "command"
+command = "bash"
+args = ["-lc", "ln -sf \"$(command -v bun || echo \"$HOME/.bun/bin/bun\")\" \"$HOME/.bun/bin/node\""]
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; node --version"]
+[component.fix]
+kind = "command"
+command = "bash"
+args = ["-lc", "ln -sf \"$HOME/.bun/bin/bun\" \"$HOME/.bun/bin/node\""]
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "rm -f \"$HOME/.bun/bin/node\""]
+
+
+[[component]]
+id = "rustup"
+name = "rustup toolchain"
+description = "Rust toolchain manager (cargo/rustc). Foundation for rtk + cuda-oxide."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v cargo || command -v rustup || [ -x \"$HOME/.cargo/bin/cargo\" ]"]
+[component.install]
+kind = "script"
+script = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; rustc --version && cargo --version"]
+[component.fix]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; rustup self update; rustup update stable"]
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "\"$HOME/.cargo/bin/rustup\" self uninstall -y"]
+
+
+[[component]]
+id = "rtk"
+name = "rtk (Rust Token Killer)"
+description = "cargo-installed CLI; first run: rtk gain ; rtk init -g."
+requires = ["rustup"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v rtk || [ -x \"$HOME/.cargo/bin/rtk\" ]"]
+[component.install]
+kind = "script"
+script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo install --git https://github.com/rtk-ai/rtk"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; rtk --version"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo install --force --git https://github.com/rtk-ai/rtk"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo uninstall rtk"]

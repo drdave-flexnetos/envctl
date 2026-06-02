@@ -1,0 +1,122 @@
+# Boot repair: wraps ubuntu-boot-repair.sh's four subcommands as destructive
+# components whose Fix hook IS the repair (auto-fix, dry-run by default). The
+# machine-specific UUIDs live here as Guard config, NOT in engine code. Guards are
+# tailored per op (rename-pro acts on the LIVE disk by design, so it uses an
+# identity check instead of NotLiveDevice).
+
+# Read-only diagnosis (not destructive).
+[[component]]
+id = "boot-repair-diagnose"
+name = "Boot repair: diagnose (read-only)"
+description = "Mounts the dev root read-only and prints /boot state. Changes nothing."
+destructive = false
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -d /sys/firmware/efi ] && command -v blkid >/dev/null && command -v efibootmgr >/dev/null"]
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/ubuntu-boot-repair.sh"
+args = ["diagnose"]
+needs_sudo = true
+
+
+# Destructive: chroot grub-install of the DEV disk + NVRAM. UUID-guarded.
+[[component]]
+id = "boot-repair-dev"
+name = "Boot repair: dev disk (ubuntu26dev)"
+description = "chroot grub-install + NVRAM for the dev root; never touches /home."
+destructive = true
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "blkid -U 7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d >/dev/null 2>&1"]
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/ubuntu-boot-repair.sh"
+args = ["repair-dev"]
+needs_sudo = true
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "efibootmgr -v | grep -qi ubuntu26dev"]
+[[component.guards]]
+kind = "uuid_resolves"
+uuid = "7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d"
+[[component.guards]]
+kind = "not_live_device"
+uuid = "7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d"
+[[component.guards]]
+kind = "not_mounted"
+uuid = "5d9eeffb-cf79-4483-b97d-33a0140154f6"
+
+
+# Destructive: re-registers the LIVE (pro) system bootloader. Acts on live by
+# design, so guard with an IDENTITY check (live root == expected pro UUID) +
+# /boot/efi mounted — NOT NotLiveDevice.
+[[component]]
+id = "boot-repair-rename-pro"
+name = "Boot repair: rename live → ubuntu26pro"
+description = "grub-install the live system as ubuntu26pro. Acts on the live disk."
+destructive = true
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ \"$(blkid -s UUID -o value \"$(findmnt -no SOURCE /)\")\" = 8f9bd935-41d2-4275-837c-88d4bca13d85 ]"]
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/ubuntu-boot-repair.sh"
+args = ["rename-pro"]
+needs_sudo = true
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "efibootmgr -v | grep -qi ubuntu26pro"]
+[[component.guards]]
+kind = "path_exists"
+path = "/boot/efi"
+[[component.guards]]
+kind = "hook_succeeds"
+[component.guards.hook]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ \"$(blkid -s UUID -o value \"$(findmnt -no SOURCE /)\")\" = 8f9bd935-41d2-4275-837c-88d4bca13d85 ]"]
+
+
+# Destructive: create two distinct NVRAM entries (nothing deleted).
+[[component]]
+id = "boot-repair-finalize"
+name = "Boot repair: finalize NVRAM entries"
+description = "Creates distinct ubuntu26dev + ubuntu26pro NVRAM entries; deletes nothing."
+destructive = true
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -f /boot/efi/EFI/ubuntu/shimx64.efi ] && blkid -U 4CB2-1FFC >/dev/null 2>&1"]
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/ubuntu-boot-repair.sh"
+args = ["finalize"]
+needs_sudo = true
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "efibootmgr | grep -qw ubuntu26dev && efibootmgr | grep -qw ubuntu26pro"]
+[[component.guards]]
+kind = "path_exists"
+path = "/boot/efi/EFI/ubuntu/shimx64.efi"
+[[component.guards]]
+kind = "uuid_resolves"
+uuid = "4CB2-1FFC"
+
+
+# Meta: UEFI-present marker. Intentionally requires nothing — it must NOT cascade
+# auto-fix into the destructive members.
+[[component]]
+id = "group-boot-repair"
+name = "Boot repair (UEFI present)"
+description = "Marker only; the four ops are invoked individually + confirm-gated."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -d /sys/firmware/efi ]"]

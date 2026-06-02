@@ -1,0 +1,85 @@
+# OS-install apt base (autoinstall.yaml). These are installed at OS-install time;
+# modeled here so auto-detect reports them and so components that depend on them
+# (yazelix→ghostty, nvidia-container-toolkit→podman) have valid `requires` edges.
+
+[[component]]
+id = "ghostty"
+name = "Ghostty terminal"
+description = "Default terminal emulator; yazelix's batteries-included variant."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v ghostty"]
+[component.install]
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["install", "-y", "ghostty"]
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "ghostty --version"]
+
+
+[[component]]
+id = "podman"
+name = "Podman (rootless containers)"
+description = "Rootless container stack (podman + compose + buildah + skopeo)."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v podman"]
+[component.install]
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["install", "-y", "podman", "podman-compose", "buildah", "skopeo", "uidmap", "slirp4netns"]
+[component.verify]
+kind = "command"
+command = "podman"
+args = ["info"]
+
+
+[[component]]
+id = "keepassxc"
+name = "KeePassXC"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v keepassxc"]
+[component.install]
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["install", "-y", "keepassxc"]
+
+
+[[component]]
+id = "virt-stack"
+name = "QEMU/KVM + libvirt"
+description = "Virtualization stack (qemu-system-x86 + libvirt + ovmf)."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v qemu-system-x86_64 && command -v virsh"]
+[component.install]
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["install", "-y", "qemu-system-x86", "qemu-utils", "libvirt-daemon-system", "libvirt-clients", "bridge-utils", "dnsmasq-base", "ovmf"]
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "qemu-system-x86_64 --version"]
+
+
+# Precondition meta: the tools the wizard assumes from the apt base.
+[[component]]
+id = "meta-base-sanity"
+name = "Base preconditions"
+description = "Asserts the apt-base tools the wizard depends on are present."
+requires = ["ghostty", "podman"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v git && command -v curl && command -v unzip && command -v jq && command -v python3"]

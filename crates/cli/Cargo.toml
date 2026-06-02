@@ -1,0 +1,15 @@
+[package]
+name = "envctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "envctl"
+path = "src/main.rs"
+
+[dependencies]
+envctl-engine = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

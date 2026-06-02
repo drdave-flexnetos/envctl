@@ -1,0 +1,77 @@
+//! Drift = a pure diff between the detected `EnvReport` and the manifest's
+//! desired state. Each `DriftItem` carries a severity + a `suggested_verb` so the
+//! CLI/GUI can tell the user not just *what* is off but *what to run*. Pure and
+//! deterministic — unit-tested against constructed reports.
+use crate::model::{DriftItem, DriftKind, EnvReport, Registry, Severity};
+
+pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
+    let mut items = Vec::new();
+
+    for c in &report.components {
+        // GPU-skipped components on a non-NVIDIA box aren't drift — they're N/A.
+        if c.note.contains("no GPU") {
+            continue;
+        }
+        let comp = reg.get(&c.id);
+        let is_meta = c.id.starts_with("group-") || c.id.starts_with("meta-");
+
+        if !c.detected {
+            // Only flag as Missing if there's actually an install path (an
+            // install hook or owned wiring). Pure "operation" components
+            // (e.g. boot-repair ops, which only have fix) are not "missing".
+            let installable = comp
+                .map(|x| x.install.is_some() || !x.wiring.shell_rc.is_empty())
+                .unwrap_or(false);
+            if installable {
+                items.push(DriftItem {
+                    component: c.id.clone(),
+                    kind: DriftKind::Missing,
+                    severity: if is_meta { Severity::Low } else { Severity::Medium },
+                    suggested_verb: format!("envctl install {}", c.id),
+                    detail: "declared but not installed".into(),
+                });
+            }
+            continue;
+        }
+
+        if c.healthy == Some(false) {
+            items.push(DriftItem {
+                component: c.id.clone(),
+                kind: DriftKind::Unhealthy,
+                severity: Severity::High,
+                suggested_verb: format!("envctl auto-fix {} --apply", c.id),
+                detail: "installed but verify failed".into(),
+            });
+        }
+
+        let declares_wiring = comp.map(|x| !x.wiring.shell_rc.is_empty()).unwrap_or(false);
+        if declares_wiring && !c.wiring_present {
+            items.push(DriftItem {
+                component: c.id.clone(),
+                kind: DriftKind::WiringMissing,
+                severity: Severity::Low,
+                suggested_verb: format!("envctl install {}", c.id),
+                detail: "detected, but envctl's shell-rc wiring block is absent".into(),
+            });
+        }
+    }
+
+    // Whole-box GPU precondition: cards present but driver not live.
+    if report.gpu_present && !report.driver_loaded {
+        items.push(DriftItem {
+            component: "nvidia-open".into(),
+            kind: DriftKind::DriverInactive,
+            severity: Severity::High,
+            suggested_verb: "envctl install nvidia-open  (then REBOOT)".into(),
+            detail: "GPUs present but the kernel driver is not loaded (software-rendered)".into(),
+        });
+    }
+
+    // Highest severity first for display.
+    items.sort_by_key(|d| match d.severity {
+        Severity::High => 0,
+        Severity::Medium => 1,
+        Severity::Low => 2,
+    });
+    items
+}

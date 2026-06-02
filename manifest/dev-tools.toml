@@ -1,0 +1,102 @@
+# Extra dev toolchains (yazelix-setup.sh section 3e, lines 193-222).
+
+[[component]]
+id = "gh"
+name = "GitHub CLI (official apt repo)"
+description = "Newer than apt's gh; auth: gh auth login."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v gh"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+sudo install -dm 755 /etc/apt/keyrings
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt-get update -y
+sudo apt-get install -y gh
+'''
+[component.verify]
+kind = "command"
+command = "gh"
+args = ["--version"]
+[component.fix]
+kind = "script"
+script = "sudo apt-get update -y && sudo apt-get install --reinstall -y gh"
+[component.remove]
+kind = "script"
+script = "sudo apt-get remove -y gh; sudo rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; sudo apt-get update -y"
+
+
+[[component]]
+id = "vite"
+name = "Vite (via bun add -g)"
+requires = ["bun"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v vite || [ -x \"$HOME/.bun/bin/vite\" ]"]
+[component.install]
+kind = "script"
+script = "export BUN_INSTALL=\"$HOME/.bun\"; export PATH=\"$BUN_INSTALL/bin:$PATH\"; bun add -g vite"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; vite --version"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.bun/bin:$PATH\"; bun add -g vite"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; bun remove -g vite"]
+
+
+[[component]]
+id = "wasmer"
+name = "Wasmer (WASM runtime)"
+description = "Self-wires its own PATH block into ~/.bashrc (installer-owned)."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v wasmer || [ -x \"$HOME/.wasmer/bin/wasmer\" ]"]
+[component.install]
+kind = "script"
+script = "curl -fsSL https://get.wasmer.io | sh"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.wasmer/bin:$PATH\"; wasmer --version"]
+[component.fix]
+kind = "script"
+script = "curl -fsSL https://get.wasmer.io | sh"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "rm -rf \"$HOME/.wasmer\""]
+
+
+[[component]]
+id = "uv"
+name = "uv (Python toolchain)"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v uv || [ -x \"$HOME/.local/bin/uv\" ]"]
+[component.install]
+kind = "script"
+script = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; uv --version"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.local/bin:$PATH\"; uv self update || curl -LsSf https://astral.sh/uv/install.sh | sh"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "uv self uninstall 2>/dev/null || rm -f \"$HOME/.local/bin/uv\" \"$HOME/.local/bin/uvx\""]

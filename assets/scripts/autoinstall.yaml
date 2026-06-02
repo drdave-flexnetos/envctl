@@ -1,0 +1,212 @@
+#cloud-config
+# =============================================================================
+# Ubuntu 26.04 LTS (Resolute Raccoon)  -  autoinstall configuration
+# Target: Ubuntu DESKTOP (GNOME) + virtualization + dev/AI tooling
+# Disk:   Whole-disk wipe, direct ext4 layout (no LVM, no encryption)
+# Auth:   Edit the CHANGEME placeholders before use
+# SSH:    Enabled; public keys imported from the USB install media
+#
+# Apt-installable tools are handled here (incl. Ghostty, which yazelix wants
+# present first). Everything that needs a real login session, the network, and
+# interactive auth (Bun as the JS runtime + `node`, Nix, the yazelix cache,
+# home-manager, yazelix itself, nerd fonts, rtk, CUDA/cuda-oxide, and the AI
+# CLIs) is installed by an interactive wizard that AUTO-LAUNCHES on first login:
+#     /usr/local/bin/yazelix-setup.sh   (source: yazelix-setup.sh on the USB)
+# Note: nushell + mise are NOT installed here or by the wizard — the yazelix
+# runtime bundles them (available via `yzx env` / inside yazelix).
+# =============================================================================
+#
+# DEPLOYMENT (USB) ------------------------------------------------------------
+#   1. Flash the Ubuntu 26.04 Desktop ISO to USB #1.
+#   2. Format a SECOND FAT32 USB (or partition) with filesystem LABEL: CIDATA
+#   3. Put these files at the root of the CIDATA volume:
+#        - this file, renamed to:      user-data
+#        - an empty file named:        meta-data
+#        - the wizard script:          yazelix-setup.sh   (from this folder)
+#        - the yazelix config script:  yazelix-config.sh  (from this folder)
+#        - your SSH public key(s):     authorized_keys
+#   4. Boot the installer with BOTH USBs in. Append `autoinstall` to the GRUB
+#      entry to force it if it doesn't start automatically.
+#
+# Generate the password hash for the identity section with:
+#     mkpasswd --method=SHA-512        # from the 'whois' package
+#   or
+#     openssl passwd -6
+#
+# Validate before flashing (verified working on cloud-init 26.1):
+#     cloud-init schema --config-file user-data
+# -----------------------------------------------------------------------------
+
+autoinstall:
+  version: 1
+  interactive-sections: []          # fully unattended; e.g. ["storage"] to confirm disk
+  refresh-installer:
+    update: yes
+
+  # --- Install source: full GNOME desktop ------------------------------------
+  source:
+    id: ubuntu-desktop              # or: ubuntu-desktop-minimal
+    search_drivers: true
+
+  # --- Locale & keyboard -----------------------------------------------------
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+    variant: ""
+  timezone: America/Los_Angeles     # CHANGEME if needed
+
+  # --- Networking: DHCP on any wired NIC -------------------------------------
+  network:
+    version: 2
+    ethernets:
+      any-eth:
+        match:
+          name: "en*"
+        dhcp4: true
+        dhcp6: false
+        optional: true
+
+  # --- Storage: WIPE WHOLE DISK, direct (ext4) layout ------------------------
+  # WARNING: erases the matched disk completely. With multiple disks, uncomment
+  # 'match' below and pin the target so it can't choose the wrong drive.
+  storage:
+    layout:
+      name: direct
+    # match:
+    #   path: /dev/nvme0n1          # or: size: largest / ssd: true
+
+  # --- User account & hostname  (REPLACE every CHANGEME) ---------------------
+  # 'password' is a SHA-512 crypt hash, NOT plaintext (see header to generate).
+  identity:
+    hostname: CHANGEME-hostname
+    realname: CHANGEME Full Name
+    username: changeme
+    password: "$6$CHANGEME$replace.this.with.a.real.SHA512.crypt.hash"
+
+  # --- SSH -------------------------------------------------------------------
+  ssh:
+    install-server: true
+    allow-pw: true                  # set false to force key-only auth
+
+  # --- Apt-installable packages ----------------------------------------------
+  packages:
+    # base / dev
+    - openssh-server
+    - git
+    - curl
+    - wget
+    - vim
+    - htop
+    - tmux
+    - build-essential
+    - ca-certificates
+    - gnupg
+    - net-tools
+    - unzip
+    - jq
+    - python3-pip
+    - python3-venv
+    - pipx
+    # No apt nodejs/npm: the wizard installs Bun as the JS runtime + package
+    # manager and exposes `node` as a symlink to Bun (Node-compat mode), so
+    # node-shebang CLIs (Codex/Gemini) run via Bun. ("node via bun".)
+    - fontconfig                    # for installing Nerd Fonts in the wizard
+    - software-properties-common
+    - apt-transport-https
+    # terminal + password manager
+    - ghostty                       # in 26.04 apt (1.3.0)
+    - keepassxc
+    # virtualization: QEMU + KVM + libvirt + virt-manager
+    - qemu-system-x86
+    - qemu-utils
+    - libvirt-daemon-system
+    - libvirt-clients
+    - bridge-utils
+    - dnsmasq-base
+    - ovmf                          # UEFI firmware for VMs
+    # containers: Podman (rootless)
+    - podman
+    - podman-compose
+    - buildah
+    - skopeo
+    - uidmap                        # rootless subuid/subgid support
+    - slirp4netns
+    # NOTE: no NVIDIA driver here. Per NVIDIA's official CUDA install guide, the
+    # wizard adds NVIDIA's ubuntu2604 repo and installs the GA-matched OPEN-module
+    # driver (nvidia-open 610) alongside CUDA 13.3 — required for Blackwell and
+    # for cuda-oxide's PTX runtime. Assumes UEFI Secure Boot is DISABLED (the
+    # NVIDIA driver is not Canonical-signed). The first boot renders with
+    # software/nouveau until the wizard installs the driver and you reboot.
+
+  updates: all
+
+  # --- Installer-stage commands (run with /target mounted) -------------------
+  late-commands:
+    # Import SSH public keys shipped on the USB into the new user's account.
+    - >
+      bash -c '
+      U="$(ls /target/home | head -n1)";
+      for d in /cdrom /media/* /run/media/*/* .; do
+        if [ -f "$d/authorized_keys" ]; then
+          install -d -m 700 -o "$U" -g "$U" "/target/home/$U/.ssh";
+          install -m 600 -o "$U" -g "$U" "$d/authorized_keys" "/target/home/$U/.ssh/authorized_keys";
+          break;
+        fi;
+      done'
+    # Copy the first-login setup wizard + yazelix config script from the USB.
+    - >
+      bash -c '
+      for d in /cdrom /media/* /run/media/*/* .; do
+        [ -f "$d/yazelix-setup.sh" ]  && install -D -m 755 "$d/yazelix-setup.sh"  /target/usr/local/bin/yazelix-setup.sh;
+        [ -f "$d/yazelix-config.sh" ] && install -D -m 755 "$d/yazelix-config.sh" /target/usr/local/bin/yazelix-config.sh;
+      done'
+
+  # --- First-boot configuration (cloud-init, on the real booted system) ------
+  user-data:
+    disable_root: true
+    package_update: true
+    package_upgrade: true
+
+    write_files:
+      # Terminal launcher used by the autostart entry: opens the wizard in
+      # whichever terminal emulator is available, keeping the shell open after.
+      - path: /usr/local/bin/yazelix-setup-launch.sh
+        permissions: "0755"
+        owner: root:root
+        content: |
+          #!/usr/bin/env bash
+          W=/usr/local/bin/yazelix-setup.sh
+          [ -x "$W" ] || { notify-send "Setup wizard not found ($W)" 2>/dev/null; exit 1; }
+          CMD="$W; echo; read -rp 'Press Enter to close… ' _"
+          if   command -v ghostty        >/dev/null; then exec ghostty -e bash -lc "$CMD"
+          elif command -v kgx            >/dev/null; then exec kgx -- bash -lc "$CMD"
+          elif command -v gnome-terminal >/dev/null; then exec gnome-terminal -- bash -lc "$CMD"
+          elif command -v xterm          >/dev/null; then exec xterm -e bash -lc "$CMD"
+          else bash -lc "$CMD"; fi
+
+    runcmd:
+      # Identify the primary interactive user (UID 1000) created by autoinstall.
+      - 'U="$(getent passwd 1000 | cut -d: -f1)"; H="$(getent passwd 1000 | cut -d: -f6)"; echo "primary user=$U home=$H"'
+      # Virtualization group membership + start libvirt.
+      - 'U="$(getent passwd 1000 | cut -d: -f1)"; usermod -aG kvm,libvirt "$U" || true'
+      - systemctl enable --now libvirtd || true
+      - systemctl enable --now ssh || true
+      # Install the first-login autostart entry for the primary user (runs the
+      # wizard once on first GUI login; the wizard deletes it when it finishes).
+      # (printf, not heredoc: this is a folded scalar, so newlines fold to spaces)
+      - >
+        bash -c '
+        U="$(getent passwd 1000 | cut -d: -f1)";
+        H="$(getent passwd 1000 | cut -d: -f6)";
+        AD="$H/.config/autostart"; mkdir -p "$AD";
+        printf "%s\n"
+        "[Desktop Entry]"
+        "Type=Application"
+        "Name=First-Login Developer Setup"
+        "Comment=Installs mise, Nix, yazelix, home-manager, and AI CLIs"
+        "Exec=/usr/local/bin/yazelix-setup-launch.sh"
+        "Terminal=false"
+        "X-GNOME-Autostart-enabled=true"
+        "X-GNOME-Autostart-Delay=8"
+        > "$AD/yazelix-setup.desktop";
+        chown -R "$U:$U" "$H/.config";'

@@ -1,0 +1,120 @@
+# AI coding CLIs (yazelix-setup.sh section 2, lines 89-94).
+# Native installers (claude/kimi/devin) are Node-independent; codex/gemini run via Bun.
+# Post-install auth (`/login`) is interactive and NOT automatable.
+
+[[component]]
+id = "claude-code-cli"
+name = "Claude Code CLI"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v claude"]
+[component.install]
+kind = "script"
+script = "curl -fsSL https://claude.ai/install.sh | bash"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; claude --version"]
+[component.fix]
+kind = "script"
+script = "curl -fsSL https://claude.ai/install.sh | bash"
+
+
+[[component]]
+id = "codex-cli"
+name = "Codex CLI (via bun)"
+requires = ["bun"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v codex || [ -x \"$HOME/.bun/bin/codex\" ]"]
+[component.install]
+kind = "script"
+script = "export BUN_INSTALL=\"$HOME/.bun\"; export PATH=\"$BUN_INSTALL/bin:$PATH\"; bun install -g @openai/codex"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; codex --version"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g @openai/codex"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; bun remove -g @openai/codex"]
+
+
+[[component]]
+id = "gemini-cli"
+name = "Gemini CLI (via bun)"
+requires = ["bun"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v gemini || [ -x \"$HOME/.bun/bin/gemini\" ]"]
+[component.install]
+kind = "script"
+script = "export BUN_INSTALL=\"$HOME/.bun\"; export PATH=\"$BUN_INSTALL/bin:$PATH\"; bun install -g @google/gemini-cli"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; gemini --version"]
+[component.fix]
+kind = "script"
+script = "export PATH=\"$HOME/.bun/bin:$PATH\"; bun install -g @google/gemini-cli"
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; bun remove -g @google/gemini-cli"]
+
+
+[[component]]
+id = "kimi-cli"
+name = "Kimi CLI"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v kimi"]
+[component.install]
+kind = "script"
+script = "curl -LsSf https://code.kimi.com/install.sh | bash"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; kimi --version"]
+[component.fix]
+kind = "script"
+script = "curl -LsSf https://code.kimi.com/install.sh | bash"
+
+
+[[component]]
+id = "devin-cli"
+name = "Devin CLI"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v devin"]
+[component.install]
+kind = "script"
+script = "curl -fsSL https://cli.devin.ai/install.sh | bash"
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; devin --version"]
+[component.fix]
+kind = "script"
+script = "curl -fsSL https://cli.devin.ai/install.sh | bash"
+
+
+# Group/meta: install the whole AI-CLI set in one target. No hooks of its own —
+# its `requires` closure installs the members in dependency order; detect aggregates.
+[[component]]
+id = "group-ai-clis"
+name = "All AI CLIs"
+description = "Meta: claude + codex + gemini + kimi + devin (+ node-via-bun)."
+requires = ["node-via-bun", "claude-code-cli", "codex-cli", "gemini-cli", "kimi-cli", "devin-cli"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "for c in claude codex gemini kimi devin; do command -v $c >/dev/null || exit 1; done"]
