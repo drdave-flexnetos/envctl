@@ -121,7 +121,7 @@ requires = ["rustup"]
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v rtk || [ -x \"$HOME/.cargo/bin/rtk\" ]"]
+args = ["-lc", "command -v rtk || [ -x \"$HOME/.local/bin/rtk\" ] || [ -x \"$HOME/.cargo/bin/rtk\" ]"]
 [component.install]
 kind = "script"
 script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo install --git https://github.com/rtk-ai/rtk"
