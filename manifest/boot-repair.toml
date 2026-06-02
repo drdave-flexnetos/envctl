@@ -2,7 +2,14 @@
 # components whose Fix hook IS the repair (auto-fix, dry-run by default). The
 # machine-specific UUIDs live here as Guard config, NOT in engine code. Guards are
 # tailored per op (rename-pro acts on the LIVE disk by design, so it uses an
-# identity check instead of NotLiveDevice).
+# identity + mounted-ESP check instead of NotLiveDevice).
+#
+# IMPORTANT: detect for the destructive ops means "ALREADY DONE" (it matches the
+# verify predicate), NOT "target attached". Otherwise an un-repaired box would
+# read detected=true + verify=false and drift would (wrongly) nudge the operator
+# to run a destructive grub-install as a "health fix". With detect==verify, an
+# un-repaired box reads detected=false and — since these have no install hook and
+# no wiring — drift never flags them.
 
 # Read-only diagnosis (not destructive).
 [[component]]
@@ -22,6 +29,7 @@ needs_sudo = true
 
 
 # Destructive: chroot grub-install of the DEV disk + NVRAM. UUID-guarded.
+# detect == verify (the ubuntu26dev NVRAM entry already exists).
 [[component]]
 id = "boot-repair-dev"
 name = "Boot repair: dev disk (ubuntu26dev)"
@@ -30,7 +38,7 @@ destructive = true
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "blkid -U 7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d >/dev/null 2>&1"]
+args = ["-lc", "efibootmgr -v | grep -qi ubuntu26dev"]
 [component.fix]
 kind = "shipped_script"
 path = "/usr/local/bin/ubuntu-boot-repair.sh"
@@ -40,6 +48,8 @@ needs_sudo = true
 kind = "command"
 command = "bash"
 args = ["-lc", "efibootmgr -v | grep -qi ubuntu26dev"]
+# Guards: dev root resolves + re-verifies, is NOT the live root, the dev DATA
+# /home is NOT mounted, and the dev ESP (which repair-dev mounts+writes) resolves.
 [[component.guards]]
 kind = "uuid_resolves"
 uuid = "7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d"
@@ -49,11 +59,15 @@ uuid = "7f8c16c8-b9a2-4fb2-87fe-4e530db6ae6d"
 [[component.guards]]
 kind = "not_mounted"
 uuid = "5d9eeffb-cf79-4483-b97d-33a0140154f6"
+[[component.guards]]
+kind = "uuid_resolves"
+uuid = "4CB2-1FFC"
 
 
 # Destructive: re-registers the LIVE (pro) system bootloader. Acts on live by
-# design, so guard with an IDENTITY check (live root == expected pro UUID) +
-# /boot/efi mounted — NOT NotLiveDevice.
+# design, so guard with an IDENTITY check (live root == expected pro UUID) + a
+# MOUNTED /boot/efi check (the script requires `mountpoint -q /boot/efi`) — NOT
+# NotLiveDevice. detect == verify (ubuntu26pro NVRAM entry already exists).
 [[component]]
 id = "boot-repair-rename-pro"
 name = "Boot repair: rename live → ubuntu26pro"
@@ -62,7 +76,7 @@ destructive = true
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "[ \"$(blkid -s UUID -o value \"$(findmnt -no SOURCE /)\")\" = 8f9bd935-41d2-4275-837c-88d4bca13d85 ]"]
+args = ["-lc", "efibootmgr -v | grep -qi ubuntu26pro"]
 [component.fix]
 kind = "shipped_script"
 path = "/usr/local/bin/ubuntu-boot-repair.sh"
@@ -73,8 +87,11 @@ kind = "command"
 command = "bash"
 args = ["-lc", "efibootmgr -v | grep -qi ubuntu26pro"]
 [[component.guards]]
-kind = "path_exists"
-path = "/boot/efi"
+kind = "hook_succeeds"
+[component.guards.hook]
+kind = "command"
+command = "bash"
+args = ["-lc", "mountpoint -q /boot/efi"]
 [[component.guards]]
 kind = "hook_succeeds"
 [component.guards.hook]
@@ -84,6 +101,7 @@ args = ["-lc", "[ \"$(blkid -s UUID -o value \"$(findmnt -no SOURCE /)\")\" = 8f
 
 
 # Destructive: create two distinct NVRAM entries (nothing deleted).
+# detect == verify (both entries already exist).
 [[component]]
 id = "boot-repair-finalize"
 name = "Boot repair: finalize NVRAM entries"
@@ -92,7 +110,7 @@ destructive = true
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "[ -f /boot/efi/EFI/ubuntu/shimx64.efi ] && blkid -U 4CB2-1FFC >/dev/null 2>&1"]
+args = ["-lc", "efibootmgr | grep -qw ubuntu26dev && efibootmgr | grep -qw ubuntu26pro"]
 [component.fix]
 kind = "shipped_script"
 path = "/usr/local/bin/ubuntu-boot-repair.sh"

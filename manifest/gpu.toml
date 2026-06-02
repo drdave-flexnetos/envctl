@@ -62,9 +62,13 @@ path_entries = ["/usr/local/cuda/bin"]
 [[component.wiring.shell_rc]]
 file = "~/.bashrc"
 marker = "cuda env"
+# Resolve CUDA_HOME dynamically (cuda-toolkit-13-3 installs to /usr/local/cuda-13.3
+# and does NOT guarantee the unversioned /usr/local/cuda symlink) — mirrors the
+# wizard (yazelix-setup.sh L134-135) and this component's own verify.
 content = '''
-export PATH="/usr/local/cuda/bin:$PATH"
-export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+CUDA_HOME=/usr/local/cuda; [ -d "$CUDA_HOME/bin" ] || CUDA_HOME="$(ls -d /usr/local/cuda-* 2>/dev/null | sort -V | tail -n1)"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export CUDA_OXIDE_LLC="$(command -v llc-22 || command -v llc-21 || ls /usr/lib/llvm-2*/bin/llc 2>/dev/null | sort -V | tail -n1)"
 '''
 
@@ -240,16 +244,19 @@ args = ["-lc", "rm -rf \"$HOME/.venvs/torch\""]
 [[component]]
 id = "gpu-verify-scripts"
 name = "GPU smoke-test scripts"
-description = "~/.local/bin/yazelix-gpu-verify.sh + post-reboot one-shot autostart (wizard-generated)."
+description = "Provisioning-only: ~/.local/bin/yazelix-gpu-verify.sh + post-reboot one-shot autostart are created by the wizard. envctl detects/removes them; it does not regenerate them (port of yazelix-setup.sh 3f is a later phase)."
 requires = ["nvidia-open", "pytorch-venv", "cuda-oxide", "nvidia-container-toolkit"]
 gpu_required = true
 [component.detect]
 kind = "command"
 command = "bash"
 args = ["-lc", "[ -x \"$HOME/.local/bin/yazelix-gpu-verify.sh\" ]"]
+# verify runs the shipped smoke test with $HOME expanded (ShippedScript paths are
+# NOT shell-expanded, so this is a Command hook); </dev/null answers its final read.
 [component.verify]
-kind = "shipped_script"
-path = "/home/drdave/.local/bin/yazelix-gpu-verify.sh"
+kind = "command"
+command = "bash"
+args = ["-lc", "\"$HOME/.local/bin/yazelix-gpu-verify.sh\" </dev/null"]
 [component.remove]
 kind = "command"
 command = "bash"

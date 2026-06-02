@@ -48,7 +48,7 @@ sudo systemctl restart nix-daemon 2>/dev/null || true
 [component.verify]
 kind = "command"
 command = "bash"
-args = ["-lc", "nix config show 2>/dev/null | grep -qE 'yazelix\\.cachix\\.org'"]
+args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix config show 2>/dev/null | grep -qE 'yazelix\\.cachix\\.org'"]
 [component.fix]
 kind = "script"
 script = '''

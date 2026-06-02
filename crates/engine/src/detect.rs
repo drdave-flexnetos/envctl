@@ -197,8 +197,11 @@ fn wiring_present(comp: &crate::component::Component) -> bool {
             },
             None => blk.file.clone(),
         };
+        // Suffix-agnostic: the wizard writes the same blocks as
+        // "BEGIN <marker> (added by yazelix-setup.sh)"; envctl writes
+        // "(added by envctl)". Match the marker regardless of who wrote it.
         std::fs::read_to_string(&file)
-            .map(|t| t.contains(&format!("BEGIN {} (added by envctl)", blk.marker)))
+            .map(|t| t.contains(&format!("BEGIN {}", blk.marker)))
             .unwrap_or(false)
     })
 }

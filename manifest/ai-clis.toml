@@ -8,7 +8,7 @@ name = "Claude Code CLI"
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v claude"]
+args = ["-lc", "command -v claude || [ -x \"$HOME/.local/bin/claude\" ]"]
 [component.install]
 kind = "script"
 script = "curl -fsSL https://claude.ai/install.sh | bash"
@@ -75,7 +75,7 @@ name = "Kimi CLI"
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v kimi"]
+args = ["-lc", "command -v kimi || [ -x \"$HOME/.local/bin/kimi\" ]"]
 [component.install]
 kind = "script"
 script = "curl -LsSf https://code.kimi.com/install.sh | bash"
@@ -94,7 +94,7 @@ name = "Devin CLI"
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v devin"]
+args = ["-lc", "command -v devin || [ -x \"$HOME/.local/bin/devin\" ]"]
 [component.install]
 kind = "script"
 script = "curl -fsSL https://cli.devin.ai/install.sh | bash"
@@ -117,4 +117,4 @@ requires = ["node-via-bun", "claude-code-cli", "codex-cli", "gemini-cli", "kimi-
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "for c in claude codex gemini kimi devin; do command -v $c >/dev/null || exit 1; done"]
+args = ["-lc", "export PATH=\"$HOME/.local/bin:$HOME/.bun/bin:$PATH\"; for c in claude codex gemini kimi devin; do command -v $c >/dev/null || exit 1; done"]

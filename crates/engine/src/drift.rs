@@ -35,12 +35,23 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
         }
 
         if c.healthy == Some(false) {
+            // Defense-in-depth: NEVER auto-suggest `--apply` for a destructive
+            // component — its fix is a confirm-gated, dry-run-first operation.
+            let destructive = comp.map(|x| x.destructive).unwrap_or(false);
+            let (verb, detail) = if destructive {
+                (
+                    format!("envctl auto-fix {}   (dry-run first; review, then --apply)", c.id),
+                    "verify failed — destructive fix, run dry-run and confirm before --apply",
+                )
+            } else {
+                (format!("envctl auto-fix {} --apply", c.id), "installed but verify failed")
+            };
             items.push(DriftItem {
                 component: c.id.clone(),
                 kind: DriftKind::Unhealthy,
                 severity: Severity::High,
-                suggested_verb: format!("envctl auto-fix {} --apply", c.id),
-                detail: "installed but verify failed".into(),
+                suggested_verb: verb,
+                detail: detail.into(),
             });
         }
 
