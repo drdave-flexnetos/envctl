@@ -35,6 +35,7 @@ fn main() -> eframe::Result<()> {
 enum Screen {
     Dashboard,
     Components,
+    Graph,
     AddRepo,
     Logs,
     Settings,
@@ -45,6 +46,7 @@ impl Screen {
         match self {
             Screen::Dashboard => "Dashboard",
             Screen::Components => "Components",
+            Screen::Graph => "Graph",
             Screen::AddRepo => "Add Repo",
             Screen::Logs => "Logs",
             Screen::Settings => "Settings",
@@ -78,6 +80,9 @@ struct EnvctlApp {
     dry_run_default: bool,
     filter: String,
     tel: TelemetryControl,
+    // read-only engine clone for on-thread graph queries
+    geng: Engine,
+    graph_focus: String,
     // GPU summary (from the last EnvReport) for the DriverNotActive card
     gpu_present: bool,
     driver_loaded: bool,
@@ -108,6 +113,7 @@ impl EnvctlApp {
         // THE worker spawn. Every captured value is Send + 'static => the closure
         // is Send + 'static => std::thread::spawn accepts it.
         let engine = Engine::load_default().expect("manifest load");
+        let geng = engine.clone(); // read-only clone for graph queries on the UI thread
         let tel = TelemetryControl::new();
         let tel_worker = tel.clone();
         std::thread::spawn(move || {
@@ -130,6 +136,8 @@ impl EnvctlApp {
             dry_run_default: true,
             filter: String::new(),
             tel,
+            geng,
+            graph_focus: String::new(),
             gpu_present: false,
             driver_loaded: false,
             software_rendered: false,
@@ -270,6 +278,7 @@ impl eframe::App for EnvctlApp {
                     for s in [
                         Screen::Dashboard,
                         Screen::Components,
+                        Screen::Graph,
                         Screen::AddRepo,
                         Screen::Logs,
                         Screen::Settings,
@@ -292,6 +301,7 @@ impl eframe::App for EnvctlApp {
             .show(ctx, |ui| match self.screen {
                 Screen::Dashboard => self.dashboard(ui),
                 Screen::Components => self.components_screen(ui),
+                Screen::Graph => self.graph_screen(ui),
                 Screen::AddRepo => self.add_repo_screen(ui),
                 Screen::Logs => self.logs_screen(ui),
                 Screen::Settings => self.settings_screen(ui),
@@ -684,6 +694,70 @@ impl EnvctlApp {
                 Some(id),
             );
         }
+    }
+
+    // ── Graph ─────────────────────────────────────────────────────────────────
+    fn graph_screen(&mut self, ui: &mut egui::Ui) {
+        use envctl_engine::graph;
+        // Gather everything OWNED up front so the combo can borrow &mut self.graph_focus
+        // without aliasing the registry borrow (immediate-mode: 1-frame lag is fine).
+        let g = graph::analyze(self.geng.registry());
+        let ids: Vec<String> = self.geng.registry().ids().cloned().collect();
+        let focus = self.graph_focus.clone();
+        let im = if focus.is_empty() { None } else { graph::impact(self.geng.registry(), &focus) };
+        let paths = if focus.is_empty() { Vec::new() } else { graph::dependency_paths(self.geng.registry(), &focus) };
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.label(theme::section("DEPENDENCY GRAPH"));
+            ui.add_space(4.0);
+            theme::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(format!("{} components · {} edges · {} groups", g.nodes, g.edges, g.groups.len()));
+                ui.label(format!("{} roots · {} leaves · {} orphans", g.roots.len(), g.leaves.len(), g.orphans.len()));
+                if let Some((id, n)) = &g.max_dependents {
+                    ui.colored_label(theme::TEXT_MUTED, format!("most depended-on: {id} ({n})"));
+                }
+                ui.add_space(6.0);
+                ui.label(RichText::new("critical path").color(theme::ACCENT_TEXT));
+                ui.monospace(g.critical_path.join("  →  "));
+            });
+
+            ui.add_space(10.0);
+            ui.label(theme::section("IMPACT — pick a component"));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let sel = if focus.is_empty() { "(select)".to_string() } else { focus.clone() };
+                egui::ComboBox::from_id_salt("graph_focus")
+                    .selected_text(sel)
+                    .width(280.0)
+                    .show_ui(ui, |ui| {
+                        for id in &ids {
+                            ui.selectable_value(&mut self.graph_focus, id.clone(), id.as_str());
+                        }
+                    });
+            });
+
+            if let Some(im) = &im {
+                ui.add_space(6.0);
+                theme::card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(format!("install {}", im.component)).color(theme::HEALTHY));
+                    ui.monospace(format!("pulls in ({}): {}", im.install_closure.len(), im.install_closure.join("  →  ")));
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(format!("reset {} --cascade", im.component)).color(theme::WARN));
+                    ui.monospace(format!(
+                        "also removes ({}): {}",
+                        im.cascade_removes.len(),
+                        if im.cascade_removes.is_empty() { "(none)".into() } else { im.cascade_removes.join(", ") }
+                    ));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("why it's needed (root → it)").color(theme::TEXT_MUTED));
+                    for p in &paths {
+                        ui.monospace(format!("  {}", p.join("  →  ")));
+                    }
+                });
+            }
+        });
     }
 
     // ── Add Repo ──────────────────────────────────────────────────────────────
