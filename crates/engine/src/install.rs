@@ -138,10 +138,18 @@ fn install_artifact(plan: &InstallPlan, a: &ArtifactPlan, force: bool, dry_run: 
     if !is_safe_install_name(&a.install_name) {
         return Err(InstallErr::Unsafe(a.install_name.clone()));
     }
+    // AUDIT-FIX (blocker): the WELL_KNOWN hard-refusal is UNCONDITIONAL — even a
+    // user `--rename foo=git` may NOT take a critical command name (renaming TO
+    // `sudo`/`git`/`bash` is exactly the shadow attack). Validate the name BEFORE
+    // touching the filesystem.
+    if WELL_KNOWN.contains(&a.install_name.as_str()) {
+        return Err(InstallErr::Shadow(a.install_name.clone()));
+    }
     if !a.source.exists() {
         return Err(InstallErr::Missing(a.source.display().to_string()));
     }
-    // PATH-shadow refusal (unless the user explicitly renamed it).
+    // The SOFT PATH-shadow check (a name that merely collides with some other
+    // $PATH binary) may be bypassed by an explicit rename.
     if !a.renamed && shadows_system(&a.install_name) {
         return Err(InstallErr::Shadow(a.install_name.clone()));
     }
@@ -256,6 +264,17 @@ mod tests {
     fn managed_symlink_needs_canonical_containment() {
         // a path that doesn't exist is never ours
         assert!(!is_managed_symlink(Path::new("/no/such/envctl/link"), "slug"));
+    }
+    #[test]
+    fn rename_cannot_shadow_a_well_known_command() {
+        // even with renamed=true (an explicit --rename), installing AS `git` is a
+        // hard refusal — the source need not even exist, the name is rejected first.
+        let plan = InstallPlan { id: "x".into(), slug: "x".into(), artifacts: vec![], extra_path_entries: vec![] };
+        let a = ArtifactPlan { source: Path::new("/no/such/built/foo-cli").to_path_buf(), install_name: "git".into(), renamed: true };
+        match install_artifact(&plan, &a, false, true) {
+            Err(InstallErr::Shadow(n)) => assert_eq!(n, "git"),
+            other => panic!("expected Shadow(git), got {:?}", match other { Ok(_) => "Ok".to_string(), Err(InstallErr::Unsafe(s)) => format!("Unsafe({s})"), Err(InstallErr::Missing(s)) => format!("Missing({s})"), Err(InstallErr::Foreign(s)) => format!("Foreign({s})"), Err(InstallErr::Io(e)) => format!("Io({e})"), Err(InstallErr::Shadow(s)) => format!("Shadow({s})") }),
+        }
     }
     #[test]
     fn install_name_must_be_a_single_component() {

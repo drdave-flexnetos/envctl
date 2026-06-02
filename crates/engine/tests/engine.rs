@@ -397,6 +397,76 @@ command = "true"
 }
 
 #[test]
+fn reset_target_does_not_tear_down_its_prerequisites() {
+    // BLOCKER [8] regression: `reset capp` in the chain capp->cweb->clib must
+    // remove ONLY capp. The old code expanded the target via reg.closure() (= id
+    // + transitive PREREQS) so it also uninstalled cweb and clib (cf. reset
+    // claude-code-cli also removing shared bun). Remove must never expand to deps.
+    use envctl_engine::{Engine, EventSink, OpStatus, Phase, RunPlan};
+
+    let dir = std::env::temp_dir().join(format!("envctl-reset-leaf-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("chain.toml"),
+        r#"
+[[component]]
+id = "clib"
+name = "clib"
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "cweb"
+name = "cweb"
+requires = ["clib"]
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "capp"
+name = "capp"
+requires = ["cweb"]
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+"#,
+    )
+    .unwrap();
+
+    // DryRunRunner: every hook -> DryRun; nothing is "live", so no rdep gate fires.
+    let eng = Engine::with_runner(dir.clone(), Box::new(envctl_engine::DryRunRunner)).unwrap();
+    let sink = EventSink::null();
+    let summary = eng
+        .run(RunPlan::new(Phase::Remove, vec!["capp".to_string()], false), &sink)
+        .unwrap();
+
+    let removed = |id: &str| {
+        summary.results.iter().any(|r| {
+            r.component == id
+                && r.phase == Phase::Remove
+                && matches!(r.status, OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed)
+        })
+    };
+    assert!(removed("capp"), "capp (the target) must be removed: {:?}", summary.results);
+    assert!(!removed("cweb"), "BLOCKER REGRESSION: cweb (a prerequisite) was removed: {:?}", summary.results);
+    assert!(!removed("clib"), "BLOCKER REGRESSION: clib (a prerequisite) was removed: {:?}", summary.results);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn add_repo_paths_reject_traversal_and_option_injection() {
     // Both the build path (Engine::add_repo) and the interactive path
     // (Engine::connect_repo) must run the SAME validation gate BEFORE any path

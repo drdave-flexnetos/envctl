@@ -34,6 +34,21 @@ pub fn run(
     // Forward order, or reverse for Remove (tear down dependents first).
     let mut order: Vec<&Component> = if plan.targets.is_empty() {
         reg.ordered().collect()
+    } else if plan.phase == Phase::Remove {
+        // AUDIT-FIX (blocker): Remove must NEVER expand a target to its
+        // prerequisites. `closure(id)` is id + transitive PREREQS — correct for
+        // install (deps must exist first) but catastrophic for remove: it would
+        // make `reset claude-code-cli` also uninstall shared `bun`. The base set
+        // is exactly the named targets; `--cascade` folds in reverse-DEPENDENTS
+        // (never prerequisites) in the gate block below. Validate each id exists.
+        let mut set: HashSet<&str> = HashSet::new();
+        for id in &plan.targets {
+            if reg.get(id).is_none() {
+                anyhow::bail!("unknown component '{id}'");
+            }
+            set.insert(id.as_str());
+        }
+        reg.ordered().filter(|c| set.contains(c.id.as_str())).collect()
     } else {
         let mut v: Vec<&Component> = Vec::new();
         for id in &plan.targets {
@@ -95,28 +110,18 @@ pub fn run(
                 sink.emit(Event::RunFinished { summary: summary.clone() });
                 return Ok(summary);
             }
-            // AUDIT-FIX (blocker): rebuild `order` from the CLOSURE of surviving
-            // targets only, so a refused target's now-orphaned prerequisites are
-            // NOT left in the removal set and destroyed. A prereq shared with a
-            // surviving target is preserved (it's in that survivor's closure).
+            // Rebuild the removal set = (surviving named targets) ∪ (folded
+            // reverse-dependents). NO closure: a target's prerequisites are never
+            // auto-removed (blocker [8]), and a refused target is dropped so the
+            // live reverse-dependent it protects survives (blocker [0] / FOCUS #0).
             if !refuse.is_empty() || !fold.is_empty() {
-                let mut keep: HashSet<String> = HashSet::new();
-                for t in plan.targets.iter().filter(|t| !refuse.contains(*t)) {
-                    if let Ok(cl) = reg.closure(t) {
-                        for c in cl {
-                            keep.insert(c.id.clone());
-                        }
-                    }
-                }
+                let mut keep: HashSet<String> = plan
+                    .targets
+                    .iter()
+                    .filter(|t| !refuse.contains(*t))
+                    .cloned()
+                    .collect();
                 keep.extend(fold.iter().cloned());
-                // AUDIT-FIX (blocker, FOCUS #0): a refused target must NEVER be
-                // removed — even if it's pulled back into `keep` as a prerequisite
-                // in a SURVIVING target's closure. Removing it would destroy the
-                // live reverse-dependent the refusal exists to protect. Keeping the
-                // prereq installed while its dependent is removed is always safe.
-                for r in &refuse {
-                    keep.remove(r);
-                }
                 order = reg.ordered().filter(|c| keep.contains(&c.id)).collect();
                 order.reverse();
             }
