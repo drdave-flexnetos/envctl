@@ -13,18 +13,23 @@ pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which 
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
 pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
+pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
+pub mod addrepo; // Phase 4: the staged build-from-source pipeline + confined AI agent
+pub mod install; // Phase 4: symlink artifacts into ~/.local/bin (refuse-unmanaged) + wire-in
+pub mod register; // Phase 4: synthesize the components.d drop-in (provenance + rebuild)
 pub mod command; // EngineCommand / EngineEvent + run_event_loop (GUI worker API)
 
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
 pub use model::{
-    AddRepoSpec, ComponentState, DataPath, DesktopEntry, DriftItem, DriftKind, EnvReport, OpResult,
-    OpStatus, Registry, ResetGates, RunPlan, RunSummary, Severity, ShellRcBlock, SystemdUnit,
-    ToolState, Wiring,
+    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, ComponentState, DataPath, DesktopEntry,
+    DriftItem, DriftKind, EnvReport, OpResult, OpStatus, Refactor, RefactorGoal, Registry,
+    RenameRule, ResetGates, RunPlan, RunSummary, Severity, ShellRcBlock, SystemdUnit, ToolState,
+    Wiring,
 };
 pub use event::{Event, EventSink, GpuSample, Stream, Telemetry};
 pub use error::{EngineError, RunContext};
 pub use runner::{DryRunRunner, ProcessRunner};
-pub use command::{run_event_loop, EngineCommand, EngineEvent};
+pub use command::{run_event_loop, EngineCommand, EngineEvent, TelemetryControl};
 
 use std::path::PathBuf;
 use std::sync::Arc;

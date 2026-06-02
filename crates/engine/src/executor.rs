@@ -453,61 +453,196 @@ pub fn add_repo(
     dry_run: bool,
     sink: &EventSink,
 ) -> anyhow::Result<RunSummary> {
-    let id = spec.id.trim();
-    // 1. strict slug validation (safe as a bare TOML key AND a filename component)
-    if !is_valid_slug(id) {
-        anyhow::bail!(
-            "invalid component id '{id}': use [a-z0-9] start, then [a-z0-9._-] (no spaces/slashes)"
-        );
+    let id = spec.id.trim().to_string();
+    if !is_valid_slug(&id) {
+        anyhow::bail!("invalid component id '{id}': start [a-z0-9], then [a-z0-9._-] (no spaces/slashes)");
     }
-    // 2. refuse collision with an existing/built-in component
-    if reg.get(id).is_some() {
+    if reg.get(&id).is_some() {
         anyhow::bail!("component id '{id}' already exists — refusing to shadow it (pick another --id)");
     }
-    // 3. reject inputs that could break out of the TOML literal we emit
-    for (label, val) in [("git_url", &spec.git_url), ("build_cmd", &spec.build_cmd)] {
+    validate_spec_strings(&spec)?; // ''' + metachar guard across ALL user strings
+
+    // Run the staged pipeline (acquire → [transform] → detect → build → locate →
+    // shape). It refuses as root, gates real work behind spec.allow_build, and
+    // streams every stage. Returns the partial summary + outcome.
+    let repos_root = repos_root();
+    let (mut summary, outcome) = crate::addrepo::run_pipeline(&spec, &repos_root, dry_run, sink)?;
+    let Some(outcome) = outcome else {
+        return Ok(summary); // pipeline short-circuited (root-refusal / a stage failed)
+    };
+
+    let bsys = crate::detect_build::system_tag(outcome.build_plan.system).to_string();
+    let installed: Vec<String> = outcome
+        .installs
+        .iter()
+        .map(|(n, _)| local_bin_target(&spec, n))
+        .collect();
+    let rspec = build_register_spec(&id, &spec, &outcome, &bsys, &installed);
+
+    // PREVIEW path: no --build (or --dry-run) → show the drop-in, write nothing.
+    if !spec.allow_build || dry_run {
+        let toml = crate::register::synth_dropin(&rspec);
+        sink.emit(Event::Log {
+            component: id.clone(),
+            stream: Stream::Stdout,
+            line: format!("[preview] would register components.d/{id}.toml:\n{toml}"),
+        });
+        return Ok(summary);
+    }
+
+    // INSTALL + WIRE-IN (symlink, refuse-shadow, refuse-unmanaged-unless-force).
+    let iplan = build_install_plan(&id, &spec, &outcome);
+    let ireport = crate::install::install_and_wire(&iplan, spec.force, false, sink);
+    if !ireport.failures.is_empty() {
+        summary.failed.push(format!("{id}/install"));
+    }
+
+    // REGISTER — re-check id-collision against a FRESH registry (close the
+    // long-pipeline TOCTOU) before writing the drop-in.
+    if let Ok(fresh) = Registry::load(manifest_dir) {
+        if fresh.get(&id).is_some() {
+            anyhow::bail!("component id '{id}' was registered concurrently — refusing to overwrite");
+        }
+    }
+    let final_targets = if ireport.installed_paths.is_empty() { installed.clone() } else { ireport.installed_paths.clone() };
+    let rspec = RegisterSpec { installed_targets: final_targets, ..rspec };
+    let toml = crate::register::synth_dropin(&rspec);
+    write_dropin(manifest_dir, &id, &toml, sink)?;
+
+    sink.emit(Event::Log {
+        component: id.clone(),
+        stream: Stream::Stdout,
+        line: format!("registered '{id}' (build-from-source). Manage with: envctl auto-detect / install {id} / reset {id} --apply"),
+    });
+    sink.emit(Event::RunFinished { summary: summary.clone() });
+    Ok(summary)
+}
+
+use crate::install::{ArtifactPlan, InstallPlan};
+use crate::model::{BuildStrategy, Refactor};
+use crate::register::RegisterSpec;
+
+fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
+    let mut strs: Vec<(&str, String)> = vec![
+        ("git_url", spec.git_url.clone()),
+        ("build_cmd", spec.build_cmd.clone()),
+    ];
+    if let Some(r) = &spec.git_ref {
+        strs.push(("git_ref", r.clone()));
+    }
+    for g in &spec.artifacts {
+        strs.push(("artifact", g.clone()));
+    }
+    match &spec.strategy {
+        BuildStrategy::Refactor { refactor: Refactor::Patch { command } } => strs.push(("patch_cmd", command.clone())),
+        BuildStrategy::Refactor { refactor: Refactor::Ai { instruction: Some(i), .. } } => strs.push(("ai_instruction", i.clone())),
+        BuildStrategy::Rename { renames } => {
+            for r in renames {
+                if !is_valid_slug(&r.to) {
+                    anyhow::bail!("--rename target '{}' is not a valid install name", r.to);
+                }
+                strs.push(("rename_from", r.from.clone()));
+            }
+        }
+        BuildStrategy::CherryPick { bins } => {
+            for b in bins {
+                strs.push(("bin", b.clone()));
+            }
+        }
+        _ => {}
+    }
+    for (label, val) in strs {
         if val.contains("'''") {
             anyhow::bail!("{label} may not contain ''' (would break the generated manifest)");
         }
     }
+    Ok(())
+}
 
-    let toml_text = synth_component_toml(id, &spec);
+fn repos_root() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    std::path::PathBuf::from(home).join(".local/share/envctl/repos")
+}
 
-    if dry_run {
-        sink.emit(Event::Log {
-            component: id.into(),
-            stream: Stream::Stdout,
-            line: format!("[dry-run] would write components.d/{id}.toml:\n{toml_text}"),
-        });
-        return Ok(RunSummary::default());
+fn local_bin_target(_spec: &AddRepoSpec, name: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    format!("{home}/.local/bin/{name}")
+}
+
+fn build_install_plan(id: &str, _spec: &AddRepoSpec, outcome: &crate::addrepo::PipelineOutcome) -> InstallPlan {
+    let artifacts = outcome
+        .installs
+        .iter()
+        .map(|(name, src)| {
+            let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            ArtifactPlan { source: src.clone(), install_name: name.clone(), renamed: name != stem }
+        })
+        .collect();
+    InstallPlan { id: id.into(), slug: id.into(), artifacts, extra_path_entries: vec![] }
+}
+
+fn build_register_spec(
+    id: &str,
+    spec: &AddRepoSpec,
+    outcome: &crate::addrepo::PipelineOutcome,
+    build_system: &str,
+    installed: &[String],
+) -> RegisterSpec {
+    let strategy_tag = match &spec.strategy {
+        BuildStrategy::AsIs => "as-is",
+        BuildStrategy::CherryPick { .. } => "cherry-pick",
+        BuildStrategy::Rename { .. } => "rename",
+        BuildStrategy::Refactor { refactor: Refactor::Patch { .. } } => "refactor:patch",
+        BuildStrategy::Refactor { refactor: Refactor::Ai { .. } } => "refactor:ai",
     }
+    .to_string();
+    let transform = match &spec.strategy {
+        BuildStrategy::Refactor { refactor: Refactor::Patch { command } } => Some(command.clone()),
+        BuildStrategy::Refactor { refactor: Refactor::Ai { goal, instruction, .. } } => {
+            Some(format!("ai goal={goal:?} {}", instruction.clone().unwrap_or_default()))
+        }
+        _ => None,
+    };
+    let relinks: Vec<(String, String)> = outcome
+        .installs
+        .iter()
+        .map(|(name, src)| {
+            let rel = src.strip_prefix(&outcome.clone_dir).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| src.to_string_lossy().into_owned());
+            (name.clone(), rel)
+        })
+        .collect();
+    let primary = outcome.installs.first().map(|(n, _)| n.clone());
+    RegisterSpec {
+        id: id.into(),
+        slug: id.into(),
+        display_name: format!("{id} (add-repo)"),
+        source: spec.git_url.clone(),
+        git_ref: spec.git_ref.clone(),
+        resolved_sha: outcome.resolved_sha.clone().unwrap_or_default(),
+        strategy_tag,
+        build_system: build_system.into(),
+        build_cmd: outcome.build_plan.build_cmd.clone(),
+        transform,
+        primary_bin: primary,
+        verify_cmd: spec.verify_cmd.clone(),
+        relinks,
+        installed_targets: installed.to_vec(),
+    }
+}
 
-    // 4. atomic temp+rename, with a timestamped backup of any existing drop-in
+fn write_dropin(manifest_dir: &Path, id: &str, toml_text: &str, sink: &EventSink) -> anyhow::Result<()> {
     let dir = manifest_dir.join("components.d");
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(format!("{id}.toml"));
     if target.exists() {
         let bak = dir.join(format!("{id}.toml.bak.{}", now_epoch()));
         std::fs::copy(&target, &bak)?;
-        sink.emit(Event::Log {
-            component: id.into(),
-            stream: Stream::Stdout,
-            line: format!("backed up existing drop-in -> {}", bak.display()),
-        });
+        sink.emit(Event::Log { component: id.into(), stream: Stream::Stdout, line: format!("backed up existing drop-in -> {}", bak.display()) });
     }
     let tmp = dir.join(format!(".{id}.toml.tmp"));
-    std::fs::write(&tmp, &toml_text)?;
+    std::fs::write(&tmp, toml_text)?;
     std::fs::rename(&tmp, &target)?;
-
-    sink.emit(Event::Log {
-        component: id.into(),
-        stream: Stream::Stdout,
-        line: format!(
-            "registered component '{id}' -> {}\n  build it with:  envctl install {id}",
-            target.display()
-        ),
-    });
-    Ok(RunSummary::default())
+    Ok(())
 }
 
 fn is_valid_slug(s: &str) -> bool {
@@ -516,48 +651,7 @@ fn is_valid_slug(s: &str) -> bool {
         Some(c) if c.is_ascii_alphanumeric() => {}
         _ => return false,
     }
-    s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-}
-
-/// Build the drop-in. `id` is a validated slug (safe bare key). `git_url` is
-/// single-quoted for bash; `build_cmd` is the user's own build command, embedded
-/// in a TOML literal string (both pre-checked for `'''`).
-fn synth_component_toml(id: &str, spec: &AddRepoSpec) -> String {
-    let url_sq = sh_single_quote(&spec.git_url);
-    format!(
-        "# generated by `envctl add-repo` — edit freely or re-run add-repo --force\n\
-         [[component]]\n\
-         id = \"{id}\"\n\
-         name = \"{id} (add-repo)\"\n\
-         description = \"Built from source via envctl add-repo.\"\n\
-         \n\
-         [component.detect]\n\
-         kind = \"command\"\n\
-         command = \"bash\"\n\
-         args = [\"-lc\", \"command -v {id}\"]\n\
-         \n\
-         [component.install]\n\
-         kind = \"script\"\n\
-         login_shell = true\n\
-         script = '''\n\
-         set -e\n\
-         install -d -m 700 \"$HOME/.local/share/envctl/repos\"\n\
-         SRC=\"$HOME/.local/share/envctl/repos/{id}\"\n\
-         if [ -d \"$SRC/.git\" ]; then git -C \"$SRC\" pull --ff-only; else git clone {url} \"$SRC\"; fi\n\
-         cd \"$SRC\"\n\
-         {build}\n\
-         '''\n",
-        id = id,
-        url = url_sq,
-        build = spec.build_cmd,
-    )
-}
-
-/// POSIX single-quote: wrap in '...' and replace each ' with '\'' .
-fn sh_single_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+    s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 fn now_epoch() -> u64 {

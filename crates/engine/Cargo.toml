@@ -18,3 +18,5 @@ thiserror = { workspace = true }
 sysinfo = { workspace = true }
 which = { workspace = true }
 chrono = { workspace = true }
+glob = { workspace = true }
+rustix = { workspace = true }

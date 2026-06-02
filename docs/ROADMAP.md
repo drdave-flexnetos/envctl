@@ -74,3 +74,24 @@ Six phases. **Phase 0 (this scaffold)** compiles green and ships a working, read
 - **Three crates: envctl-engine (lib), envctl (CLI bin), envctl-gui (eframe bin). add-repo writes synthesized components to ~/.config/envctl/components.d/*.toml drop-ins merged at load; builds install user-scope under ~/.local + repos cached at ~/.local/share/envctl/repos; logs tee to ~/.local/state/envctl/envctl.log.** — Resolves the crate-naming conflict (envctl-engine/envctl/envctl-gui chosen over envctl-core/envctl-cli) and the add-repo prefix conflict (canonical XDG layout). Drop-in merging means add-repo never edits a shared file in place, so clean removal = delete the drop-in. All behavior in the lib guarantees CLI and GUI cannot diverge; the on-disk log is the direct analogue of ~/yazelix-setup.log.
 - **GUI is eframe/egui immediate-mode with one long-lived serial worker thread, two mpsc channels, busy as a HashSet in the App, repaints driven by ctx.request_repaint() after each event, telemetry on its own ~1s cadence. No Mutex on the hot path.** — Immediate mode means the UI is a pure function of the latest snapshot — no view/state drift, trivial worker-driven repaints, ~0% CPU at rest, and egui's built-ins cover the whole need with zero extra deps (the brief's NO-web / few-deps constraints). A single serial worker ensures two sudo/apt/nix destructive ops can never race; a separate sampler ensures a 10-minute CUDA build never freezes the GPU gauges.
 - **Dependency order is a deterministic Kahn topological sort with ties broken by manifest declaration order; cycles are a hard load-time error. install/add-repo/auto-fix traverse forward (SkippedBlocked if a dep failed), reset traverses reversed (refuse-on-dependents unless --cascade), and gpu_required is an orthogonal lspci runtime gate.** — Deterministic ties make the built-ins reproduce the wizard's exact proven sequence (NerdFonts->Bun->AI CLIs->rustup->GPU subgraph->Nix->home-manager->yazelix). Refusing cycles at load is refuse-on-ambiguity applied to config. SkippedBlocked encodes the wizard's reason for front-loading Nix before home-manager/yazelix; the orthogonal GPU gate matches the section-3b lspci guard without polluting the dep graph.
+---
+
+## ✅ Phases 4 & 5 — IMPLEMENTED + dogfooded (build-from-source add-repo · GUI/telemetry)
+
+**Phase 4 — `add-repo`** (`detect_build.rs` detector table, `addrepo.rs` staged
+pipeline + confined AI-agent orchestrator, `install.rs` symlink/PATH-shadow/
+refuse-unmanaged install, `register.rs` provenance drop-in). Strategies: `as-is`,
+`cherry-pick`, `rename`, `refactor` (patch **and** AI — incl. full **port-to-rust**
+via an available agent). Dogfooded on the live box: a local cargo crate was
+cloned → cargo-built → symlinked into `~/.local/bin` → registered → managed by
+`auto-detect`. See [ADD-REPO.md](ADD-REPO.md).
+
+**Safety deltas beyond the original Phase-4 sketch:** opt-in `--build` gate (a bare
+add-repo only previews); euid-0 refusal; PATH-shadow + refuse-unmanaged-by-default
+install (`--force` to clobber, backed up); structurally-confined AI agent
+(`--add-dir`/`--permission-mode`, never `--yolo`); process-group timeout kill;
+`build_from_source` drop-ins not auto-rerun on an untargeted `install`.
+
+**Phase 5 — GUI/telemetry:** dedicated `TelemetryControl` sampler thread (cadence
+backoff off-Dashboard/unfocused, `SampleTelemetry` is a wake-nudge); DriverNotActive
+card; strategy-aware Add-Repo screen; (logs/settings polish ongoing).

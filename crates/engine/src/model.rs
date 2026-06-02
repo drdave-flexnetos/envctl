@@ -442,16 +442,155 @@ pub struct DataPath {
     pub uuid: Option<String>,
 }
 
-/// A request to build-from-source and wire in an upstream repo.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// A request to build-from-source and wire in an upstream repo (Phase 4).
+/// `build_cmd` stays a `String` ("" = let the detector choose); all new fields are
+/// `#[serde(default)]` and the struct derives `Default` so old call sites that use
+/// `..Default::default()` keep compiling.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AddRepoSpec {
     pub id: String,
     pub git_url: String,
     #[serde(default)]
+    pub local_path: Option<PathBuf>,
+    #[serde(default)]
     pub git_ref: Option<String>,
+    /// "" = detector default; non-empty overrides the whole build command.
+    #[serde(default)]
     pub build_cmd: String,
+    #[serde(default)]
+    pub build_system: Option<BuildSystem>,
+    #[serde(default)]
+    pub artifacts: Vec<String>,
+    #[serde(default)]
+    pub strategy: BuildStrategy,
     #[serde(default)]
     pub bin_dir: Option<PathBuf>,
     #[serde(default)]
+    pub daemon: bool,
+    #[serde(default)]
     pub verify_cmd: Option<String>,
+    /// SAFETY opt-in: only with `--build` do we run the upstream build / AI agent /
+    /// install. Without it add-repo is acquire+detect+preview only.
+    #[serde(default)]
+    pub allow_build: bool,
+    /// Opt-in to back-up-then-replace a real foreign file at an install target.
+    #[serde(default)]
+    pub force: bool,
+    /// Opt-in to `git clone --recurse-submodules` (off by default).
+    #[serde(default)]
+    pub recurse_submodules: bool,
+}
+
+/// Which build-system the pipeline drives. `Auto` (default) sniffs signal files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildSystem {
+    #[default]
+    Auto,
+    Cargo,
+    Cmake,
+    Meson,
+    Autotools,
+    Make,
+    Node,
+    Python,
+    NixFlake,
+    Go,
+    Zig,
+}
+
+/// HOW we transform the acquired tree before/while building + installing it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BuildStrategy {
+    #[default]
+    AsIs,
+    CherryPick {
+        bins: Vec<String>,
+    },
+    Rename {
+        renames: Vec<RenameRule>,
+    },
+    Refactor {
+        refactor: Refactor,
+    },
+}
+
+/// `old=new` install-name remap.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RenameRule {
+    pub from: String,
+    pub to: String,
+}
+
+/// A pre-build transform applied in-place inside the 0700 clone dir.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Refactor {
+    /// Run a user-provided shell transform command in the clone (`bash -lc`).
+    Patch { command: String },
+    /// Drive an available AI coding CLI non-interactively IN the clone with a
+    /// structured instruction; the agent does the code work, then the pipeline
+    /// re-detects the (often now-cargo) tree and builds the result.
+    Ai {
+        #[serde(default)]
+        agent: Option<AiAgent>,
+        goal: RefactorGoal,
+        #[serde(default)]
+        instruction: Option<String>,
+    },
+}
+
+/// The structured headline transforms the AI strategy can request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefactorGoal {
+    PortToRust,
+    CherryPickToCrate,
+    RenameForSynergy,
+    Custom,
+}
+
+/// AI coding CLIs envctl knows how to orchestrate non-interactively.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiAgent {
+    Claude,
+    Codex,
+    Gemini,
+    Kimi,
+}
+
+impl AiAgent {
+    pub fn preference() -> [AiAgent; 4] {
+        [AiAgent::Claude, AiAgent::Codex, AiAgent::Gemini, AiAgent::Kimi]
+    }
+    pub fn bin(self) -> &'static str {
+        match self {
+            AiAgent::Claude => "claude",
+            AiAgent::Codex => "codex",
+            AiAgent::Gemini => "gemini",
+            AiAgent::Kimi => "kimi",
+        }
+    }
+    /// Argv that runs the agent NON-INTERACTIVELY, STRUCTURALLY CONFINED to
+    /// `clone_dir`, never with a skip-permissions / yolo flag. The instruction is a
+    /// SINGLE argv element (no shell) for injection containment.
+    pub fn argv(self, prompt: &str, clone_dir: &str) -> Vec<String> {
+        match self {
+            AiAgent::Claude => vec![
+                "-p".into(),
+                prompt.into(),
+                "--permission-mode".into(),
+                "acceptEdits".into(),
+                "--add-dir".into(),
+                clone_dir.into(),
+                "--output-format".into(),
+                "text".into(),
+            ],
+            AiAgent::Codex => vec!["exec".into(), "--cd".into(), clone_dir.into(), prompt.into()],
+            AiAgent::Gemini => vec!["-p".into(), prompt.into()],
+            AiAgent::Kimi => vec!["-p".into(), prompt.into()],
+        }
+    }
 }

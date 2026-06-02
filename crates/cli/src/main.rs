@@ -3,7 +3,8 @@
 //! `--apply` to act. `auto-detect` is read-only and prints a real EnvReport.
 use clap::{Parser, Subcommand};
 use envctl_engine::{
-    AddRepoSpec, Engine, EnvReport, Event, EventSink, OpStatus, Phase, ResetGates, RunPlan, Severity,
+    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, Engine, EnvReport, Event, EventSink, OpStatus,
+    Phase, Refactor, RefactorGoal, RenameRule, ResetGates, RunPlan, Severity,
 };
 
 #[derive(Parser)]
@@ -64,12 +65,59 @@ enum Cmd {
         confirm: bool,
     },
     /// Add a repo as a managed component (build-from-source + wire-in).
+    /// Acquire+detect+PREVIEW by default; pass --build to actually build + install.
     AddRepo {
+        /// Git URL (or use --local for a working tree).
         git_url: String,
         #[arg(long)]
         id: String,
         #[arg(long)]
-        build_cmd: String,
+        local: Option<std::path::PathBuf>,
+        #[arg(long, value_name = "REF")]
+        git_ref: Option<String>,
+        /// Force a detector: cargo|cmake|meson|autotools|make|node|python|nix_flake|go|zig.
+        #[arg(long)]
+        build_system: Option<String>,
+        #[arg(long)]
+        build_cmd: Option<String>,
+        /// Artifact glob relative to the clone. Repeatable.
+        #[arg(long = "artifact")]
+        artifacts: Vec<String>,
+        /// Strategy: as-is | cherry-pick | rename | refactor.
+        #[arg(long, default_value = "as-is")]
+        strategy: String,
+        /// cherry-pick: only install these binaries (by file-stem). Repeatable.
+        #[arg(long = "bin")]
+        bins: Vec<String>,
+        /// rename: install old under new name (old=new). Repeatable.
+        #[arg(long = "rename", value_parser = parse_rename)]
+        renames: Vec<(String, String)>,
+        /// refactor=patch: shell transform run in the clone before build.
+        #[arg(long)]
+        patch_cmd: Option<String>,
+        /// refactor=ai goal: port-to-rust | cherry-pick-to-crate | rename-for-synergy | custom.
+        #[arg(long)]
+        ai_goal: Option<String>,
+        /// refactor=ai: force agent — claude|codex|gemini|kimi (else auto-detect).
+        #[arg(long)]
+        ai_agent: Option<String>,
+        /// refactor=ai: extra instruction appended to the goal prompt.
+        #[arg(long)]
+        ai_instruction: Option<String>,
+        /// Treat as a daemon (reserved for systemd --user wiring).
+        #[arg(long)]
+        daemon: bool,
+        #[arg(long)]
+        verify_cmd: Option<String>,
+        /// OPT-IN: actually run the upstream build / AI agent / install (else preview).
+        #[arg(long)]
+        build: bool,
+        /// Back up + replace a real foreign file at an install target.
+        #[arg(long)]
+        force: bool,
+        /// git clone --recurse-submodules (off by default).
+        #[arg(long)]
+        recurse_submodules: bool,
         #[arg(long)]
         dry_run: bool,
     },
@@ -134,13 +182,19 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
                     &sink,
                 )?
                 .ok(),
-            Cmd::AddRepo { git_url, id, build_cmd, dry_run } => eng
-                .add_repo(
-                    AddRepoSpec { id, git_url, git_ref: None, build_cmd, bin_dir: None, verify_cmd: None },
-                    dry_run,
-                    &sink,
-                )?
-                .ok(),
+            Cmd::AddRepo {
+                git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
+                renames, patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build,
+                force, recurse_submodules, dry_run,
+            } => {
+                let spec = build_spec(AddRepoArgs {
+                    git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
+                    renames, patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build,
+                    force, recurse_submodules,
+                })
+                .map_err(|e| anyhow::anyhow!(e))?;
+                eng.add_repo(spec, dry_run, &sink)?.ok()
+            }
             Cmd::AutoDetect { .. } => unreachable!("handled in main"),
         };
         Ok(ok) // sink drops here -> the main-thread rx.iter() terminates cleanly
@@ -198,6 +252,109 @@ fn print_event(ev: &Event) {
             }
         }
         _ => {}
+    }
+}
+
+fn parse_rename(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
+        .filter(|(a, b)| !a.is_empty() && !b.is_empty())
+        .ok_or_else(|| format!("expected old=new, got `{s}`"))
+}
+
+/// Flattened add-repo flags (keeps build_spec's signature sane).
+struct AddRepoArgs {
+    git_url: String,
+    id: String,
+    local: Option<std::path::PathBuf>,
+    git_ref: Option<String>,
+    build_system: Option<String>,
+    build_cmd: Option<String>,
+    artifacts: Vec<String>,
+    strategy: String,
+    bins: Vec<String>,
+    renames: Vec<(String, String)>,
+    patch_cmd: Option<String>,
+    ai_goal: Option<String>,
+    ai_agent: Option<String>,
+    ai_instruction: Option<String>,
+    daemon: bool,
+    verify_cmd: Option<String>,
+    build: bool,
+    force: bool,
+    recurse_submodules: bool,
+}
+
+fn build_spec(a: AddRepoArgs) -> Result<AddRepoSpec, String> {
+    let strategy = match a.strategy.as_str() {
+        "as-is" => BuildStrategy::AsIs,
+        "cherry-pick" => BuildStrategy::CherryPick { bins: a.bins },
+        "rename" => BuildStrategy::Rename {
+            renames: a.renames.into_iter().map(|(from, to)| RenameRule { from, to }).collect(),
+        },
+        "refactor" => BuildStrategy::Refactor {
+            refactor: if let Some(cmd) = a.patch_cmd {
+                Refactor::Patch { command: cmd }
+            } else {
+                Refactor::Ai {
+                    agent: a.ai_agent.as_deref().map(parse_agent).transpose()?,
+                    goal: parse_goal(a.ai_goal.as_deref().unwrap_or("custom"))?,
+                    instruction: a.ai_instruction,
+                }
+            },
+        },
+        other => return Err(format!("unknown --strategy `{other}` (as-is|cherry-pick|rename|refactor)")),
+    };
+    Ok(AddRepoSpec {
+        id: a.id,
+        git_url: a.git_url,
+        local_path: a.local,
+        git_ref: a.git_ref,
+        build_cmd: a.build_cmd.unwrap_or_default(),
+        build_system: a.build_system.as_deref().map(parse_build_system).transpose()?,
+        artifacts: a.artifacts,
+        strategy,
+        bin_dir: None,
+        daemon: a.daemon,
+        verify_cmd: a.verify_cmd,
+        allow_build: a.build,
+        force: a.force,
+        recurse_submodules: a.recurse_submodules,
+    })
+}
+
+fn parse_goal(s: &str) -> Result<RefactorGoal, String> {
+    match s {
+        "port-to-rust" => Ok(RefactorGoal::PortToRust),
+        "cherry-pick-to-crate" => Ok(RefactorGoal::CherryPickToCrate),
+        "rename-for-synergy" => Ok(RefactorGoal::RenameForSynergy),
+        "custom" => Ok(RefactorGoal::Custom),
+        other => Err(format!("unknown --ai-goal `{other}`")),
+    }
+}
+fn parse_agent(s: &str) -> Result<AiAgent, String> {
+    match s {
+        "claude" => Ok(AiAgent::Claude),
+        "codex" => Ok(AiAgent::Codex),
+        "gemini" => Ok(AiAgent::Gemini),
+        "kimi" => Ok(AiAgent::Kimi),
+        other => Err(format!("unknown --ai-agent `{other}`")),
+    }
+}
+fn parse_build_system(s: &str) -> Result<BuildSystem, String> {
+    match s {
+        "auto" => Ok(BuildSystem::Auto),
+        "cargo" => Ok(BuildSystem::Cargo),
+        "cmake" => Ok(BuildSystem::Cmake),
+        "meson" => Ok(BuildSystem::Meson),
+        "autotools" => Ok(BuildSystem::Autotools),
+        "make" => Ok(BuildSystem::Make),
+        "node" => Ok(BuildSystem::Node),
+        "python" => Ok(BuildSystem::Python),
+        "nix_flake" | "nix-flake" => Ok(BuildSystem::NixFlake),
+        "go" => Ok(BuildSystem::Go),
+        "zig" => Ok(BuildSystem::Zig),
+        other => Err(format!("unknown --build-system `{other}`")),
     }
 }
 

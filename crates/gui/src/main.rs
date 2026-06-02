@@ -12,8 +12,9 @@ mod theme;
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column, TableBuilder};
 use envctl_engine::{
-    run_event_loop, ComponentState, DriftItem, DriftKind, Engine, EngineCommand, EngineEvent,
-    Event, OpStatus, Severity, Stream, Telemetry,
+    run_event_loop, AddRepoSpec, BuildStrategy, ComponentState, DriftItem, DriftKind, Engine,
+    EngineCommand, EngineEvent, Event, OpStatus, Refactor, RefactorGoal, RenameRule, Severity,
+    Stream, Telemetry, TelemetryControl,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -76,10 +77,24 @@ struct EnvctlApp {
     util_history: HashMap<u32, VecDeque<f32>>,
     dry_run_default: bool,
     filter: String,
+    tel: TelemetryControl,
+    // GPU summary (from the last EnvReport) for the DriverNotActive card
+    gpu_present: bool,
+    driver_loaded: bool,
+    software_rendered: bool,
+    gpu_count: usize,
     // add-repo form
     add_url: String,
     add_id: String,
     add_build: String,
+    add_strategy: String,
+    add_ref: String,
+    add_bins: String,
+    add_renames: String,
+    add_patch: String,
+    add_ai_goal: String,
+    add_ai_instruction: String,
+    add_build_flag: bool,
 }
 
 impl EnvctlApp {
@@ -93,9 +108,11 @@ impl EnvctlApp {
         // THE worker spawn. Every captured value is Send + 'static => the closure
         // is Send + 'static => std::thread::spawn accepts it.
         let engine = Engine::load_default().expect("manifest load");
+        let tel = TelemetryControl::new();
+        let tel_worker = tel.clone();
         std::thread::spawn(move || {
             let repaint: Box<dyn FnMut() + Send + 'static> = Box::new(move || ctx.request_repaint());
-            run_event_loop(engine, cmd_rx, evt_tx, repaint);
+            run_event_loop(engine, cmd_rx, evt_tx, tel_worker, repaint);
         });
 
         let app = Self {
@@ -112,9 +129,22 @@ impl EnvctlApp {
             util_history: HashMap::new(),
             dry_run_default: true,
             filter: String::new(),
+            tel,
+            gpu_present: false,
+            driver_loaded: false,
+            software_rendered: false,
+            gpu_count: 0,
             add_url: String::new(),
             add_id: String::new(),
-            add_build: "cargo install --path .".into(),
+            add_build: String::new(),
+            add_strategy: "as-is".into(),
+            add_ref: String::new(),
+            add_bins: String::new(),
+            add_renames: String::new(),
+            add_patch: String::new(),
+            add_ai_goal: "port-to-rust".into(),
+            add_ai_instruction: String::new(),
+            add_build_flag: false,
         };
         let _ = app.cmd_tx.send(EngineCommand::Detect);
         let _ = app.cmd_tx.send(EngineCommand::SampleTelemetry);
@@ -134,6 +164,11 @@ impl EnvctlApp {
                         report.components.len(),
                         report.drift.len()
                     );
+                    // read Copy fields BEFORE moving report.components (partial-move guard)
+                    self.gpu_present = report.gpu_present;
+                    self.driver_loaded = report.driver_loaded;
+                    self.software_rendered = report.software_rendered;
+                    self.gpu_count = report.gpu_count;
                     self.components = report.components;
                     self.drift = report.drift;
                 }
@@ -262,10 +297,14 @@ impl eframe::App for EnvctlApp {
                 Screen::Settings => self.settings_screen(ui),
             });
 
-        // Live telemetry tick while the Dashboard is visible.
+        // The dedicated sampler thread emits Telemetry on its own cadence; the GUI
+        // just sets the cadence (fast on Dashboard, slow elsewhere) + repaints.
         if self.screen == Screen::Dashboard {
-            let _ = self.cmd_tx.send(EngineCommand::SampleTelemetry);
-            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            let cadence = if ctx.input(|i| i.focused) { 1000 } else { 3000 };
+            self.tel.set_cadence(cadence);
+            ctx.request_repaint_after(std::time::Duration::from_millis(cadence));
+        } else {
+            self.tel.set_cadence(10000);
         }
     }
 }
@@ -291,6 +330,18 @@ impl EnvctlApp {
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             let t = self.telemetry.clone();
+
+            // DriverNotActive: GPUs present but the kernel driver isn't loaded.
+            if self.gpu_present && (!self.driver_loaded || self.software_rendered) {
+                theme::card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.colored_label(
+                        theme::WARN,
+                        format!("⟳  {} NVIDIA GPU(s) present but the driver is not loaded — install nvidia-open and REBOOT to light them up.", self.gpu_count),
+                    );
+                });
+                ui.add_space(8.0);
+            }
 
             ui.label(theme::section("SYSTEM"));
             ui.add_space(4.0);
@@ -662,32 +713,70 @@ impl EnvctlApp {
                     );
                     ui.end_row();
 
+                    ui.label(RichText::new("Ref").color(theme::TEXT_MUTED));
+                    ui.add(egui::TextEdit::singleline(&mut self.add_ref).hint_text("branch/tag/sha (optional)").desired_width(380.0));
+                    ui.end_row();
+
                     ui.label(RichText::new("Build cmd").color(theme::TEXT_MUTED));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.add_build).desired_width(380.0),
-                    );
+                    ui.add(egui::TextEdit::singleline(&mut self.add_build).hint_text("(blank = auto-detect)").desired_width(380.0));
+                    ui.end_row();
+
+                    ui.label(RichText::new("Strategy").color(theme::TEXT_MUTED));
+                    egui::ComboBox::from_id_salt("strategy")
+                        .selected_text(&self.add_strategy)
+                        .show_ui(ui, |ui| {
+                            for s in ["as-is", "cherry-pick", "rename", "refactor"] {
+                                ui.selectable_value(&mut self.add_strategy, s.to_string(), s);
+                            }
+                        });
                     ui.end_row();
                 });
 
+            // strategy-specific fields
+            ui.add_space(8.0);
+            match self.add_strategy.as_str() {
+                "cherry-pick" => {
+                    ui.label(RichText::new("Bins (comma-separated file-stems)").color(theme::TEXT_MUTED));
+                    ui.add(egui::TextEdit::singleline(&mut self.add_bins).hint_text("rg, foo").desired_width(420.0));
+                }
+                "rename" => {
+                    ui.label(RichText::new("Renames (old=new, comma-separated)").color(theme::TEXT_MUTED));
+                    ui.add(egui::TextEdit::singleline(&mut self.add_renames).hint_text("rg=rgx").desired_width(420.0));
+                }
+                "refactor" => {
+                    ui.label(RichText::new("Patch cmd (leave blank for AI refactor)").color(theme::TEXT_MUTED));
+                    ui.add(egui::TextEdit::singleline(&mut self.add_patch).desired_width(420.0));
+                    if self.add_patch.trim().is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("AI goal").color(theme::TEXT_MUTED));
+                            egui::ComboBox::from_id_salt("ai_goal")
+                                .selected_text(&self.add_ai_goal)
+                                .show_ui(ui, |ui| {
+                                    for g in ["port-to-rust", "cherry-pick-to-crate", "rename-for-synergy", "custom"] {
+                                        ui.selectable_value(&mut self.add_ai_goal, g.to_string(), g);
+                                    }
+                                });
+                        });
+                        ui.add(egui::TextEdit::singleline(&mut self.add_ai_instruction).hint_text("extra instruction (optional)").desired_width(420.0));
+                        ui.colored_label(theme::WARN, "envctl invokes the agent NON-INTERACTIVELY in the clone; it never auto-commits or pushes.");
+                    }
+                }
+                _ => {}
+            }
+
+            ui.add_space(10.0);
+            ui.checkbox(&mut self.add_build_flag, "Build now (run the upstream build / AI agent + install) — off = preview only");
+
             ui.add_space(12.0);
-            let ready =
-                !self.add_url.trim().is_empty() && !self.add_id.trim().is_empty();
+            let ready = !self.add_url.trim().is_empty() && !self.add_id.trim().is_empty();
             ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(ready, egui::Button::new("Validate (dry-run)"))
-                    .clicked()
-                {
+                if ui.add_enabled(ready, egui::Button::new("Validate (dry-run)")).clicked() {
                     self.dispatch(self.add_repo_cmd(true), None);
                     self.screen = Screen::Logs;
                 }
-                let reg = egui::Button::new(
-                    RichText::new("Register").color(if ready {
-                        theme::ACCENT_TEXT
-                    } else {
-                        theme::TEXT_FAINT
-                    }),
-                )
-                .fill(if ready { theme::ACCENT } else { theme::SURFACE });
+                let label = if self.add_build_flag { "Build + Register" } else { "Register (preview)" };
+                let reg = egui::Button::new(RichText::new(label).color(if ready { theme::ACCENT_TEXT } else { theme::TEXT_FAINT }))
+                    .fill(if ready { theme::ACCENT } else { theme::SURFACE });
                 if ui.add_enabled(ready, reg).clicked() {
                     self.dispatch(self.add_repo_cmd(false), None);
                     self.screen = Screen::Logs;
@@ -698,19 +787,52 @@ impl EnvctlApp {
         ui.add_space(10.0);
         ui.colored_label(
             theme::TEXT_FAINT,
-            "Register writes a component drop-in; build it from the Components tab (Install).",
+            "Acquire + detect + preview by default. 'Build now' clones, builds from source, installs into ~/.local/bin, and registers a managed drop-in.",
         );
     }
 
     fn add_repo_cmd(&self, dry_run: bool) -> EngineCommand {
+        let opt = |s: &str| {
+            let t = s.trim();
+            if t.is_empty() { None } else { Some(t.to_string()) }
+        };
+        let strategy = match self.add_strategy.as_str() {
+            "cherry-pick" => BuildStrategy::CherryPick {
+                bins: split_csv(&self.add_bins),
+            },
+            "rename" => BuildStrategy::Rename {
+                renames: split_csv(&self.add_renames)
+                    .into_iter()
+                    .filter_map(|p| p.split_once('=').map(|(a, b)| RenameRule { from: a.trim().into(), to: b.trim().into() }))
+                    .collect(),
+            },
+            "refactor" => BuildStrategy::Refactor {
+                refactor: if let Some(cmd) = opt(&self.add_patch) {
+                    Refactor::Patch { command: cmd }
+                } else {
+                    Refactor::Ai {
+                        agent: None,
+                        goal: match self.add_ai_goal.as_str() {
+                            "port-to-rust" => RefactorGoal::PortToRust,
+                            "cherry-pick-to-crate" => RefactorGoal::CherryPickToCrate,
+                            "rename-for-synergy" => RefactorGoal::RenameForSynergy,
+                            _ => RefactorGoal::Custom,
+                        },
+                        instruction: opt(&self.add_ai_instruction),
+                    }
+                },
+            },
+            _ => BuildStrategy::AsIs,
+        };
         EngineCommand::AddRepo {
-            spec: envctl_engine::AddRepoSpec {
+            spec: AddRepoSpec {
                 id: self.add_id.trim().to_string(),
                 git_url: self.add_url.trim().to_string(),
-                git_ref: None,
+                git_ref: opt(&self.add_ref),
                 build_cmd: self.add_build.trim().to_string(),
-                bin_dir: None,
-                verify_cmd: None,
+                strategy,
+                allow_build: self.add_build_flag,
+                ..Default::default()
             },
             dry_run,
         }
@@ -868,4 +990,13 @@ fn log_color(l: &LogLine) -> Color32 {
     } else {
         theme::TEXT
     }
+}
+
+/// Split a comma/whitespace-separated list into trimmed non-empty tokens.
+fn split_csv(s: &str) -> Vec<String> {
+    s.split([',', ' ', '\n'])
+        .map(|x| x.trim())
+        .filter(|x| !x.is_empty())
+        .map(|x| x.to_string())
+        .collect()
 }

@@ -626,3 +626,23 @@ envctl-gui    = { envctl-engine, eframe, egui, egui_extras }
 
 No web, no WebView, nothing nightly. The CLI and GUI are two thin front-ends over one engine, so
 behavior cannot diverge.
+
+---
+
+## §8b — add-repo pipeline (Phase 4, implemented)
+
+Module map: `detect_build.rs` (signal→build-cmd→artifact-glob table, re-runnable
+after a transform so an AI port re-detects as cargo) · `addrepo.rs` (the staged
+pipeline: euid-0 refusal, `allow_build` opt-in gate, acquire into a 0700 store with
+origin-verify-on-reuse + hardened git, the patch/AI transform with a
+structurally-confined agent, streamed build in its own process group with a timeout,
+glob locate, strategy shaping) · `install.rs` (symlink into `~/.local/bin`,
+PATH-shadow refusal, canonical managed-symlink ownership, refuse-unmanaged-unless-force,
+PATH wire-in via the existing `Wiring`) · `register.rs` (synthesize the provenance
+drop-in with a SHA-pinned rebuild + owned-symlink remove, written through the
+executor's atomic temp+rename+backup writer). Streaming reuses `Event::Log` /
+`StepFinished{phase: Install}` so CLI + GUI render identically.
+
+**§11b — Telemetry thread (Phase 5):** a dedicated `TelemetryControl` sampler thread
+(peer to the event forwarder, `Send + 'static`) emits `Event::Telemetry` on a
+GUI-controlled cadence; a long `engine.run` no longer starves telemetry.
