@@ -25,7 +25,10 @@ expansion) and could remove a refused target via a survivor's closure; the live-
 guard failed *open* on btrfs; `--rename foo=git` could shadow system `git`; the GUI's
 Fix toggle was inverted (ran destructive Fix for real by default). `envctl.lock` is
 now **committed** (it was gitignored, which made `lock --check` useless). **33 engine
-tests** green. Remaining: the 30 audit-v2 *minors* (not yet triaged).
+tests** green, clippy clean. The 24 actionable audit-v2 *minors* were then **all fixed**
+(6 were already resolved by the blocker/major work), so **audit-v2 is fully closed**.
+The repo is published + live at `github.com/drdave-flexnetos/envctl` — everything is
+committed and pushed to `origin/master`.
 
 ## Status (commits on `master`)
 ```
