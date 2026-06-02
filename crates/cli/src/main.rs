@@ -50,6 +50,8 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Read-only health diagnostics: writability, toolchains, sudo, UEFI, GPU.
+    Doctor,
     /// Install components (additive + idempotent; --dry-run to preview).
     Install {
         targets: Vec<String>,
@@ -217,6 +219,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Cmd::Doctor => print_doctor(json),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => handle_connect(engine, other, json),
@@ -275,7 +278,9 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!(e))?;
                 eng.add_repo(spec, dry_run, &sink)?.ok()
             }
-            Cmd::AutoDetect { .. } | Cmd::Graph { .. } | Cmd::Lock { .. } => unreachable!("handled in main"),
+            Cmd::AutoDetect { .. } | Cmd::Graph { .. } | Cmd::Lock { .. } | Cmd::Doctor => {
+                unreachable!("handled in main")
+            }
         };
         Ok(ok) // sink drops here -> the main-thread rx.iter() terminates cleanly
     });
@@ -371,6 +376,92 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
     } else {
         println!("\nenvctl: clone is ready. Build what you made with:");
         println!("  envctl add-repo {} --id {} --strategy as-is --build", spec.git_url, spec.id);
+    }
+    Ok(())
+}
+
+/// Read-only health diagnostics (kasetto-style `doctor`): writability, toolchains,
+/// sudo, UEFI/Secure-Boot, GPU, and the run log. Never mutates anything.
+fn print_doctor(json: bool) -> anyhow::Result<()> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let write_ok = |p: &str| -> bool {
+        let dir = std::path::Path::new(p);
+        if std::fs::create_dir_all(dir).is_err() {
+            return false;
+        }
+        let t = dir.join(".envctl-doctor-probe");
+        let ok = std::fs::write(&t, b"x").is_ok();
+        let _ = std::fs::remove_file(&t);
+        ok
+    };
+    let has = |bin: &str| -> Option<String> {
+        let out = std::process::Command::new("bash")
+            .args(["-lc", &format!("command -v {bin} && {bin} --version 2>/dev/null | head -1")])
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("present").trim().to_string())
+    };
+    let dirs = [
+        format!("{home}/.local/bin"),
+        format!("{home}/.config"),
+        format!("{home}/.local/share/envctl/repos"),
+        "/etc".to_string(),
+    ];
+    let tools = ["git", "cargo", "rustc", "claude", "nix", "podman", "nvidia-smi", "gh", "uv", "bun"];
+    let sudo_cached = std::process::Command::new("sudo")
+        .args(["-n", "true"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let uefi = std::path::Path::new("/sys/firmware/efi").exists();
+    let secure_boot = std::process::Command::new("bash")
+        .args(["-lc", "od -An -t u1 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | tr -s ' ' | awk '{print $NF}' | head -1"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    let driver_loaded = std::path::Path::new("/proc/driver/nvidia/version").exists();
+    let run_log = std::path::Path::new(&home).join(".local/state/envctl/envctl.log");
+    let log_exists = run_log.exists();
+
+    if json {
+        let dirj: Vec<_> = dirs.iter().map(|d| serde_json::json!({"path": d, "writable": write_ok(d)})).collect();
+        let toolj: Vec<_> = tools.iter().map(|t| serde_json::json!({"tool": t, "version": has(t)})).collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "writable": dirj, "tools": toolj, "sudo_cached": sudo_cached,
+                "uefi": uefi, "secure_boot": secure_boot, "nvidia_driver_loaded": driver_loaded,
+                "run_log": run_log.display().to_string(), "run_log_exists": log_exists,
+            }))?
+        );
+        return Ok(());
+    }
+
+    let yn = |b: bool| if b { "\x1b[1;32m✓\x1b[0m" } else { "\x1b[1;31m✗\x1b[0m" };
+    println!("\x1b[1;36m── writability ──\x1b[0m");
+    for d in &dirs {
+        println!("  {}  {d}", yn(write_ok(d)));
+    }
+    println!("\x1b[1;36m── toolchains ──\x1b[0m");
+    for t in &tools {
+        match has(t) {
+            Some(v) => println!("  \x1b[1;32m✓\x1b[0m {t:<11} {v}"),
+            None => println!("  \x1b[1;90m·\x1b[0m {t:<11} (absent)"),
+        }
+    }
+    println!("\x1b[1;36m── system ──\x1b[0m");
+    println!("  sudo (cached)      {}", yn(sudo_cached));
+    println!("  UEFI               {}", yn(uefi));
+    println!("  Secure Boot        {}", match secure_boot.as_deref() { Some("1") => "\x1b[1;33mON\x1b[0m (nvidia-open needs it OFF)", Some("0") => "\x1b[1;32mOFF\x1b[0m", _ => "unknown" });
+    println!("  nvidia driver      {}", if driver_loaded { "\x1b[1;32mloaded\x1b[0m" } else { "\x1b[1;33mnot loaded\x1b[0m" });
+    println!("  run log            {} {}", yn(log_exists), run_log.display());
+    if !sudo_cached {
+        println!("\n  note: sudo not pre-authorized — privileged installs need `sudo -v` in a real terminal first.");
     }
     Ok(())
 }
