@@ -80,12 +80,12 @@ pub fn run(reg: &Registry, runner: &dyn HookRunner, sink: &EventSink) -> anyhow:
             continue;
         }
         if let Some(h) = comp.detect.as_ref() {
-            st.detected = runner.run(&comp.id, Phase::Detect, h, false).status == OpStatus::Ok;
+            st.detected = runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok;
         }
         if st.detected {
             if let Some(h) = comp.verify.as_ref() {
                 st.healthy =
-                    Some(runner.run(&comp.id, Phase::Verify, h, false).status == OpStatus::Ok);
+                    Some(runner.run(&comp.id, Phase::Verify, h, false, sink).status == OpStatus::Ok);
             }
         }
         report.components.push(st);

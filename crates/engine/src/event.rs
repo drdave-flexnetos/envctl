@@ -86,6 +86,13 @@ impl EventSink {
         (EventSink(tx), rx)
     }
 
+    /// A sink whose receiver is dropped: every `emit` is silently discarded.
+    /// Used where events aren't consumed (e.g. guard predicate hooks).
+    pub fn null() -> EventSink {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        EventSink(tx)
+    }
+
     pub fn emit(&self, ev: Event) {
         let _ = self.0.send(ev);
     }

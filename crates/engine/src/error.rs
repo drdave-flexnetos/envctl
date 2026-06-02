@@ -89,6 +89,24 @@ pub fn run_phase(
             message: String::new(),
             dry_run,
         },
-        Some(hook) => sink.timed(|| runner.run(&comp.id, phase, hook, dry_run)),
+        // catch_unwind so a panicking runner becomes a Failed result instead of
+        // killing the worker thread (and wedging the GUI).
+        Some(hook) => {
+            let id = comp.id.clone();
+            sink.timed(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runner.run(&comp.id, phase, hook, dry_run, sink)
+                }))
+                .unwrap_or_else(|_| OpResult {
+                    component: id,
+                    phase,
+                    status: OpStatus::Failed,
+                    exit_code: None,
+                    duration_ms: 0,
+                    message: "hook panicked".into(),
+                    dry_run,
+                })
+            })
+        }
     }
 }

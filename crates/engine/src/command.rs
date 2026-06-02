@@ -5,10 +5,10 @@
 //! itself depends on NO egui type — the repaint hook is injected as a boxed
 //! `FnMut()`.
 //!
-//! Liveness note (Phase 2): events are drained into `evt_tx` AFTER each engine op
-//! returns. Because the engine emits synchronously on this worker thread, that is
-//! a post-op burst, not live mid-build streaming. Correct + compiles; live
-//! streaming (one shared channel) is a Phase-2 item (see ROADMAP.md).
+//! Live streaming (Phase 2): a dedicated forwarder thread relays engine events to
+//! the UI *as they arrive*, so a 20-minute apt/nix/CUDA build streams line-by-line
+//! into the GUI Live Logs rather than arriving in a post-op burst. Everything —
+//! including telemetry — flows through the one engine `sink`.
 use crate::{component::Phase, model::{AddRepoSpec, RunPlan}, Engine, Event, EventSink};
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -34,54 +34,41 @@ pub fn run_event_loop(
     evt_tx: Sender<EngineEvent>,
     mut repaint: Box<dyn FnMut() + Send + 'static>,
 ) {
-    // The engine emits into `sink`; we forward `sink`'s receiver into evt_tx.
     let (sink, ev_rx) = EventSink::channel();
+
+    // Forwarder thread: relay every engine event to the UI the instant it is
+    // emitted (live streaming), requesting a repaint after each. Captures only
+    // Send + 'static values. Exits when `sink` is dropped (this fn returns).
+    std::thread::spawn(move || {
+        while let Ok(ev) = ev_rx.recv() {
+            if evt_tx.send(ev).is_err() {
+                break;
+            }
+            repaint();
+        }
+    });
+
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             EngineCommand::Shutdown => break,
             EngineCommand::Detect => {
                 let _ = engine.detect(&sink);
-                drain(&ev_rx, &evt_tx, &mut repaint);
             }
             EngineCommand::Install { targets, dry_run } => {
-                run_plan(&engine, &sink, Phase::Install, targets, dry_run, &ev_rx, &evt_tx, &mut repaint);
+                let _ = engine.run(RunPlan { phase: Phase::Install, targets, dry_run }, &sink);
             }
             EngineCommand::Fix { targets, dry_run } => {
-                run_plan(&engine, &sink, Phase::Fix, targets, dry_run, &ev_rx, &evt_tx, &mut repaint);
+                let _ = engine.run(RunPlan { phase: Phase::Fix, targets, dry_run }, &sink);
             }
             EngineCommand::Remove { targets, dry_run } => {
-                run_plan(&engine, &sink, Phase::Remove, targets, dry_run, &ev_rx, &evt_tx, &mut repaint);
+                let _ = engine.run(RunPlan { phase: Phase::Remove, targets, dry_run }, &sink);
             }
             EngineCommand::AddRepo { spec, dry_run } => {
                 let _ = engine.add_repo(spec, dry_run, &sink);
-                drain(&ev_rx, &evt_tx, &mut repaint);
             }
             EngineCommand::SampleTelemetry => {
-                let _ = evt_tx.send(Event::Telemetry(crate::telemetry::sample()));
-                repaint();
+                sink.emit(Event::Telemetry(crate::telemetry::sample()));
             }
         }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_plan(
-    engine: &Engine,
-    sink: &EventSink,
-    phase: Phase,
-    targets: Vec<String>,
-    dry_run: bool,
-    ev_rx: &Receiver<Event>,
-    evt_tx: &Sender<Event>,
-    repaint: &mut Box<dyn FnMut() + Send + 'static>,
-) {
-    let _ = engine.run(RunPlan { phase, targets, dry_run }, sink);
-    drain(ev_rx, evt_tx, repaint);
-}
-
-fn drain(ev_rx: &Receiver<Event>, evt_tx: &Sender<Event>, repaint: &mut Box<dyn FnMut() + Send + 'static>) {
-    while let Ok(ev) = ev_rx.try_recv() {
-        let _ = evt_tx.send(ev);
-        repaint();
     }
 }

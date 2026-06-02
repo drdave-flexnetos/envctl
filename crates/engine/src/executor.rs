@@ -49,6 +49,9 @@ pub fn run(
         order.reverse();
     }
 
+    // Pre-warm sudo (+ keepalive) if this run will need it; dropped at fn end.
+    let _sudo = prewarm_sudo(&order, plan.phase, plan.dry_run, sink);
+
     let total = order.len();
     sink.emit(Event::RunStarted {
         phase: plan.phase,
@@ -78,10 +81,13 @@ pub fn run(
             continue;
         }
 
-        // Idempotent install: skip-if-already-detected (never re-run curl|bash).
+        // Idempotent install: skip-if-already-detected (never re-run curl|bash),
+        // but still reconcile its declarative wiring (idempotent) so an already-
+        // installed tool with a missing PATH/rc block gets fixed.
         if plan.phase == Phase::Install && !plan.dry_run {
             if let Some(h) = comp.detect.as_ref() {
-                if runner.run(&comp.id, Phase::Detect, h, false).status == OpStatus::Ok {
+                if runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok {
+                    apply_wiring(comp, sink);
                     let res = mkres(comp, plan.phase, OpStatus::Skipped, "already present", false);
                     finish(sink, &mut summary, res);
                     continue;
@@ -99,6 +105,17 @@ pub fn run(
             OpStatus::SkippedBlocked => summary.skipped_blocked.push(comp.id.clone()),
             _ => {}
         }
+
+        // Wiring: apply after a successful install, revert after a successful
+        // remove (never on dry-run; never if the hook itself failed/was refused).
+        if !plan.dry_run && matches!(res.status, OpStatus::Ok | OpStatus::NoHook) {
+            match plan.phase {
+                Phase::Install => apply_wiring(comp, sink),
+                Phase::Remove => revert_wiring(comp, sink),
+                _ => {}
+            }
+        }
+
         finish(sink, &mut summary, res);
     }
 
@@ -123,6 +140,109 @@ fn mkres(comp: &Component, phase: Phase, status: OpStatus, msg: &str, dry_run: b
 fn finish(sink: &EventSink, summary: &mut RunSummary, res: OpResult) {
     sink.emit(Event::StepFinished { result: res.clone() });
     summary.results.push(res);
+}
+
+fn apply_wiring(comp: &Component, sink: &EventSink) {
+    if comp.wiring.shell_rc.is_empty() {
+        return;
+    }
+    match crate::wiring::apply(&comp.wiring) {
+        Ok(()) => sink.emit(Event::Log {
+            component: comp.id.clone(),
+            stream: Stream::Stdout,
+            line: "wiring applied (shell-rc reconciled)".into(),
+        }),
+        Err(e) => sink.emit(Event::Log {
+            component: comp.id.clone(),
+            stream: Stream::Stderr,
+            line: format!("wiring apply failed: {e}"),
+        }),
+    }
+}
+
+fn revert_wiring(comp: &Component, sink: &EventSink) {
+    if comp.wiring.shell_rc.is_empty() {
+        return;
+    }
+    let _ = crate::wiring::revert(&comp.wiring);
+    sink.emit(Event::Log {
+        component: comp.id.clone(),
+        stream: Stream::Stdout,
+        line: "wiring reverted (owned shell-rc block excised)".into(),
+    });
+}
+
+/// Pre-warm sudo once (so streamed, TTY-less hooks don't prompt) and keep the
+/// credential fresh for the duration of the run. Returns a guard that stops the
+/// keepalive on drop. No-op unless the run actually needs sudo.
+struct SudoKeepalive {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+impl Drop for SudoKeepalive {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+fn needs_sudo(order: &[&Component], phase: Phase) -> bool {
+    order.iter().any(|c| match c.hook(phase) {
+        Some(crate::component::Hook::Command { needs_sudo, .. }) => *needs_sudo,
+        Some(crate::component::Hook::ShippedScript { needs_sudo, .. }) => *needs_sudo,
+        Some(crate::component::Hook::Script { needs_sudo, script, .. }) => {
+            *needs_sudo || script.contains("sudo ")
+        }
+        None => false,
+    })
+}
+
+fn prewarm_sudo(order: &[&Component], phase: Phase, dry_run: bool, sink: &EventSink) -> Option<SudoKeepalive> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    if dry_run || !matches!(phase, Phase::Install | Phase::Fix | Phase::Remove) {
+        return None;
+    }
+    if !needs_sudo(order, phase) {
+        return None;
+    }
+    // `sudo -v` inherits this process's stdio: from a real terminal it prompts
+    // once; with no TTY it fails fast (and we warn) rather than hanging later.
+    let ok = std::process::Command::new("sudo")
+        .arg("-v")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        sink.emit(Event::Log {
+            component: "sudo".into(),
+            stream: Stream::Stderr,
+            line: "could not pre-authorize sudo (no TTY / not a sudoer?) — privileged steps will fail fast. Run from a real terminal."
+                .into(),
+        });
+        return None;
+    }
+    sink.emit(Event::Log {
+        component: "sudo".into(),
+        stream: Stream::Stdout,
+        line: "sudo pre-authorized; keepalive running for this run".into(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop2 = stop.clone();
+    let handle = std::thread::spawn(move || {
+        while !stop2.load(Ordering::Relaxed) {
+            let _ = std::process::Command::new("sudo").arg("-n").arg("true").status();
+            for _ in 0..50 {
+                if stop2.load(Ordering::Relaxed) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+    });
+    Some(SudoKeepalive { stop, handle: Some(handle) })
 }
 
 // ---------------------------------------------------------------------------

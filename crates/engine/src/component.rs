@@ -6,6 +6,7 @@
 //! wizard already proved out, wrapped (never rewritten). Adding a tool means
 //! adding a TOML entry, not recompiling. The one *behavioral* abstraction we keep
 //! is `HookRunner`, so tests can inject a dry-run/recording runner.
+use crate::event::EventSink;
 use crate::model::{OpResult, Wiring};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -127,6 +128,11 @@ impl Component {
 /// The one behavioral seam: lets the CLI/GUI/tests inject dry-run / recording
 /// runners. MUST be `Send + Sync` so a `Box<dyn HookRunner>` can live inside the
 /// `Send + Sync + 'static` Engine moved into the GUI worker thread.
+///
+/// `sink` lets a runner stream `Event::Log` lines live while a hook runs (the
+/// real `ProcessRunner` does this for action phases). Read-only/dry runners
+/// simply ignore it.
 pub trait HookRunner: Send + Sync {
-    fn run(&self, comp: &str, phase: Phase, hook: &Hook, dry_run: bool) -> OpResult;
+    fn run(&self, comp: &str, phase: Phase, hook: &Hook, dry_run: bool, sink: &EventSink)
+        -> OpResult;
 }

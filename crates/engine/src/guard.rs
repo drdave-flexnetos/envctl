@@ -33,7 +33,7 @@ fn check_one(g: &Guard, runner: &dyn HookRunner, ctx: &RunContext) -> Option<Str
         }
 
         Guard::HookSucceeds { hook } => {
-            let r = runner.run("<guard>", Phase::Detect, hook, false);
+            let r = runner.run("<guard>", Phase::Detect, hook, false, &crate::event::EventSink::null());
             if r.status == OpStatus::Ok {
                 None
             } else {
