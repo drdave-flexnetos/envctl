@@ -279,23 +279,28 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
         );
         return Ok(());
     }
-    let _ = std::fs::copy(&file, format!("{file}.bak.{}", now_epoch()));
-    let mut out = String::new();
-    let mut skip = false;
-    for line in text.lines() {
-        if line.contains(&begin) {
-            skip = true;
-            continue;
-        }
-        if line.contains(&end) {
-            skip = false;
-            continue;
-        }
-        if !skip {
-            out.push_str(line);
-            out.push('\n');
-        }
+    // AUDIT-FIX (minor): excise exactly the FIRST paired BEGIN..END span by byte
+    // index instead of a stateful line scan, which could delete user content
+    // between two BEGIN markers (or a foreign line containing the marker
+    // substring) or leave a half-block. If a second BEGIN marker is present we
+    // can't tell which span is ours, so bail and leave the file untouched.
+    let end_marker_idx = bi + text[bi..].find(&end).unwrap();
+    let mut span_end = end_marker_idx + end.len();
+    // also swallow the marker line's trailing newline so we don't leave a blank.
+    if text[span_end..].starts_with('\n') {
+        span_end += 1;
     }
+    if text[span_end..].contains(&begin) {
+        rep.fail(
+            "shell_rc",
+            format!("multiple envctl blocks '{}' in {file} — left untouched (excise by hand)", blk.marker),
+        );
+        return Ok(());
+    }
+    let _ = std::fs::copy(&file, format!("{file}.bak.{}", now_epoch()));
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..bi]);
+    out.push_str(&text[span_end..]);
     std::fs::write(&file, out)?;
     rep.note(format!("excised envctl-owned block '{}' from {file}", blk.marker));
     Ok(())
@@ -389,8 +394,24 @@ fn revert_systemd(u: &SystemdUnit) -> std::io::Result<()> {
 
 // ================================ apt repos =================================
 
+/// AUDIT-FIX (minor): a manifest-supplied `list_file` is interpolated into
+/// `{SOURCES_D}/{list_file}` for sudo tee/cp/rm. Reject anything that is not a
+/// single, plain path component so a `../` or absolute value can't escape
+/// /etc/apt/sources.list.d.
+fn check_list_file(list_file: &str) -> anyhow::Result<()> {
+    if list_file.is_empty()
+        || list_file.contains('/')
+        || list_file == "."
+        || list_file == ".."
+    {
+        anyhow::bail!("invalid apt list_file '{list_file}': must be a single path component");
+    }
+    Ok(())
+}
+
 /// Returns Ok(true) if it wrote anything (keyring or .list).
 fn apply_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> {
+    check_list_file(&r.list_file)?;
     let mut changed = false;
     if !Path::new(&r.keyring_path).exists() {
         if let Some(parent) = Path::new(&r.keyring_path).parent() {
@@ -442,6 +463,7 @@ fn apply_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> {
 /// Returns Ok(true) if it removed anything. Stops at the first failure BEFORE
 /// touching the keyring (the only broken state is key-gone+list-present).
 fn revert_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> {
+    check_list_file(&r.list_file)?; // audit fix (minor): keep rm/cp confined to SOURCES_D
     let mut changed = false;
     let list_path = format!("{SOURCES_D}/{}", r.list_file);
     if Path::new(&list_path).exists() {

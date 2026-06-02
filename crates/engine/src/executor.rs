@@ -84,6 +84,9 @@ pub fn run(
             let mut refuse: HashSet<String> = HashSet::new();
             for tid in &plan.targets {
                 for rdep in reg.reverse_dependents(tid) {
+                    // audit fix (minor): the reverse-dependent's Detect hook is run here
+                    // purely as a liveness PROBE to decide refuse/cascade — detect hooks
+                    // must therefore be side-effect-free (idempotent, read-only).
                     let live = run_phase(sink, rdep, Phase::Detect, runner, false, &ctx).status == OpStatus::Ok;
                     if live && !target_set.contains(&rdep.id) {
                         if plan.gates.cascade {
@@ -624,6 +627,11 @@ pub(crate) fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
     if let Some(r) = &spec.git_ref {
         strs.push(("git_ref", r.clone()));
     }
+    // audit fix (minor): verify_cmd is a user string too — guard it for '''/charset
+    // so the register docstring's "every user string is guarded" claim holds.
+    if let Some(v) = &spec.verify_cmd {
+        strs.push(("verify_cmd", v.clone()));
+    }
     for g in &spec.artifacts {
         strs.push(("artifact", g.clone()));
     }
@@ -744,7 +752,14 @@ fn write_dropin(manifest_dir: &Path, id: &str, toml_text: &str, sink: &EventSink
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(format!("{id}.toml"));
     if target.exists() {
-        let bak = dir.join(format!("{id}.toml.bak.{}", now_epoch()));
+        // audit fix (minor): nanosecond epoch + uniqueness loop so two backups taken
+        // within the same instant don't clobber each other (matches install.rs).
+        let mut bak = dir.join(format!("{id}.toml.bak.{}", now_epoch()));
+        let mut n = 0u32;
+        while bak.symlink_metadata().is_ok() {
+            n += 1;
+            bak = dir.join(format!("{id}.toml.bak.{}.{n}", now_epoch()));
+        }
         std::fs::copy(&target, &bak)?;
         sink.emit(Event::Log { component: id.into(), stream: Stream::Stdout, line: format!("backed up existing drop-in -> {}", bak.display()) });
     }
@@ -763,9 +778,11 @@ pub(crate) fn is_valid_slug(s: &str) -> bool {
     s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-fn now_epoch() -> u64 {
+// audit fix (minor): nanosecond resolution so two same-second backups produce
+// distinct `.bak.<n>` suffixes instead of colliding (matches install.rs/wiring.rs).
+fn now_epoch() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0)
 }

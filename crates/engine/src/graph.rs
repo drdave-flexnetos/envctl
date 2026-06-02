@@ -175,6 +175,9 @@ fn state_for<'a>(report: Option<&'a EnvReport>, id: &str) -> Option<&'a crate::m
 /// Graphviz DOT. With a report, nodes are colored by state
 /// (green=healthy, amber=detected-only, grey=absent) and a red border on drift.
 pub fn to_dot(reg: &Registry, report: Option<&EnvReport>) -> String {
+    // audit fix (minor): escape ids before emitting into DOT so a quote or
+    // backslash in an id can't produce broken output.
+    let esc = |id: &str| id.replace('\\', "\\\\").replace('"', "\\\"");
     let sev_color = |s: &crate::model::ComponentState| {
         if s.detected && s.healthy == Some(true) {
             "#2ea043" // green
@@ -190,7 +193,7 @@ pub fn to_dot(reg: &Registry, report: Option<&EnvReport>) -> String {
 
     let mut s = String::from("digraph envctl {\n  rankdir=LR;\n  node [shape=box, style=\"rounded,filled\", fontname=\"monospace\", fillcolor=\"#161b22\", color=\"#30363d\", fontcolor=\"#c9d1d9\"];\n  edge [color=\"#484f58\"];\n  bgcolor=\"#0d1117\";\n");
     for c in reg.ordered() {
-        let mut attrs = vec![format!("label=\"{}\"", c.id)];
+        let mut attrs = vec![format!("label=\"{}\"", esc(&c.id))];
         if let Some(st) = state_for(report, &c.id) {
             attrs.push(format!("color=\"{}\"", sev_color(st)));
             if matches!(drift_sev.get(c.id.as_str()), Some(Severity::High)) {
@@ -201,11 +204,11 @@ pub fn to_dot(reg: &Registry, report: Option<&EnvReport>) -> String {
         if c.id.starts_with("group-") || c.id.starts_with("meta-") {
             attrs.push("shape=octagon".into());
         }
-        s.push_str(&format!("  \"{}\" [{}];\n", c.id, attrs.join(", ")));
+        s.push_str(&format!("  \"{}\" [{}];\n", esc(&c.id), attrs.join(", ")));
     }
     for c in reg.ordered() {
         for dep in &c.requires {
-            s.push_str(&format!("  \"{}\" -> \"{}\";\n", dep, c.id));
+            s.push_str(&format!("  \"{}\" -> \"{}\";\n", esc(dep), esc(&c.id)));
         }
     }
     s.push_str("}\n");

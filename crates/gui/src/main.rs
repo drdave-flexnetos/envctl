@@ -191,6 +191,10 @@ impl EnvctlApp {
                         }
                         buf.push_back(g.util_pct as f32);
                     }
+                    // audit fix (minor): drop history for GPU indices no longer present
+                    // so stale sparklines don't linger or reappear.
+                    let live: HashSet<u32> = t.gpus.iter().map(|g| g.index).collect();
+                    self.util_history.retain(|k, _| live.contains(k));
                     self.telemetry = Some(t);
                 }
                 Event::GuardRefused { component, reason } => {

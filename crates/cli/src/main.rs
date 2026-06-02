@@ -24,10 +24,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Read-only inventory: host, GPU (works pre-driver), tools, components.
-    AutoDetect {
-        #[arg(long)]
-        only: Vec<String>,
-    },
+    // audit fix (minor): dropped unimplemented `--only` flag (engine.detect takes
+    // no filter) so an unsupported flag errors instead of silently no-oping.
+    AutoDetect {},
     /// Dependency-graph intelligence: summary, impact/blast-radius, paths, DOT/JSON.
     Graph {
         /// Focus on one component: install closure + reset --cascade blast-radius.
@@ -182,9 +181,14 @@ fn main() -> anyhow::Result<()> {
             } else if json {
                 println!("{}", serde_json::to_string_pretty(&graph::to_json(reg, live_report.as_ref()))?);
             } else if let Some(id) = impact {
-                print_impact(reg, &id);
+                // audit fix (minor): reflect unknown-component failure in exit code.
+                if !print_impact(reg, &id) {
+                    std::process::exit(2);
+                }
             } else if let Some(id) = why {
-                print_why(reg, &id);
+                if !print_why(reg, &id) {
+                    std::process::exit(2);
+                }
             } else {
                 print_graph_summary(reg);
             }
@@ -504,9 +508,14 @@ fn print_graph_summary(reg: &envctl_engine::Registry) {
     println!("\n  tip: envctl graph --impact <id> · --why <id> · --dot | dot -Tsvg -o g.svg · --json --live");
 }
 
-fn print_impact(reg: &envctl_engine::Registry, id: &str) {
+/// Returns false when the component is unknown (so the caller can set a
+/// non-zero exit code). audit fix (minor).
+fn print_impact(reg: &envctl_engine::Registry, id: &str) -> bool {
     match envctl_engine::graph::impact(reg, id) {
-        None => eprintln!("envctl: unknown component '{id}'"),
+        None => {
+            eprintln!("envctl: unknown component '{id}'");
+            false
+        }
         Some(im) => {
             println!("\x1b[1;36m── impact of '{id}' ──\x1b[0m");
             println!("  direct requires:     {}", join_or_none(&im.requires));
@@ -515,20 +524,23 @@ fn print_impact(reg: &envctl_engine::Registry, id: &str) {
             println!("    {}", im.install_closure.join("  →  "));
             println!("\x1b[1;33m  reset {id} --cascade\x1b[0m also removes ({}):", im.cascade_removes.len());
             println!("    {}", join_or_none(&im.cascade_removes));
+            true
         }
     }
 }
 
-fn print_why(reg: &envctl_engine::Registry, id: &str) {
+/// Returns false when the component is unknown / has no paths. audit fix (minor).
+fn print_why(reg: &envctl_engine::Registry, id: &str) -> bool {
     let paths = envctl_engine::graph::dependency_paths(reg, id);
     if paths.is_empty() {
         eprintln!("envctl: unknown component '{id}' (or it has no paths)");
-        return;
+        return false;
     }
     println!("\x1b[1;36m── why '{id}' is needed (root → {id} paths) ──\x1b[0m");
     for p in paths {
         println!("  {}", p.join("  →  "));
     }
+    true
 }
 
 fn join_or_none(v: &[String]) -> String {

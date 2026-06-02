@@ -35,7 +35,13 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
                         || !w.alternatives.is_empty()
                 })
                 .unwrap_or(false);
-            if installable {
+            // AUDIT-FIX (minor #16): when the whole-box DriverInactive block
+            // below will already emit nvidia-open (GPUs present, driver not
+            // live), suppress the generic Missing entry here so nvidia-open
+            // appears exactly once with the driver-focused verb.
+            let driver_inactive_owns =
+                c.id == "nvidia-open" && report.gpu_present && !report.driver_loaded;
+            if installable && !driver_inactive_owns {
                 items.push(DriftItem {
                     component: c.id.clone(),
                     kind: DriftKind::Missing,

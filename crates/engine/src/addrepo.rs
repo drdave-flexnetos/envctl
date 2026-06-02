@@ -129,6 +129,12 @@ pub fn run_pipeline(
             artifact_globs: if spec.artifacts.is_empty() { vec!["target/release/*".into()] } else { spec.artifacts.clone() },
         }
     } else {
+        // audit fix (minor): in preview, detect/locate run against the on-disk clone.
+        // If we did NOT just fetch (preview never clones), a pre-existing clone from a
+        // prior run may be stale — label the results so they aren't read as a fresh fetch.
+        if preview {
+            sink.emit(plainlog(id, "[preview — detect/locate from existing on-disk clone, may be stale]".into()));
+        }
         match detect(&clone_dir, spec) {
             Ok(p) => {
                 let sys = p.system;
@@ -215,7 +221,19 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
     let clone_dir = repos_root.join(&spec.id);
 
     // acquire with INHERITED stdio so the user sees the clone (and any prompts).
-    if !clone_dir.join(".git").is_dir() {
+    if clone_dir.join(".git").is_dir() {
+        // audit fix (minor): on reuse of a remote clone, verify origin matches the
+        // requested URL (same gate as acquire()) so a foreign pre-existing clone at
+        // this id can't drop the agent into untrusted code. Local clones have no
+        // meaningful origin URL to compare, so this only applies when local_path is None.
+        if spec.local_path.is_none() {
+            let origin = Command::new("git").arg("-C").arg(&clone_dir).args(["remote", "get-url", "origin"]).output().ok()
+                .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            if origin.as_deref() != Some(spec.git_url.as_str()) {
+                anyhow::bail!("refusing to reuse clone {}: origin is {:?}, not {}", clone_dir.display(), origin, spec.git_url);
+            }
+        }
+    } else {
         let mut c = if spec.local_path.is_some() {
             let mut c = Command::new("git");
             c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"]);
@@ -414,8 +432,14 @@ fn locate_artifacts(clone_dir: &Path, spec: &AddRepoSpec, plan: &BuildPlan, prev
         }
     }
     if found.is_empty() && preview {
+        // audit fix (minor): only predict a concrete artifact when the first glob is a
+        // literal path (no glob metacharacters). An unexpanded pattern like
+        // `target/release/*` must NOT be fabricated into a PathBuf — its bogus `*`
+        // stem would otherwise flow through shape_installs into the summary.
         if let Some(g) = globs.first() {
-            found.push(clone_dir.join(g));
+            if !g.contains(['*', '?', '[']) {
+                found.push(clone_dir.join(g));
+            }
         }
     }
     found.sort();
@@ -508,7 +532,15 @@ fn wait_timeout(child: &mut Child, dur: Duration, pid: u32) -> (Option<i32>, boo
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            Err(_) => return (None, false, false),
+            // audit fix (minor): a try_wait error must not orphan the still-running
+            // setsid group — mirror the timeout branch's cleanup before returning.
+            Err(_) => {
+                kill_group(pid);
+                let _ = child.kill();
+                let _ = child.wait();
+                // surface as timed_out=true so the caller reports a kill, not a clean exit.
+                return (None, false, true);
+            }
         }
     }
 }
@@ -516,7 +548,12 @@ fn wait_timeout(child: &mut Child, dur: Duration, pid: u32) -> (Option<i32>, boo
 /// Kill the child's whole process group (it is the group leader via setsid).
 fn kill_group(pid: u32) {
     if let Some(p) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process_group(p, rustix::process::Signal::Kill);
+        // audit fix (minor): if the group kill fails (e.g. setsid in pre_exec failed
+        // so the child never became a group leader), fall back to killing the child
+        // pid directly rather than silently leaving a wedged subtree.
+        if rustix::process::kill_process_group(p, rustix::process::Signal::Kill).is_err() {
+            let _ = rustix::process::kill_process(p, rustix::process::Signal::Kill);
+        }
     }
 }
 

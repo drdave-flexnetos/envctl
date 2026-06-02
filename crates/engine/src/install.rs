@@ -11,6 +11,7 @@
 #![cfg(unix)]
 use crate::event::{Event, EventSink, Stream};
 use crate::model::Wiring;
+use std::collections::HashSet;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
@@ -218,8 +219,21 @@ fn shadows_system(name: &str) -> bool {
             if p == lb_raw || p_canon == lb {
                 continue;
             }
-            if p.join(name).exists() {
-                return true;
+            // audit fix (minor): `exists()` follows symlinks (missing a dangling-link
+            // shadow) and matches any entry incl. directories/non-executables (false
+            // positive). Use symlink_metadata() to see the entry itself, then only
+            // count it as a shadow when it's a non-directory carrying an exec bit.
+            let candidate = p.join(name);
+            if let Ok(md) = candidate.symlink_metadata() {
+                use std::os::unix::fs::PermissionsExt;
+                let is_dir = md.file_type().is_dir();
+                let exec = md.permissions().mode() & 0o111 != 0;
+                // A dangling symlink (broken target) still shadows by name; for it the
+                // link's own metadata is what we inspect, so treat any non-dir symlink
+                // as a shadow regardless of exec bits on the (absent) target.
+                if md.file_type().is_symlink() || (!is_dir && exec) {
+                    return true;
+                }
             }
         }
     }
@@ -245,7 +259,11 @@ fn is_managed_symlink(target: &Path, slug: &str) -> bool {
 fn synth_wiring(plan: &InstallPlan) -> Wiring {
     let mut path_entries: Vec<String> = vec!["~/.local/bin".into()];
     path_entries.extend(plan.extra_path_entries.iter().cloned());
-    path_entries.dedup();
+    // audit fix (minor): order-preserving dedup via a seen-set — `dedup()` only
+    // collapses ADJACENT duplicates and the vec isn't sorted, so a non-adjacent
+    // duplicate PATH entry would otherwise survive into the owned export block.
+    let mut seen = HashSet::new();
+    path_entries.retain(|e| seen.insert(e.clone()));
     Wiring { path_entries, ..Default::default() }
 }
 

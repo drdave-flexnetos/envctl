@@ -54,9 +54,12 @@ impl HookRunner for ProcessRunner {
 
         let log = Arc::new(Mutex::new(if streaming { open_run_log() } else { None }));
         let tail = Arc::new(Mutex::new(Vec::<String>::new())); // last stderr lines for the message
+        // Audit fix (minor #27): also keep a stdout tail so probes that echo their
+        // diagnostic to stdout then exit 1 don't yield an empty failure message.
+        let out_tail = Arc::new(Mutex::new(Vec::<String>::new()));
 
         let h_out = child.stdout.take().map(|r| {
-            pump(r, comp.to_string(), Stream::Stdout, streaming, sink.clone(), log.clone(), None)
+            pump(r, comp.to_string(), Stream::Stdout, streaming, sink.clone(), log.clone(), Some(out_tail.clone()))
         });
         let h_err = child.stderr.take().map(|r| {
             pump(r, comp.to_string(), Stream::Stderr, streaming, sink.clone(), log.clone(), Some(tail.clone()))
@@ -71,12 +74,23 @@ impl HookRunner for ProcessRunner {
         }
 
         if timed_out {
-            return mk(comp, phase, OpStatus::Failed, code, &format!("timed out after {}s", timeout_for(phase).as_secs()));
+            // Audit fix (minor #24): after SIGKILL the wait code is None, which is
+            // indistinguishable from a spawn/internal error. Synthesize the
+            // conventional timeout exit code (124) so JSON consumers can tell a
+            // timeout from a did-not-run, regardless of what `code` carries.
+            let _ = code;
+            return mk(comp, phase, OpStatus::Failed, Some(124), &format!("timed out after {}s", timeout_for(phase).as_secs()));
         }
         if success {
             mk(comp, phase, OpStatus::Ok, code, "")
         } else {
-            let msg = tail.lock().map(|v| v.join("\n")).unwrap_or_default();
+            let mut msg = tail.lock().map(|v| v.join("\n")).unwrap_or_default();
+            // Audit fix (minor #27): fall back to the stdout tail when stderr was
+            // empty (probe wrote its diagnostic to stdout) so the CLI never shows a
+            // failure with no explanation.
+            if msg.is_empty() {
+                msg = out_tail.lock().map(|v| v.join("\n")).unwrap_or_default();
+            }
             mk(comp, phase, OpStatus::Failed, code, truncate(&msg, 4000))
         }
     }
@@ -128,7 +142,18 @@ fn pump<R: Read + Send + 'static>(
                 sink.emit(Event::Log { component: comp.clone(), stream, line: line.clone() });
                 if let Ok(mut g) = log.lock() {
                     if let Some(f) = g.as_mut() {
-                        let _ = writeln!(f, "[{comp}] {line}");
+                        // Audit fix (minor #26): on the first tee write error, emit one
+                        // diagnostic and drop the fd so we don't silently retry a dead
+                        // fd per line for the rest of a long failing run. UI streaming
+                        // above is unaffected.
+                        if writeln!(f, "[{comp}] {line}").is_err() {
+                            sink.emit(Event::Log {
+                                component: comp.clone(),
+                                stream: Stream::Stderr,
+                                line: "envctl: run-log write failed; stopping log tee".to_string(),
+                            });
+                            *g = None;
+                        }
                     }
                 }
             }
