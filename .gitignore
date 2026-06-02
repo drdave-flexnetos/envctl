@@ -3,3 +3,6 @@ Cargo.lock.bak
 **/*.rs.bk
 *.swp
 .DS_Store
+
+/envctl.lock
+manifest/envctl.lock

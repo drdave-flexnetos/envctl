@@ -185,6 +185,39 @@ fn manifest_phase3_wiring_loads() {
 }
 
 #[test]
+fn dropin_filters_injection_in_relinks() {
+    use envctl_engine::register::{synth_dropin, RegisterSpec};
+    let spec = RegisterSpec {
+        id: "x".into(),
+        slug: "x".into(),
+        display_name: "x".into(),
+        source: "https://x/y".into(),
+        git_ref: None,
+        resolved_sha: "abc123".into(),
+        strategy_tag: "as-is".into(),
+        build_system: "cargo".into(),
+        build_cmd: "cargo build --release".into(),
+        transform: None,
+        primary_bin: Some("x".into()),
+        verify_cmd: None,
+        // an unsafe install-name and an unsafe clone-rel path must be filtered out
+        relinks: vec![
+            ("evil$(touch /tmp/pwn)".into(), "target/release/x".into()),
+            ("ok".into(), "bad\"$(x)".into()),
+            ("good".into(), "target/release/good".into()),
+        ],
+        installed_targets: vec![],
+    };
+    let toml = synth_dropin(&spec);
+    assert!(!toml.contains("touch /tmp/pwn"), "unsafe relink NAME must be filtered");
+    assert!(!toml.contains("bad\"$(x)"), "unsafe relink REL must be filtered");
+    assert!(toml.contains("ln -sfn \"$SRC/target/release/good\" \"$HOME/.local/bin/good\""), "safe relink kept");
+    // and the generated TOML still parses (one component with the expected hooks)
+    let reg_ok = toml.contains("[[component]]") && toml.contains("[component.install]");
+    assert!(reg_ok);
+}
+
+#[test]
 fn guard_verify_path_uuid_fail_closed() {
     let ctx = RunContext::default();
     // missing path -> refuse

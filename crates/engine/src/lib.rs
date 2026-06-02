@@ -12,6 +12,7 @@ pub mod runner; // ProcessRunner (real) + DryRunRunner impls of HookRunner
 pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which probes
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
 pub mod graph; // graph intelligence over the component dependency DAG
+pub mod lock; // envctl.lock — content-hashed manifest-of-record + CI gate
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
 pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
 pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
@@ -86,6 +87,11 @@ impl Engine {
 
     pub fn registry(&self) -> &Registry {
         &self.inner.registry
+    }
+
+    /// The manifest directory (where `envctl.lock` + `components.d/` live).
+    pub fn manifest_dir(&self) -> &std::path::Path {
+        &self.inner.manifest_dir
     }
 
     /// THE shared mutating entrypoint (install/reset/auto-fix). Best-effort:

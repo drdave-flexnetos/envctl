@@ -43,6 +43,13 @@ enum Cmd {
         #[arg(long)]
         live: bool,
     },
+    /// Write/verify envctl.lock — a content hash of every component for reproducible
+    /// installs + a CI gate. No flags = (re)write the lock; --check = verify (exit 1 on drift).
+    Lock {
+        /// Verify the lock matches the manifest; exit nonzero on drift (CI gate).
+        #[arg(long)]
+        check: bool,
+    },
     /// Install components (additive + idempotent; --dry-run to preview).
     Install {
         targets: Vec<String>,
@@ -181,6 +188,35 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Cmd::Lock { check } => {
+            use envctl_engine::lock;
+            let reg = engine.registry();
+            let dir = engine.manifest_dir();
+            if check {
+                let locked = lock::LockFile::load(dir)?;
+                let drift = lock::diff(reg, &locked);
+                if json {
+                    let items: Vec<_> = drift.iter().map(|(id, k)| serde_json::json!({"component": id, "drift": k})).collect();
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({"locked": !drift.is_empty(), "drift": items}))?);
+                } else if drift.is_empty() {
+                    println!("\x1b[1;32m✓ envctl.lock matches the manifest ({} components)\x1b[0m", reg.len());
+                } else {
+                    println!("\x1b[1;33m✗ lock drift ({}): manifest changed without re-locking\x1b[0m", drift.len());
+                    for (id, k) in &drift {
+                        println!("  {:?}  {id}", k);
+                    }
+                    println!("  run `envctl lock` to update.");
+                }
+                if !drift.is_empty() {
+                    std::process::exit(1);
+                }
+            } else {
+                let mut lf = lock::generate(reg);
+                lf.save(dir)?;
+                println!("wrote {} ({} components)", lock::lock_path(dir).display(), reg.len());
+            }
+            Ok(())
+        }
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => handle_connect(engine, other, json),
@@ -239,7 +275,7 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!(e))?;
                 eng.add_repo(spec, dry_run, &sink)?.ok()
             }
-            Cmd::AutoDetect { .. } | Cmd::Graph { .. } => unreachable!("handled in main"),
+            Cmd::AutoDetect { .. } | Cmd::Graph { .. } | Cmd::Lock { .. } => unreachable!("handled in main"),
         };
         Ok(ok) // sink drops here -> the main-thread rx.iter() terminates cleanly
     });
