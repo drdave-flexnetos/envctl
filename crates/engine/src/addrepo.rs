@@ -187,6 +187,11 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
     if euid_is_root() {
         anyhow::bail!("refusing to clone/agent as root (euid 0) — run as your user");
     }
+    // AUDIT-FIX (blocker): the interactive path MUST run the same gate as
+    // executor::add_repo before any `repos_root.join(&spec.id)` or git call —
+    // otherwise `--id ../../etc/x` escapes the 0700 sandbox and a leading-dash
+    // --local/--git-ref becomes git option-injection.
+    crate::executor::validate_add_repo_spec(spec)?;
     let (agent, prompt) = match &spec.strategy {
         BuildStrategy::Refactor { refactor: Refactor::Ai { agent, goal, instruction } } => {
             (resolve_agent(*agent), build_ai_prompt(*goal, instruction.as_deref()))
@@ -214,7 +219,7 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
         let mut c = if spec.local_path.is_some() {
             let mut c = Command::new("git");
             c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"]);
-            c.arg(spec.local_path.as_ref().unwrap());
+            c.arg("--").arg(spec.local_path.as_ref().unwrap()); // `--` => no git-arg injection
             c
         } else {
             let mut c = git_hardened();

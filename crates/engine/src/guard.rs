@@ -129,7 +129,19 @@ fn uuid_of(dev: &str) -> Option<String> {
     }
 }
 
-/// `findmnt -no SOURCE /` → the live root device.
+/// findmnt's SOURCE column carries a btrfs-subvolume / bind-mount suffix, e.g.
+/// `/dev/nvme0n1p2[/@]`. Strip it so the bare device can be fed to blkid and
+/// compared against `resolve_dev` output. (AUDIT-FIX blocker: without this the
+/// live-root guard failed OPEN on every btrfs/bind root — blkid errored on the
+/// suffix → live_root_uuid None → both checks skipped.)
+fn strip_subvol(src: &str) -> &str {
+    match src.find('[') {
+        Some(i) => src[..i].trim_end(),
+        None => src,
+    }
+}
+
+/// `findmnt -no SOURCE /` → the live root device (subvol suffix stripped).
 fn live_root_source() -> Option<String> {
     let out = Command::new("findmnt")
         .args(["-no", "SOURCE", "/"])
@@ -138,11 +150,12 @@ fn live_root_source() -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let s = String::from_utf8_lossy(&out.stdout);
+    let s = strip_subvol(s.trim());
     if s.is_empty() {
         None
     } else {
-        Some(s)
+        Some(s.to_string())
     }
 }
 
@@ -171,8 +184,19 @@ fn uuid_is_mounted(uuid: &str) -> bool {
     false
 }
 
-/// Resolve the live root UUID once, for `RunContext` (findmnt / → blkid UUID).
+/// Resolve the live root UUID once, for `RunContext`. Prefer findmnt's own UUID
+/// column (robust on btrfs/bind/LUKS where SOURCE is decorated or a mapper node);
+/// fall back to SOURCE→blkid with the subvol suffix stripped. (AUDIT-FIX blocker:
+/// the old SOURCE→blkid-only path returned None on btrfs, disabling the guard.)
 pub fn resolve_live_root_uuid() -> Option<String> {
+    if let Ok(out) = Command::new("findmnt").args(["-no", "UUID", "/"]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return Some(s);
+            }
+        }
+    }
     live_root_source().and_then(|dev| uuid_of(&dev))
 }
 
@@ -216,8 +240,19 @@ pub fn verify_path_uuid(path: &str, uuid: &str, ctx: &RunContext) -> Option<Stri
     }
 }
 
-/// `findmnt -no SOURCE --target <path>` → device, then its UUID.
+/// The fs UUID carrying `path`. Prefer findmnt's UUID column (robust on
+/// btrfs/bind/LUKS); fall back to SOURCE→blkid with the subvol suffix stripped.
+/// (AUDIT-FIX major: SOURCE→blkid-only returned None on btrfs because the column
+/// carries a `[/subvol]` suffix that blkid rejects → purge wrongly refused.)
 fn mount_uuid_of(path: &str) -> Option<String> {
+    if let Ok(out) = Command::new("findmnt").args(["-no", "UUID", "--target", path]).output() {
+        if out.status.success() {
+            let u = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !u.is_empty() {
+                return Some(u);
+            }
+        }
+    }
     let out = Command::new("findmnt")
         .args(["-no", "SOURCE", "--target", path])
         .output()
@@ -225,10 +260,24 @@ fn mount_uuid_of(path: &str) -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    let dev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let dev = String::from_utf8_lossy(&out.stdout);
+    let dev = strip_subvol(dev.trim());
     if dev.is_empty() {
         None
     } else {
-        uuid_of(&dev)
+        uuid_of(dev)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_subvol;
+    #[test]
+    fn strip_subvol_handles_btrfs_and_bind_suffixes() {
+        assert_eq!(strip_subvol("/dev/nvme0n1p2"), "/dev/nvme0n1p2");
+        assert_eq!(strip_subvol("/dev/nvme0n1p2[/@]"), "/dev/nvme0n1p2");
+        assert_eq!(strip_subvol("/dev/sda1[/@home]"), "/dev/sda1");
+        // a trailing space before the bracket is trimmed
+        assert_eq!(strip_subvol("/dev/sda1 [/@]"), "/dev/sda1");
     }
 }

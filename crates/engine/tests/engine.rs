@@ -311,6 +311,120 @@ fn guard_verify_path_uuid_fail_closed() {
     assert!(envctl_engine::guard::verify_path_uuid("/", "deadbeef-0000-0000", &ctx).is_some());
 }
 
+#[test]
+fn refused_target_that_is_a_survivors_prereq_is_not_removed() {
+    // FOCUS #0 regression: targets {clib, capp} with capp->clib (capp requires
+    // clib) and an external LIVE cdep->clib. clib is refused (cdep depends on it,
+    // outside the set, no --cascade). Because clib is ALSO in capp's closure, the
+    // old code re-added it to `keep` and removed it anyway — orphaning cdep. The
+    // fix subtracts refused ids from `keep`: clib must survive, only capp removed.
+    use envctl_engine::{Engine, EventSink, HookRunner, OpResult, OpStatus, Phase, RunPlan};
+    use std::collections::HashSet;
+
+    struct LiveRunner {
+        live: HashSet<String>,
+    }
+    impl HookRunner for LiveRunner {
+        fn run(&self, comp: &str, phase: Phase, _h: &envctl_engine::Hook, _d: bool, _s: &EventSink) -> OpResult {
+            let status = if phase == Phase::Detect && self.live.contains(comp) { OpStatus::Ok } else { OpStatus::DryRun };
+            OpResult { component: comp.into(), phase, status, exit_code: None, duration_ms: 0, message: String::new(), dry_run: false }
+        }
+    }
+
+    let dir = std::env::temp_dir().join(format!("envctl-reset-prereq-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("chain.toml"),
+        r#"
+[[component]]
+id = "clib"
+name = "clib"
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "capp"
+name = "capp"
+requires = ["clib"]
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+
+[[component]]
+id = "cdep"
+name = "cdep"
+requires = ["clib"]
+[component.detect]
+kind = "command"
+command = "true"
+[component.remove]
+kind = "command"
+command = "true"
+"#,
+    )
+    .unwrap();
+
+    // cdep is the live external reverse-dependent of clib.
+    let runner = LiveRunner { live: HashSet::from(["cdep".to_string()]) };
+    let eng = Engine::with_runner(dir.clone(), Box::new(runner)).unwrap();
+    let sink = EventSink::null();
+    let summary = eng
+        .run(RunPlan::new(Phase::Remove, vec!["clib".to_string(), "capp".to_string()], false), &sink)
+        .unwrap();
+
+    assert!(summary.refused.iter().any(|x| x == "clib"), "clib must be refused: {:?}", summary.refused);
+    // a component is "removed" iff its Remove hook actually ran (DryRun/Ok/etc.);
+    // a Refused marker is NOT a removal.
+    let was_removed = |id: &str| {
+        summary.results.iter().any(|r| {
+            r.component == id
+                && r.phase == Phase::Remove
+                && matches!(r.status, OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed)
+        })
+    };
+    assert!(!was_removed("clib"), "BLOCKER REGRESSION: refused clib removed via capp's closure: {:?}", summary.results);
+    assert!(was_removed("capp"), "capp (a surviving target) should still be removed: {:?}", summary.results);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn add_repo_paths_reject_traversal_and_option_injection() {
+    // Both the build path (Engine::add_repo) and the interactive path
+    // (Engine::connect_repo) must run the SAME validation gate BEFORE any path
+    // join or git call — AUDIT-FIX for the --connect bypass.
+    use envctl_engine::{AddRepoSpec, Engine, EventSink};
+    let eng = Engine::with_runner(manifest_dir(), Box::new(envctl_engine::DryRunRunner)).unwrap();
+    let sink = EventSink::null();
+
+    // 1. id path-traversal is rejected on the build path.
+    let bad_id = AddRepoSpec { id: "../../etc/evil".into(), git_url: "https://example.com/x".into(), ..Default::default() };
+    let e = eng.add_repo(bad_id.clone(), true, &sink).unwrap_err().to_string();
+    assert!(e.contains("invalid component id"), "build path must reject traversal id: {e}");
+
+    // 2. …and on the interactive connect path (the bug: it used to skip this).
+    let e = eng.connect_repo(&bad_id).unwrap_err().to_string();
+    assert!(e.contains("invalid component id"), "connect path must reject traversal id: {e}");
+
+    // 3. leading-dash git_ref (git option-injection) is rejected.
+    let bad_ref = AddRepoSpec {
+        id: "okname".into(),
+        git_url: "https://example.com/x".into(),
+        git_ref: Some("--upload-pack=evil".into()),
+        ..Default::default()
+    };
+    let e = eng.connect_repo(&bad_ref).unwrap_err().to_string();
+    assert!(e.contains("--git-ref") || e.contains("git-ref"), "connect path must reject dash ref: {e}");
+}
+
 // --- graph intelligence over the real manifest DAG ---------------------------
 #[test]
 fn graph_analyze_real_manifest() {

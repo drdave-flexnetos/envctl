@@ -109,6 +109,14 @@ pub fn run(
                     }
                 }
                 keep.extend(fold.iter().cloned());
+                // AUDIT-FIX (blocker, FOCUS #0): a refused target must NEVER be
+                // removed — even if it's pulled back into `keep` as a prerequisite
+                // in a SURVIVING target's closure. Removing it would destroy the
+                // live reverse-dependent the refusal exists to protect. Keeping the
+                // prereq installed while its dependent is removed is always safe.
+                for r in &refuse {
+                    keep.remove(r);
+                }
                 order = reg.ordered().filter(|c| keep.contains(&c.id)).collect();
                 order.reverse();
             }
@@ -478,13 +486,10 @@ pub fn add_repo(
     sink: &EventSink,
 ) -> anyhow::Result<RunSummary> {
     let id = spec.id.trim().to_string();
-    if !is_valid_slug(&id) {
-        anyhow::bail!("invalid component id '{id}': start [a-z0-9], then [a-z0-9._-] (no spaces/slashes)");
-    }
+    validate_add_repo_spec(&spec)?; // shared gate: id slug + ''' + leading-dash guard
     if reg.get(&id).is_some() {
         anyhow::bail!("component id '{id}' already exists — refusing to shadow it (pick another --id)");
     }
-    validate_spec_strings(&spec)?; // ''' + metachar guard across ALL user strings
 
     // Run the staged pipeline (acquire → [transform] → detect → build → locate →
     // shape). It refuses as root, gates real work behind spec.allow_build, and
@@ -548,7 +553,21 @@ use crate::install::{ArtifactPlan, InstallPlan};
 use crate::model::{BuildStrategy, Refactor};
 use crate::register::RegisterSpec;
 
-fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
+/// The SINGLE add-repo gate, shared by every entry point (`executor::add_repo`
+/// AND `addrepo::connect_agent`). Validates the id slug (no `/`, `..`, leading
+/// dash, ≤64 chars) and every user-supplied string (leading-dash option
+/// injection, `'''` manifest break, ref shape). Call this BEFORE any path join
+/// or git invocation. (AUDIT-FIX blocker: the `--connect` path used to skip both
+/// of these, allowing `--id ../../etc/x` traversal and git option-injection.)
+pub(crate) fn validate_add_repo_spec(spec: &AddRepoSpec) -> anyhow::Result<()> {
+    let id = spec.id.trim();
+    if !is_valid_slug(id) {
+        anyhow::bail!("invalid component id '{id}': start [a-z0-9], then [a-z0-9._-] (no spaces/slashes/..)");
+    }
+    validate_spec_strings(spec)
+}
+
+pub(crate) fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
     let mut strs: Vec<(&str, String)> = vec![
         ("git_url", spec.git_url.clone()),
         ("build_cmd", spec.build_cmd.clone()),
@@ -686,7 +705,7 @@ fn write_dropin(manifest_dir: &Path, id: &str, toml_text: &str, sink: &EventSink
     Ok(())
 }
 
-fn is_valid_slug(s: &str) -> bool {
+pub(crate) fn is_valid_slug(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) if c.is_ascii_alphanumeric() => {}

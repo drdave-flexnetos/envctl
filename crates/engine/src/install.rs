@@ -75,6 +75,7 @@ pub fn install_and_wire(plan: &InstallPlan, force: bool, dry_run: bool, sink: &E
                 rep.note(format!("left foreign file at {t} intact (not envctl-managed) — pass --force to back up + replace"));
             }
             Err(InstallErr::Missing(s)) => rep.fail("artifact", format!("source not found: {s}")),
+            Err(InstallErr::Unsafe(n)) => rep.fail("artifact", format!("refusing unsafe install name '{n}': must be a single path component (no '/', '..')")),
             Err(InstallErr::Io(e)) => rep.fail("artifact", e),
         }
     }
@@ -108,6 +109,7 @@ enum InstallErr {
     Shadow(String),
     Foreign(String),
     Missing(String),
+    Unsafe(String),
     Io(std::io::Error),
 }
 impl From<std::io::Error> for InstallErr {
@@ -116,7 +118,26 @@ impl From<std::io::Error> for InstallErr {
     }
 }
 
+/// An install name must be exactly ONE path component — no separators, no `.`/`..`,
+/// non-empty — so `local_bin().join(name)` can never escape ~/.local/bin.
+fn is_safe_install_name(name: &str) -> bool {
+    use std::path::Component;
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    let mut comps = std::path::Path::new(name).components();
+    matches!((comps.next(), comps.next()), (Some(Component::Normal(_)), None))
+}
+
 fn install_artifact(plan: &InstallPlan, a: &ArtifactPlan, force: bool, dry_run: bool) -> Result<Option<String>, InstallErr> {
+    // AUDIT-FIX (blocker): the install name lands in `local_bin().join(name)`. A
+    // rename/cherry-pick name like `../../.config/evil` would plant (or, with
+    // --force, overwrite) a managed symlink OUTSIDE ~/.local/bin. Refuse anything
+    // that is not exactly one safe path component, at the sink — independent of
+    // upstream slug validation.
+    if !is_safe_install_name(&a.install_name) {
+        return Err(InstallErr::Unsafe(a.install_name.clone()));
+    }
     if !a.source.exists() {
         return Err(InstallErr::Missing(a.source.display().to_string()));
     }
@@ -235,5 +256,19 @@ mod tests {
     fn managed_symlink_needs_canonical_containment() {
         // a path that doesn't exist is never ours
         assert!(!is_managed_symlink(Path::new("/no/such/envctl/link"), "slug"));
+    }
+    #[test]
+    fn install_name_must_be_a_single_component() {
+        // safe: ordinary bin names
+        assert!(is_safe_install_name("ripgrep"));
+        assert!(is_safe_install_name("my-tool_v2.bin"));
+        // unsafe: traversal / separators / dot-dirs / empty — would escape ~/.local/bin
+        assert!(!is_safe_install_name("../evil"));
+        assert!(!is_safe_install_name("../../.config/evil"));
+        assert!(!is_safe_install_name("sub/dir"));
+        assert!(!is_safe_install_name(".."));
+        assert!(!is_safe_install_name("."));
+        assert!(!is_safe_install_name(""));
+        assert!(!is_safe_install_name("/abs"));
     }
 }
