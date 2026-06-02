@@ -95,3 +95,19 @@ install (`--force` to clobber, backed up); structurally-confined AI agent
 **Phase 5 — GUI/telemetry:** dedicated `TelemetryControl` sampler thread (cadence
 backoff off-Dashboard/unfocused, `SampleTelemetry` is a wake-nudge); DriverNotActive
 card; strategy-aware Add-Repo screen; (logs/settings polish ongoing).
+
+---
+
+## ✅ Post-v1 hardening + kasetto adoptions (graph · lock · doctor · audit)
+
+- **Graph intelligence** (`graph.rs` + `envctl graph`): DAG summary, `--impact`
+  blast-radius, `--why` paths, `--dot`/`--json`, + a GUI Graph tab.
+- **Interactive connect** (`add-repo --connect`): supervised agent session in the clone.
+- **`envctl.lock`** (`lock.rs` + `envctl lock`/`--check`): content-hashed
+  manifest-of-record (FNV-1a over canonical JSON, no deps) + a CI gate — kasetto §2.
+- **`doctor`**: read-only writability/toolchain/sudo/UEFI/GPU diagnostics — kasetto §14.
+- **Verified audit**: a 42-agent swarm found 14 real bugs (3 blockers: reset
+  orphan-prereq removal, unterminated-shell-rc excision to EOF, drop-in shell
+  injection); all fixed + regression-tested. See `docs/KASETTO-FEATURES.md` for the
+  remaining ranked adoptions (sync modes `--locked/--update`, multi-host source
+  resolver, `extends` composition, universal `--json`, completions [needs network]).

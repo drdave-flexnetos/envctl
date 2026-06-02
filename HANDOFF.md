@@ -11,7 +11,11 @@ is a TOML **component** whose hooks wrap the proven Desktop bash kit. **All six
 roadmap phases are complete + dogfooded**, plus graph intelligence and an
 interactive add-repo "connect" mode.
 
-Verbs: `auto-detect · install · reset · auto-fix · add-repo · graph`.
+Verbs: `auto-detect · install · reset · auto-fix · add-repo · graph · lock · doctor`.
+
+A 42-agent **verified audit** found 14 real bugs (3 blockers) — all fixed +
+regression-tested (see `git log`). A content-hashed **`envctl.lock`** (CI gate)
+and a **`doctor`** diagnostic were adopted from the kasetto catalog.
 
 ## Status (commits on `master`)
 ```
@@ -53,6 +57,15 @@ cargo run -p envctl -- graph --impact bun       # blast radius (cascade removes 
 cargo run -p envctl -- graph --why cuda-oxide   # root->id dependency paths
 cargo run -p envctl -- graph --dot | dot -Tsvg -o /tmp/envctl-graph.svg  # if graphviz
 cargo run -p envctl -- graph --json --live | head
+
+# 3b. lock — content-hashed manifest-of-record + CI gate
+cargo run -p envctl -- lock                     # writes envctl.lock (44 components)
+cargo run -p envctl -- lock --check             # exit 0 = matches; exit 1 = drift
+cargo run -p envctl -- lock --check --json
+
+# 3c. doctor — read-only health (writability, toolchains, sudo, UEFI, GPU)
+cargo run -p envctl -- doctor
+cargo run -p envctl -- doctor --json
 
 # 4. install — idempotent, streaming, wiring. SAFE reversible dogfood:
 cargo run -p envctl -- install bun --dry-run    # preview
