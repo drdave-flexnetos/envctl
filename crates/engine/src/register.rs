@@ -64,9 +64,13 @@ pub fn synth_dropin(spec: &RegisterSpec) -> String {
         Some(t) if spec.strategy_tag == "refactor:patch" => format!("# replay refactor:patch transform\n{t}\n"),
         _ => String::new(),
     };
+    // AUDIT-FIX (blocker): the relink line interpolates name+rel into a shell
+    // double-quoted string; an unsafe char ($ ` " \ newline / ..) would break out.
+    // Only emit relinks whose name is a slug and whose rel path is a safe charset.
     let relink_lines: String = spec
         .relinks
         .iter()
+        .filter(|(name, rel)| safe_name(name) && safe_rel(rel))
         .map(|(name, rel)| format!("ln -sfn \"$SRC/{rel}\" \"$HOME/.local/bin/{name}\""))
         .collect::<Vec<_>>()
         .join("\n");
@@ -151,6 +155,21 @@ pub fn synth_dropin(spec: &RegisterSpec) -> String {
 
 fn sh_q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// A safe install name (slug): bare, no shell metachars.
+fn safe_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && !s.starts_with('-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+/// A safe clone-relative path: no `..`, no shell metachars, no leading `-`.
+fn safe_rel(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains("..")
+        && !s.starts_with('-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
 /// TOML basic-string for an args[] element.

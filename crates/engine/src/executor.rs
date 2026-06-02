@@ -95,11 +95,19 @@ pub fn run(
                 sink.emit(Event::RunFinished { summary: summary.clone() });
                 return Ok(summary);
             }
-            if !refuse.is_empty() {
-                order.retain(|c| !refuse.contains(&c.id));
-            }
-            if !fold.is_empty() {
-                let mut keep: HashSet<String> = order.iter().map(|c| c.id.clone()).collect();
+            // AUDIT-FIX (blocker): rebuild `order` from the CLOSURE of surviving
+            // targets only, so a refused target's now-orphaned prerequisites are
+            // NOT left in the removal set and destroyed. A prereq shared with a
+            // surviving target is preserved (it's in that survivor's closure).
+            if !refuse.is_empty() || !fold.is_empty() {
+                let mut keep: HashSet<String> = HashSet::new();
+                for t in plan.targets.iter().filter(|t| !refuse.contains(*t)) {
+                    if let Ok(cl) = reg.closure(t) {
+                        for c in cl {
+                            keep.insert(c.id.clone());
+                        }
+                    }
+                }
                 keep.extend(fold.iter().cloned());
                 order = reg.ordered().filter(|c| keep.contains(&c.id)).collect();
                 order.reverse();
@@ -142,8 +150,12 @@ pub fn run(
         // but still reconcile its declarative wiring (idempotent) so an already-
         // installed tool with a missing PATH/rc block gets fixed.
         if plan.phase == Phase::Install && !plan.dry_run {
-            if let Some(h) = comp.detect.as_ref() {
-                if runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok {
+            // run_phase (not runner.run) so the probe gets catch_unwind + gpu/guard
+            // treatment, consistent with every other phase (audit fix).
+            if comp.detect.is_some()
+                && run_phase(sink, comp, Phase::Detect, runner, false, &ctx).status == OpStatus::Ok
+            {
+                {
                     let mut res = mkres(comp, plan.phase, OpStatus::Skipped, "already present", false);
                     apply_wiring(comp, sink, &mut res, &mut summary);
                     finish(sink, &mut summary, res);
@@ -213,6 +225,18 @@ pub fn run(
         }
 
         finish(sink, &mut summary, res);
+    }
+
+    // Dedup the roster vecs — a component can be pushed onto a roster twice
+    // (e.g. wiring-fail + reverify-fail both mark incomplete) (audit fix).
+    for v in [
+        &mut summary.failed,
+        &mut summary.refused,
+        &mut summary.skipped_blocked,
+        &mut summary.incomplete,
+    ] {
+        v.sort();
+        v.dedup();
     }
 
     sink.emit(Event::RunFinished {
@@ -490,6 +514,15 @@ pub fn add_repo(
         return Ok(summary);
     }
 
+    // Re-check id-collision against a FRESH registry (close the long-pipeline
+    // TOCTOU) BEFORE installing — so a concurrent registration can't leave
+    // orphaned ~/.local/bin symlinks + a PATH block behind on the bail path (audit fix).
+    if let Ok(fresh) = Registry::load(manifest_dir) {
+        if fresh.get(&id).is_some() {
+            anyhow::bail!("component id '{id}' was registered concurrently — refusing to overwrite");
+        }
+    }
+
     // INSTALL + WIRE-IN (symlink, refuse-shadow, refuse-unmanaged-unless-force).
     let iplan = build_install_plan(&id, &spec, &outcome);
     let ireport = crate::install::install_and_wire(&iplan, spec.force, false, sink);
@@ -497,13 +530,6 @@ pub fn add_repo(
         summary.failed.push(format!("{id}/install"));
     }
 
-    // REGISTER — re-check id-collision against a FRESH registry (close the
-    // long-pipeline TOCTOU) before writing the drop-in.
-    if let Ok(fresh) = Registry::load(manifest_dir) {
-        if fresh.get(&id).is_some() {
-            anyhow::bail!("component id '{id}' was registered concurrently — refusing to overwrite");
-        }
-    }
     let final_targets = if ireport.installed_paths.is_empty() { installed.clone() } else { ireport.installed_paths.clone() };
     let rspec = RegisterSpec { installed_targets: final_targets, ..rspec };
     let toml = crate::register::synth_dropin(&rspec);
@@ -554,6 +580,21 @@ fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
     for (label, val) in strs {
         if val.contains("'''") {
             anyhow::bail!("{label} may not contain ''' (would break the generated manifest)");
+        }
+    }
+    // AUDIT-FIX (major): reject leading-dash values — git treats them as options
+    // (e.g. git_url `--upload-pack=…` => arbitrary exec) — and validate the ref shape.
+    if spec.git_url.starts_with('-') {
+        anyhow::bail!("git_url may not start with '-'");
+    }
+    if let Some(lp) = &spec.local_path {
+        if lp.to_string_lossy().starts_with('-') {
+            anyhow::bail!("--local path may not start with '-'");
+        }
+    }
+    if let Some(r) = &spec.git_ref {
+        if r.starts_with('-') || !r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/')) {
+            anyhow::bail!("invalid --git-ref '{r}' (use [A-Za-z0-9._/-], no leading '-')");
         }
     }
     Ok(())

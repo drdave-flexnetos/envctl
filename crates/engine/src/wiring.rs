@@ -188,6 +188,12 @@ pub fn revert(w: &Wiring, gates: &ResetGates, ctx: &RunContext) -> WiringReport 
             continue;
         }
         let p = expand_tilde(&dp.path);
+        // AUDIT-FIX: the UUID check resolves symlinks, but rename operates on the
+        // link itself — refuse a symlink so we never purge via a redirected path.
+        if std::fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            rep.fail("data_path", format!("refusing to purge {}: it is a symlink", dp.path));
+            continue;
+        }
         let trash = format!("{p}.envctl-trash.{}", now_epoch());
         match std::fs::rename(&p, &trash) {
             Ok(()) => rep.note(format!("purged {} -> {trash}", dp.path)),
@@ -262,6 +268,17 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
         }
         return Ok(());
     }
+    // AUDIT-FIX (blocker): only excise a properly PAIRED BEGIN..END. If the END
+    // marker is missing after BEGIN (truncated/edited/crash-mid-write), do NOT
+    // delete to EOF — leave the file untouched and report the failure.
+    let bi = text.find(&begin).unwrap();
+    if !text[bi..].contains(&end) {
+        rep.fail(
+            "shell_rc",
+            format!("unterminated envctl block '{}' in {file} — left untouched (excise it by hand)", blk.marker),
+        );
+        return Ok(());
+    }
     let _ = std::fs::copy(&file, format!("{file}.bak.{}", now_epoch()));
     let mut out = String::new();
     let mut skip = false;
@@ -289,15 +306,17 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
 fn foreign_path_line(text: &str) -> bool {
     let mut in_block = false;
     for line in text.lines() {
-        if line.contains("BEGIN") && line.contains("(added by envctl)") {
+        let t = line.trim_start();
+        // anchored marker matching (audit fix) — a stray substring won't fool us.
+        if t.starts_with("# >>> BEGIN ") && t.contains("(added by envctl)") {
             in_block = true;
-        } else if line.contains("<<< END") {
+        } else if t.starts_with("# <<< END ") {
             in_block = false;
-        } else if !in_block {
-            let t = line.trim_start();
-            if (t.starts_with("export PATH=") || t.starts_with("PATH=")) && t.contains(":$PATH") {
-                return true;
-            }
+        } else if !in_block
+            && (t.starts_with("export PATH=") || t.starts_with("PATH="))
+            && (t.contains(":$PATH") || t.contains(":${PATH}"))
+        {
+            return true;
         }
     }
     false
@@ -511,8 +530,15 @@ fn apply_alternative(a: &Alternative, rep: &mut WiringReport) -> anyhow::Result<
         return Ok(());
     };
     let prio = a.priority.to_string();
-    let _ = sudo(&["update-alternatives", "--install", &a.link, &a.name, &target, &prio]);
-    let _ = sudo(&["update-alternatives", "--set", &a.name, &target]);
+    // AUDIT-FIX: surface sudo failures instead of asserting success.
+    if let Err(e) = sudo(&["update-alternatives", "--install", &a.link, &a.name, &target, &prio]) {
+        rep.fail("alternative", e);
+        return Ok(());
+    }
+    if let Err(e) = sudo(&["update-alternatives", "--set", &a.name, &target]) {
+        rep.fail("alternative", e);
+        return Ok(());
+    }
     rep.note(format!("set alternative {} -> {target}", a.name));
     Ok(())
 }
@@ -521,7 +547,10 @@ fn revert_alternative(a: &Alternative, rep: &mut WiringReport) -> anyhow::Result
     let Some(target) = resolve_target(&a.target) else {
         return Ok(());
     };
-    let _ = sudo(&["update-alternatives", "--remove", &a.name, &target]);
+    if let Err(e) = sudo(&["update-alternatives", "--remove", &a.name, &target]) {
+        rep.fail("alternative", e);
+        return Ok(());
+    }
     rep.note(format!("removed alternative {} -> {target}", a.name));
     Ok(())
 }
@@ -586,9 +615,12 @@ fn sh_q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-fn now_epoch() -> u64 {
+/// Nanosecond stamp for backup/trash names — collision-proof at sub-second
+/// resolution (two edits to the same file in the same second won't clobber a
+/// prior backup) (audit fix).
+fn now_epoch() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0)
 }

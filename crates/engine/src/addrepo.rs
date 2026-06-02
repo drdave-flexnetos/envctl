@@ -222,7 +222,7 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
             if let Some(r) = &spec.git_ref {
                 c.args(["--branch", r]);
             }
-            c.arg(&spec.git_url);
+            c.arg("--").arg(&spec.git_url); // `--` => no git-arg injection
             c
         };
         c.arg(&clone_dir);
@@ -282,7 +282,7 @@ fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &Event
         if let Some(r) = &spec.git_ref {
             c.args(["--branch", r]);
         }
-        c.arg(&spec.git_url).arg(clone_dir);
+        c.arg("--").arg(&spec.git_url).arg(clone_dir); // `--` => no git-arg injection
         stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink)?;
     }
     ensure_private_dir(clone_dir)?; // 0700 the per-slug clone too
@@ -320,6 +320,15 @@ fn apply_refactor(refactor: &Refactor, clone_dir: &Path, preview: bool, sink: &E
         Refactor::Ai { agent, goal, instruction } => {
             let agent = resolve_agent(*agent)
                 .ok_or_else(|| anyhow::anyhow!("no AI coding CLI found; tried {}", available_agents_msg()))?;
+            // AUDIT-FIX: only Claude/Codex are structurally confined to the clone
+            // (--add-dir / --cd). Refuse Gemini/Kimi headless — they have no
+            // enforceable FS sandbox flag; use --connect for a supervised session.
+            if matches!(agent, AiAgent::Gemini | AiAgent::Kimi) {
+                anyhow::bail!(
+                    "{} has no enforceable sandbox flag for a headless refactor — use claude/codex, or `--connect` for an interactive session",
+                    agent.bin()
+                );
+            }
             let prompt = build_ai_prompt(*goal, instruction.as_deref());
             let cd = clone_dir.to_string_lossy().into_owned();
             let argv = agent.argv(&prompt, &cd);
@@ -387,7 +396,9 @@ fn locate_artifacts(clone_dir: &Path, spec: &AddRepoSpec, plan: &BuildPlan, prev
         let pat = clone_dir.join(g);
         if let Ok(paths) = glob::glob(&pat.to_string_lossy()) {
             for p in paths.flatten() {
-                if p.is_file() && is_executable(&p) {
+                // executable files only, and NOT build-system source/helper scripts
+                // that a catch-all `*`/`src/*` glob would otherwise sweep up (audit fix).
+                if p.is_file() && is_executable(&p) && !is_source_helper(&p) {
                     found.push(p);
                 }
             }
@@ -525,6 +536,22 @@ fn ensure_private_dir(p: &Path) -> std::io::Result<()> {
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+}
+
+/// A build-system source/helper file that a catch-all glob would wrongly install.
+fn is_source_helper(p: &Path) -> bool {
+    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    const DENY: &[&str] = &[
+        "configure", "config.guess", "config.sub", "config.status", "install-sh",
+        "compile", "missing", "depcomp", "libtool", "bootstrap", "autogen.sh", "ltmain.sh",
+    ];
+    if DENY.contains(&name) {
+        return true;
+    }
+    matches!(
+        p.extension().and_then(|s| s.to_str()),
+        Some("sh" | "py" | "pl" | "rb" | "bash" | "in" | "am" | "ac" | "m4" | "guess" | "sub")
+    )
 }
 
 #[cfg(test)]
