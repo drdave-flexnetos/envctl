@@ -219,7 +219,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Cmd::Doctor => print_doctor(json),
+        Cmd::Doctor => print_doctor(&engine, json),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => handle_connect(engine, other, json),
@@ -382,7 +382,8 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
 
 /// Read-only health diagnostics (kasetto-style `doctor`): writability, toolchains,
 /// sudo, UEFI/Secure-Boot, GPU, and the run log. Never mutates anything.
-fn print_doctor(json: bool) -> anyhow::Result<()> {
+fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
+    let last_run = envctl_engine::runtime::load(engine.manifest_dir()).last_run;
     let home = std::env::var("HOME").unwrap_or_default();
     let write_ok = |p: &str| -> bool {
         let dir = std::path::Path::new(p);
@@ -437,6 +438,7 @@ fn print_doctor(json: bool) -> anyhow::Result<()> {
                 "writable": dirj, "tools": toolj, "sudo_cached": sudo_cached,
                 "uefi": uefi, "secure_boot": secure_boot, "nvidia_driver_loaded": driver_loaded,
                 "run_log": run_log.display().to_string(), "run_log_exists": log_exists,
+                "last_run": last_run,
             }))?
         );
         return Ok(());
@@ -460,6 +462,15 @@ fn print_doctor(json: bool) -> anyhow::Result<()> {
     println!("  Secure Boot        {}", match secure_boot.as_deref() { Some("1") => "\x1b[1;33mON\x1b[0m (nvidia-open needs it OFF)", Some("0") => "\x1b[1;32mOFF\x1b[0m", _ => "unknown" });
     println!("  nvidia driver      {}", if driver_loaded { "\x1b[1;32mloaded\x1b[0m" } else { "\x1b[1;33mnot loaded\x1b[0m" });
     println!("  run log            {} {}", yn(log_exists), run_log.display());
+    match &last_run {
+        Some(lr) => println!(
+            "  last op            {} {} ({}f/{}r/{}i) at {}",
+            lr.verb,
+            if lr.ok { "\x1b[1;32mok\x1b[0m" } else { "\x1b[1;31mFAILED\x1b[0m" },
+            lr.failed, lr.refused, lr.incomplete, lr.at
+        ),
+        None => println!("  last op            (none recorded)"),
+    }
     if !sudo_cached {
         println!("\n  note: sudo not pre-authorized — privileged installs need `sudo -v` in a real terminal first.");
     }

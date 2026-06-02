@@ -13,6 +13,7 @@ pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which 
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
 pub mod graph; // graph intelligence over the component dependency DAG
 pub mod lock; // envctl.lock — content-hashed manifest-of-record + CI gate
+pub mod runtime; // machine-local last-run state (XDG cache), out of the lock
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
 pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
 pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
@@ -98,7 +99,14 @@ impl Engine {
     /// `Err` only for setup-time problems; `Ok(summary)` where `!summary.ok()`
     /// means some components failed or were refused. Emits Events into `sink`.
     pub fn run(&self, plan: RunPlan, sink: &EventSink) -> anyhow::Result<RunSummary> {
-        executor::run(&self.inner.registry, self.inner.runner.as_ref(), plan, sink)
+        let phase = plan.phase;
+        let dry = plan.dry_run;
+        let summary = executor::run(&self.inner.registry, self.inner.runner.as_ref(), plan, sink)?;
+        if !dry {
+            // best-effort machine-local last-run record (out of the committed lock)
+            crate::runtime::record_run(&self.inner.manifest_dir, phase, &summary);
+        }
+        Ok(summary)
     }
 
     /// Read-only auto-detect. Never writes. Used identically by `envctl
