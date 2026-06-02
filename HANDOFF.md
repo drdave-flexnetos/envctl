@@ -17,6 +17,16 @@ A 42-agent **verified audit** found 14 real bugs (3 blockers) — all fixed +
 regression-tested (see `git log`). A content-hashed **`envctl.lock`** (CI gate)
 and a **`doctor`** diagnostic were adopted from the kasetto catalog.
 
+A **second** 14-agent verified audit then found 64 more (9 blockers, 25 majors,
+30 minors). **All blockers + all majors are fixed**, built (engine+cli+gui clean)
+and tested — notably: `--connect` bypassed all spec validation (path traversal +
+git option-injection); `reset X` used to also uninstall X's prerequisites (closure
+expansion) and could remove a refused target via a survivor's closure; the live-root
+guard failed *open* on btrfs; `--rename foo=git` could shadow system `git`; the GUI's
+Fix toggle was inverted (ran destructive Fix for real by default). `envctl.lock` is
+now **committed** (it was gitignored, which made `lock --check` useless). **33 engine
+tests** green. Remaining: the 30 audit-v2 *minors* (not yet triaged).
+
 ## Status (commits on `master`)
 ```
 Phase 4+5 add-repo+telemetry · Phase 3 reset/auto-fix · GUI theme · PRD ·
@@ -42,9 +52,10 @@ content hashing).
 . "$HOME/.cargo/env"
 export ENVCTL_MANIFEST_DIR="$PWD/manifest"
 
-# 1. builds + tests (expect: clean; ~20 engine tests pass)
+# 1. builds + tests (expect: clean; 33 engine tests pass)
 cargo build --workspace
 cargo test -p envctl-engine
+cargo run -p envctl -- lock --check    # exit 0 — committed lock matches the manifest
 
 # 2. auto-detect — read-only; should see 2x RTX 5090 (PCI floor), driver,
 #    Threadripper, 44 components with accurate drift
