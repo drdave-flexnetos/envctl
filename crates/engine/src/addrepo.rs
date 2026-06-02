@@ -178,6 +178,76 @@ pub fn run_pipeline(
     Ok((summary, Some(PipelineOutcome { clone_dir, resolved_sha, build_plan, artifacts, installs })))
 }
 
+/// INTERACTIVE handoff: clone the repo, write the goal to `.envctl-task.md`, and
+/// drop the user into an interactive agent session (claude/codex/…) IN the clone,
+/// attached to the real terminal. Used when the user picks cherry-pick or a full
+/// Rust port and wants to drive the refactor themselves rather than headless.
+/// Returns after the agent session ends; the caller may then build with `--build`.
+pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
+    if euid_is_root() {
+        anyhow::bail!("refusing to clone/agent as root (euid 0) — run as your user");
+    }
+    let (agent, prompt) = match &spec.strategy {
+        BuildStrategy::Refactor { refactor: Refactor::Ai { agent, goal, instruction } } => {
+            (resolve_agent(*agent), build_ai_prompt(*goal, instruction.as_deref()))
+        }
+        BuildStrategy::Refactor { refactor: Refactor::Patch { .. } } => {
+            (resolve_agent(None), build_ai_prompt(RefactorGoal::Custom, None))
+        }
+        BuildStrategy::CherryPick { bins } => (
+            resolve_agent(None),
+            build_ai_prompt(RefactorGoal::CherryPickToCrate, Some(&format!("Focus on: {}", bins.join(", ")))),
+        ),
+        _ => (resolve_agent(None), build_ai_prompt(RefactorGoal::Custom, None)),
+    };
+    let agent = agent.ok_or_else(|| anyhow::anyhow!("no AI coding CLI found; {}", available_agents_msg()))?;
+
+    let repos_root = {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        PathBuf::from(home).join(".local/share/envctl/repos")
+    };
+    ensure_private_dir(&repos_root)?;
+    let clone_dir = repos_root.join(&spec.id);
+
+    // acquire with INHERITED stdio so the user sees the clone (and any prompts).
+    if !clone_dir.join(".git").is_dir() {
+        let mut c = if spec.local_path.is_some() {
+            let mut c = Command::new("git");
+            c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"]);
+            c.arg(spec.local_path.as_ref().unwrap());
+            c
+        } else {
+            let mut c = git_hardened();
+            c.arg("clone");
+            if let Some(r) = &spec.git_ref {
+                c.args(["--branch", r]);
+            }
+            c.arg(&spec.git_url);
+            c
+        };
+        c.arg(&clone_dir);
+        let st = c.status()?;
+        if !st.success() {
+            anyhow::bail!("clone failed");
+        }
+    }
+    ensure_private_dir(&clone_dir)?;
+
+    std::fs::write(
+        clone_dir.join(".envctl-task.md"),
+        format!("# envctl refactor task\n\n{prompt}\n\nWhen finished, exit the agent. envctl will not commit or push.\n"),
+    )?;
+
+    println!("\nenvctl: connecting you to `{}` in {}", agent.bin(), clone_dir.display());
+    println!("        the task is written to .envctl-task.md; collaborate, then exit the agent.");
+    println!("        afterward, build it with:  envctl add-repo {} --id {} --build\n", spec.git_url, spec.id);
+
+    // Interactive: inherit stdio so the agent attaches to the real terminal.
+    let status = Command::new(agent.bin()).current_dir(&clone_dir).status()?;
+    println!("\nenvctl: agent session ended (exit {:?}). Clone is at {}", status.code(), clone_dir.display());
+    Ok(())
+}
+
 // ── acquire ─────────────────────────────────────────────────────────────────
 fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &EventSink) -> anyhow::Result<String> {
     ensure_private_dir(repos_root)?;

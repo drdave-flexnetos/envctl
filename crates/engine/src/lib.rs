@@ -11,6 +11,7 @@ pub mod wiring; // apply()/revert() for Wiring (shell_rc backup-then-excise)
 pub mod runner; // ProcessRunner (real) + DryRunRunner impls of HookRunner
 pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which probes
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
+pub mod graph; // graph intelligence over the component dependency DAG
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
 pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
 pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
@@ -103,6 +104,13 @@ impl Engine {
     /// add-repo: synthesize a build-from-source Component, persist a drop-in
     /// under `<manifest_dir>/components.d/<id>.toml` (atomic + backed up), then
     /// (unless dry_run) install it.
+    /// Interactive handoff: clone + drop the user into an agent session in the
+    /// clone (for cherry-pick / port-to-rust). Blocks on the real terminal; runs
+    /// on the caller's (main) thread, NOT the GUI worker. Never as root.
+    pub fn connect_repo(&self, spec: &AddRepoSpec) -> anyhow::Result<()> {
+        crate::addrepo::connect_agent(spec)
+    }
+
     pub fn add_repo(
         &self,
         spec: AddRepoSpec,

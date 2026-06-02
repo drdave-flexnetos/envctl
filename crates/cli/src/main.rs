@@ -28,6 +28,21 @@ enum Cmd {
         #[arg(long)]
         only: Vec<String>,
     },
+    /// Dependency-graph intelligence: summary, impact/blast-radius, paths, DOT/JSON.
+    Graph {
+        /// Focus on one component: install closure + reset --cascade blast-radius.
+        #[arg(long)]
+        impact: Option<String>,
+        /// Why is X needed — print the root→X dependency paths.
+        #[arg(long)]
+        why: Option<String>,
+        /// Emit Graphviz DOT (pipe to `dot -Tsvg -o graph.svg`).
+        #[arg(long)]
+        dot: bool,
+        /// Annotate with live detect/drift state (runs auto-detect first).
+        #[arg(long)]
+        live: bool,
+    },
     /// Install components (additive + idempotent; --dry-run to preview).
     Install {
         targets: Vec<String>,
@@ -118,6 +133,10 @@ enum Cmd {
         /// git clone --recurse-submodules (off by default).
         #[arg(long)]
         recurse_submodules: bool,
+        /// Interactive: clone, then drop into an agent session in the clone (for
+        /// cherry-pick / port-to-rust). Pair with --build to build afterward.
+        #[arg(long)]
+        connect: bool,
         #[arg(long)]
         dry_run: bool,
     },
@@ -140,6 +159,31 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Cmd::Graph { impact, why, dot, live } => {
+            use envctl_engine::graph;
+            let live_report = if live {
+                let (sink, _rx) = EventSink::channel();
+                Some(engine.detect(&sink)?)
+            } else {
+                None
+            };
+            let reg = engine.registry();
+            if dot {
+                print!("{}", graph::to_dot(reg, live_report.as_ref()));
+            } else if json {
+                println!("{}", serde_json::to_string_pretty(&graph::to_json(reg, live_report.as_ref()))?);
+            } else if let Some(id) = impact {
+                print_impact(reg, &id);
+            } else if let Some(id) = why {
+                print_why(reg, &id);
+            } else {
+                print_graph_summary(reg);
+            }
+            Ok(())
+        }
+        // Interactive add-repo connect: handled on the MAIN thread so the agent
+        // attaches to the real terminal.
+        other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => handle_connect(engine, other, json),
         other => {
             // Usage fail-fast (exit 2) before spawning the worker. The executor
             // also enforces these authoritatively (the GUI hits that path).
@@ -185,7 +229,7 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
             Cmd::AddRepo {
                 git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
                 renames, patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build,
-                force, recurse_submodules, dry_run,
+                force, recurse_submodules, connect: _, dry_run,
             } => {
                 let spec = build_spec(AddRepoArgs {
                     git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
@@ -195,7 +239,7 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!(e))?;
                 eng.add_repo(spec, dry_run, &sink)?.ok()
             }
-            Cmd::AutoDetect { .. } => unreachable!("handled in main"),
+            Cmd::AutoDetect { .. } | Cmd::Graph { .. } => unreachable!("handled in main"),
         };
         Ok(ok) // sink drops here -> the main-thread rx.iter() terminates cleanly
     });
@@ -252,6 +296,103 @@ fn print_event(ev: &Event) {
             }
         }
         _ => {}
+    }
+}
+
+/// Interactive add-repo: build the spec, drop the user into an agent session in
+/// the clone, then (if --build) build the now-transformed tree as-is.
+fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
+    let Cmd::AddRepo {
+        git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins, renames,
+        patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build, force,
+        recurse_submodules, connect: _, dry_run: _,
+    } = cmd
+    else {
+        unreachable!("handle_connect only called for AddRepo");
+    };
+    let spec = build_spec(AddRepoArgs {
+        git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins, renames,
+        patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build, force,
+        recurse_submodules,
+    })
+    .map_err(|e| anyhow::anyhow!(e))?;
+
+    engine.connect_repo(&spec)?; // interactive; blocks on the terminal
+
+    if spec.allow_build {
+        // Build the transformed clone AS-IS (don't re-run the agent).
+        let bspec = AddRepoSpec { strategy: BuildStrategy::AsIs, allow_build: true, ..spec };
+        let (sink, rx) = EventSink::channel();
+        let _ = engine.add_repo(bspec, false, &sink);
+        drop(sink);
+        for ev in rx.iter() {
+            if json {
+                println!("{}", serde_json::to_string(&ev)?);
+            } else {
+                print_event(&ev);
+            }
+        }
+    } else {
+        println!("\nenvctl: clone is ready. Build what you made with:");
+        println!("  envctl add-repo {} --id {} --strategy as-is --build", spec.git_url, spec.id);
+    }
+    Ok(())
+}
+
+fn print_graph_summary(reg: &envctl_engine::Registry) {
+    let g = envctl_engine::graph::analyze(reg);
+    let c = "\x1b[1;36m";
+    let z = "\x1b[0m";
+    println!("{c}── dependency graph ──{z}");
+    println!("  {} components · {} edges · {} groups", g.nodes, g.edges, g.groups.len());
+    println!("  roots (no deps):     {}", g.roots.len());
+    println!("  leaves (top-level):  {}", g.leaves.len());
+    if !g.orphans.is_empty() {
+        println!("  orphans (standalone): {}", g.orphans.join(", "));
+    }
+    if let Some((id, n)) = &g.max_dependents {
+        println!("  most depended-on:    {id}  ({n} direct dependents)");
+    }
+    if let Some((id, n)) = &g.max_requires {
+        println!("  most prerequisites:  {id}  ({n} requires)");
+    }
+    println!("{c}── critical path (longest chain) ──{z}");
+    println!("  {}", g.critical_path.join("  →  "));
+    println!("\n  tip: envctl graph --impact <id> · --why <id> · --dot | dot -Tsvg -o g.svg · --json --live");
+}
+
+fn print_impact(reg: &envctl_engine::Registry, id: &str) {
+    match envctl_engine::graph::impact(reg, id) {
+        None => eprintln!("envctl: unknown component '{id}'"),
+        Some(im) => {
+            println!("\x1b[1;36m── impact of '{id}' ──\x1b[0m");
+            println!("  direct requires:     {}", join_or_none(&im.requires));
+            println!("  direct dependents:   {}", join_or_none(&im.required_by));
+            println!("\x1b[1;32m  install {id}\x1b[0m pulls in ({}):", im.install_closure.len());
+            println!("    {}", im.install_closure.join("  →  "));
+            println!("\x1b[1;33m  reset {id} --cascade\x1b[0m also removes ({}):", im.cascade_removes.len());
+            println!("    {}", join_or_none(&im.cascade_removes));
+        }
+    }
+}
+
+fn print_why(reg: &envctl_engine::Registry, id: &str) {
+    let paths = envctl_engine::graph::dependency_paths(reg, id);
+    if paths.is_empty() {
+        eprintln!("envctl: unknown component '{id}' (or it has no paths)");
+        return;
+    }
+    println!("\x1b[1;36m── why '{id}' is needed (root → {id} paths) ──\x1b[0m");
+    for p in paths {
+        println!("  {}", p.join("  →  "));
+    }
+}
+
+fn join_or_none(v: &[String]) -> String {
+    if v.is_empty() {
+        "(none)".into()
+    } else {
+        v.join(", ")
     }
 }
 
