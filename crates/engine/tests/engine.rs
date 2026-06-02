@@ -310,3 +310,75 @@ fn guard_verify_path_uuid_fail_closed() {
     // existing path with a bogus UUID that can't resolve -> refuse (never deletes on doubt)
     assert!(envctl_engine::guard::verify_path_uuid("/", "deadbeef-0000-0000", &ctx).is_some());
 }
+
+// --- graph intelligence over the real manifest DAG ---------------------------
+#[test]
+fn graph_analyze_real_manifest() {
+    use envctl_engine::graph;
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    let g = graph::analyze(&reg);
+    assert!(g.nodes > 0 && g.edges > 0, "non-empty DAG: {}n/{}e", g.nodes, g.edges);
+    // rustup has no prerequisites -> it is a root.
+    assert!(g.roots.contains(&"rustup".to_string()), "rustup is a root: {:?}", g.roots);
+    assert!(!g.critical_path.is_empty(), "a longest chain exists");
+
+    // impact("bun"): its install pulls bun in, and a --cascade reset folds node-via-bun.
+    let imp = graph::impact(&reg, "bun").expect("bun exists");
+    assert!(imp.install_closure.contains(&"bun".to_string()));
+    assert!(imp.cascade_removes.contains(&"node-via-bun".to_string()), "cascade: {:?}", imp.cascade_removes);
+    assert!(graph::impact(&reg, "no-such-component").is_none());
+
+    // every root->bun path starts at a root and ends at bun.
+    let paths = graph::dependency_paths(&reg, "bun");
+    assert!(!paths.is_empty());
+    for p in &paths {
+        assert_eq!(p.last().map(String::as_str), Some("bun"), "path ends at target: {p:?}");
+    }
+    // DOT + JSON renderers produce something well-formed.
+    assert!(graph::to_dot(&reg, None).contains("digraph"));
+    assert!(graph::to_json(&reg, None).get("nodes").is_some());
+}
+
+// --- envctl.lock generate -> save -> load -> diff is clean -------------------
+#[test]
+fn lock_roundtrip_no_drift_against_self() {
+    use envctl_engine::lock;
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    let tmp = std::env::temp_dir().join(format!("envctl-lock-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let mut lf = lock::generate(&reg);
+    lf.save(&tmp).expect("save lock");
+    let loaded = lock::LockFile::load(&tmp).expect("load lock");
+    // a lock generated from a registry has zero drift against that same registry.
+    assert!(lock::diff(&reg, &loaded).is_empty(), "freshly-generated lock must not drift");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+// --- machine-local runtime last-run state round-trips through XDG cache ------
+#[test]
+fn runtime_record_and_load_roundtrip() {
+    use envctl_engine::{runtime, Phase, RunSummary};
+    let base = std::env::temp_dir().join(format!("envctl-rt-test-{}", std::process::id()));
+    let cache = base.join("cache");
+    let manifest = base.join("manifest");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::create_dir_all(&manifest).unwrap();
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+
+    // a half-failed install: one failure recorded as not-ok.
+    let mut s = RunSummary::default();
+    s.failed.push("bun".into());
+    runtime::record_run(&manifest, Phase::Install, &s);
+
+    let st = runtime::load(&manifest).last_run.expect("a run was recorded");
+    assert_eq!(st.verb, "install");
+    assert_eq!(st.failed, 1);
+    assert!(!st.ok, "a run with a failure is not ok");
+    assert!(!st.at.is_empty(), "timestamp recorded");
+
+    std::env::remove_var("XDG_CACHE_HOME");
+    let _ = std::fs::remove_dir_all(&base);
+}
