@@ -10,7 +10,7 @@
 use crate::component::{Component, HookRunner, Phase};
 use crate::error::{run_phase, RunContext};
 use crate::event::{Event, EventSink, Stream};
-use crate::model::{AddRepoSpec, OpResult, OpStatus, Registry, RunPlan, RunSummary};
+use crate::model::{AddRepoSpec, OpResult, OpStatus, Registry, ResetGates, RunPlan, RunSummary, Wiring};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -49,6 +49,64 @@ pub fn run(
         order.reverse();
     }
 
+    let mut summary = RunSummary::default();
+
+    // ---- Reset gates (Phase::Remove only), evaluated ONCE under frozen ctx ----
+    if plan.phase == Phase::Remove {
+        // (1) Untargeted whole-roster reset requires --all AND --confirm.
+        if plan.targets.is_empty() && !(plan.gates.all && plan.gates.confirm) {
+            let reason = "refusing whole-roster reset: pass --all --confirm".to_string();
+            sink.emit(Event::GuardRefused { component: "<reset>".into(), reason: reason.clone() });
+            summary.refused.push("<reset>".into());
+            finish(sink, &mut summary, mkres_id("<reset>", Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
+            sink.emit(Event::RunFinished { summary: summary.clone() });
+            return Ok(summary);
+        }
+        // (2)+(3) Reverse-dependent refusal / cascade fold (explicit targets only).
+        if !plan.targets.is_empty() {
+            let target_set: HashSet<String> = order.iter().map(|c| c.id.clone()).collect();
+            let mut fold: HashSet<String> = HashSet::new();
+            let mut refuse: HashSet<String> = HashSet::new();
+            for tid in &plan.targets {
+                for rdep in reg.reverse_dependents(tid) {
+                    let live = run_phase(sink, rdep, Phase::Detect, runner, false, &ctx).status == OpStatus::Ok;
+                    if live && !target_set.contains(&rdep.id) {
+                        if plan.gates.cascade {
+                            fold.insert(rdep.id.clone());
+                        } else {
+                            refuse.insert(tid.clone());
+                        }
+                    }
+                }
+            }
+            for tid in &refuse {
+                let reason = format!("refusing remove of {tid}: a live reverse-dependent is not in the set (use --cascade)");
+                sink.emit(Event::GuardRefused { component: tid.clone(), reason: reason.clone() });
+                summary.refused.push(tid.clone());
+                finish(sink, &mut summary, mkres_id(tid, Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
+            }
+            // Folding extra components beyond the named targets needs --confirm on --apply.
+            if !fold.is_empty() && !plan.gates.confirm && !plan.dry_run {
+                let list: Vec<String> = { let mut v: Vec<String> = fold.into_iter().collect(); v.sort(); v };
+                let reason = format!("refusing cascade: would also remove {} — pass --confirm", list.join(", "));
+                sink.emit(Event::GuardRefused { component: "<cascade>".into(), reason: reason.clone() });
+                summary.refused.push("<cascade>".into());
+                finish(sink, &mut summary, mkres_id("<cascade>", Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
+                sink.emit(Event::RunFinished { summary: summary.clone() });
+                return Ok(summary);
+            }
+            if !refuse.is_empty() {
+                order.retain(|c| !refuse.contains(&c.id));
+            }
+            if !fold.is_empty() {
+                let mut keep: HashSet<String> = order.iter().map(|c| c.id.clone()).collect();
+                keep.extend(fold.iter().cloned());
+                order = reg.ordered().filter(|c| keep.contains(&c.id)).collect();
+                order.reverse();
+            }
+        }
+    }
+
     // Pre-warm sudo (+ keepalive) if this run will need it; dropped at fn end.
     let _sudo = prewarm_sudo(&order, plan.phase, plan.dry_run, sink);
 
@@ -59,7 +117,6 @@ pub fn run(
         dry_run: plan.dry_run,
     });
 
-    let mut summary = RunSummary::default();
     let mut failed_ids: HashSet<String> = HashSet::new();
 
     for (i, comp) in order.iter().enumerate() {
@@ -87,15 +144,39 @@ pub fn run(
         if plan.phase == Phase::Install && !plan.dry_run {
             if let Some(h) = comp.detect.as_ref() {
                 if runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok {
-                    apply_wiring(comp, sink);
-                    let res = mkres(comp, plan.phase, OpStatus::Skipped, "already present", false);
+                    let mut res = mkres(comp, plan.phase, OpStatus::Skipped, "already present", false);
+                    apply_wiring(comp, sink, &mut res, &mut summary);
                     finish(sink, &mut summary, res);
                     continue;
                 }
             }
         }
 
-        let res = run_phase(sink, comp, plan.phase, runner, plan.dry_run, &ctx);
+        // Auto-fix triage (Phase::Fix): act ONLY on broken/partial components.
+        if plan.phase == Phase::Fix && !plan.dry_run {
+            if comp.detect.is_some()
+                && run_phase(sink, comp, Phase::Detect, runner, false, &ctx).status != OpStatus::Ok
+            {
+                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Skipped, "not installed; use install", false));
+                continue;
+            }
+            let healthy = comp.verify.is_none()
+                || run_phase(sink, comp, Phase::Verify, runner, false, &ctx).status == OpStatus::Ok;
+            if healthy && wiring_present(comp) {
+                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Skipped, "already healthy", false));
+                continue;
+            }
+            // A system-scope fix (apt/nix/cdi/alt) is destructive infra — gate it.
+            if has_system_scope(&comp.wiring) && !plan.gates.confirm {
+                let reason = "system-scope fix needs --confirm".to_string();
+                sink.emit(Event::GuardRefused { component: comp.id.clone(), reason: reason.clone() });
+                summary.refused.push(comp.id.clone());
+                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Refused, &reason, false));
+                continue;
+            }
+        }
+
+        let mut res = run_phase(sink, comp, plan.phase, runner, plan.dry_run, &ctx);
         match res.status {
             OpStatus::Failed => {
                 summary.failed.push(comp.id.clone());
@@ -106,12 +187,27 @@ pub fn run(
             _ => {}
         }
 
-        // Wiring: apply after a successful install, revert after a successful
-        // remove (never on dry-run; never if the hook itself failed/was refused).
+        // Wiring + post-action re-verify (frozen ctx; never on dry-run; only when
+        // the hook actually acted: Ok | NoHook).
         if !plan.dry_run && matches!(res.status, OpStatus::Ok | OpStatus::NoHook) {
             match plan.phase {
-                Phase::Install => apply_wiring(comp, sink),
-                Phase::Remove => revert_wiring(comp, sink),
+                Phase::Install => apply_wiring(comp, sink, &mut res, &mut summary),
+                Phase::Remove => {
+                    revert_wiring(comp, &plan.gates, &ctx, sink, &mut res, &mut summary);
+                    // reset must leave the component ABSENT.
+                    if let Some(d) = reverify_absent(comp, runner, sink, &ctx) {
+                        res = d;
+                        summary.incomplete.push(comp.id.clone());
+                    }
+                }
+                Phase::Fix => {
+                    apply_wiring(comp, sink, &mut res, &mut summary);
+                    // auto-fix must leave the component HEALTHY.
+                    if let Some(d) = reverify_healthy(comp, runner, sink, &ctx) {
+                        res = d;
+                        summary.incomplete.push(comp.id.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -142,34 +238,129 @@ fn finish(sink: &EventSink, summary: &mut RunSummary, res: OpResult) {
     summary.results.push(res);
 }
 
-fn apply_wiring(comp: &Component, sink: &EventSink) {
-    if comp.wiring.shell_rc.is_empty() {
-        return;
-    }
-    match crate::wiring::apply(&comp.wiring) {
-        Ok(()) => sink.emit(Event::Log {
-            component: comp.id.clone(),
-            stream: Stream::Stdout,
-            line: "wiring applied (shell-rc reconciled)".into(),
-        }),
-        Err(e) => sink.emit(Event::Log {
-            component: comp.id.clone(),
-            stream: Stream::Stderr,
-            line: format!("wiring apply failed: {e}"),
-        }),
+fn mkres_id(id: &str, phase: Phase, status: OpStatus, msg: &str, dry_run: bool) -> OpResult {
+    OpResult {
+        component: id.into(),
+        phase,
+        status,
+        exit_code: None,
+        duration_ms: 0,
+        message: msg.into(),
+        dry_run,
     }
 }
 
-fn revert_wiring(comp: &Component, sink: &EventSink) {
+fn wiring_empty(w: &Wiring) -> bool {
+    w.path_entries.is_empty()
+        && w.shell_rc.is_empty()
+        && w.desktop_entries.is_empty()
+        && w.systemd_user.is_empty()
+        && w.apt_repos.is_empty()
+        && w.nix_conf_lines.is_empty()
+        && w.cdi_specs.is_empty()
+        && w.alternatives.is_empty()
+        && w.data_paths.is_empty()
+        && w.config_paths.is_empty()
+}
+
+fn has_system_scope(w: &Wiring) -> bool {
+    !w.apt_repos.is_empty()
+        || !w.nix_conf_lines.is_empty()
+        || !w.cdi_specs.is_empty()
+        || !w.alternatives.is_empty()
+}
+
+/// True iff every shell_rc marker block this component owns is present (matches
+/// detect.rs::wiring_present; suffix-agnostic so wizard-written blocks count).
+fn wiring_present(comp: &Component) -> bool {
     if comp.wiring.shell_rc.is_empty() {
+        return true; // nothing to reconcile
+    }
+    comp.wiring.shell_rc.iter().all(|blk| {
+        let file = match blk.file.strip_prefix("~/") {
+            Some(rest) => match std::env::var("HOME") {
+                Ok(h) => format!("{h}/{rest}"),
+                Err(_) => return false,
+            },
+            None => blk.file.clone(),
+        };
+        std::fs::read_to_string(&file)
+            .map(|t| t.contains(&format!("BEGIN {}", blk.marker)))
+            .unwrap_or(false)
+    })
+}
+
+fn emit_wiring(comp: &Component, sink: &EventSink, rep: &crate::wiring::WiringReport, verb: &str) {
+    for n in &rep.notes {
+        sink.emit(Event::Log { component: comp.id.clone(), stream: Stream::Stdout, line: n.clone() });
+    }
+    for (kind, e) in &rep.failures {
+        sink.emit(Event::Log {
+            component: comp.id.clone(),
+            stream: Stream::Stderr,
+            line: format!("wiring {verb} ({kind}) failed: {e}"),
+        });
+    }
+    if rep.notes.is_empty() && rep.failures.is_empty() {
+        sink.emit(Event::Log { component: comp.id.clone(), stream: Stream::Stdout, line: format!("wiring {verb}") });
+    }
+}
+
+fn apply_wiring(comp: &Component, sink: &EventSink, res: &mut OpResult, summary: &mut RunSummary) {
+    if wiring_empty(&comp.wiring) {
         return;
     }
-    let _ = crate::wiring::revert(&comp.wiring);
-    sink.emit(Event::Log {
-        component: comp.id.clone(),
-        stream: Stream::Stdout,
-        line: "wiring reverted (owned shell-rc block excised)".into(),
-    });
+    let rep = crate::wiring::apply(&comp.wiring);
+    emit_wiring(comp, sink, &rep, "applied");
+    if !rep.failures.is_empty() && matches!(res.status, OpStatus::Ok | OpStatus::NoHook) {
+        res.status = OpStatus::Incomplete;
+        res.message = "wiring apply reported failures (see log)".into();
+        summary.incomplete.push(comp.id.clone());
+    }
+}
+
+fn revert_wiring(
+    comp: &Component,
+    gates: &ResetGates,
+    ctx: &RunContext,
+    sink: &EventSink,
+    res: &mut OpResult,
+    summary: &mut RunSummary,
+) {
+    if wiring_empty(&comp.wiring) {
+        return;
+    }
+    let rep = crate::wiring::revert(&comp.wiring, gates, ctx);
+    emit_wiring(comp, sink, &rep, "reverted");
+    if !rep.failures.is_empty() && matches!(res.status, OpStatus::Ok | OpStatus::NoHook) {
+        res.status = OpStatus::Incomplete;
+        res.message = "wiring revert reported failures (see log)".into();
+        summary.incomplete.push(comp.id.clone());
+    }
+}
+
+/// reset/Remove postcondition: detect must now FAIL (absent). No detect hook =>
+/// unverifiable => satisfied (None).
+fn reverify_absent(comp: &Component, runner: &dyn HookRunner, sink: &EventSink, ctx: &RunContext) -> Option<OpResult> {
+    comp.detect.as_ref()?;
+    if run_phase(sink, comp, Phase::Detect, runner, false, ctx).status == OpStatus::Ok {
+        Some(mkres(comp, Phase::Remove, OpStatus::Incomplete,
+            "removed, but still detected (orphaned/partial remove) — re-run reset or inspect", false))
+    } else {
+        None
+    }
+}
+
+/// auto-fix/Fix postcondition: verify must now SUCCEED (healthy). No verify hook
+/// => unverifiable => satisfied (None).
+fn reverify_healthy(comp: &Component, runner: &dyn HookRunner, sink: &EventSink, ctx: &RunContext) -> Option<OpResult> {
+    comp.verify.as_ref()?;
+    if run_phase(sink, comp, Phase::Verify, runner, false, ctx).status == OpStatus::Ok {
+        None
+    } else {
+        Some(mkres(comp, Phase::Fix, OpStatus::Incomplete,
+            "fix ran, but verify still fails — review log / escalate", false))
+    }
 }
 
 /// Pre-warm sudo once (so streamed, TTY-less hooks don't prompt) and keep the
@@ -189,13 +380,17 @@ impl Drop for SudoKeepalive {
 }
 
 fn needs_sudo(order: &[&Component], phase: Phase) -> bool {
-    order.iter().any(|c| match c.hook(phase) {
-        Some(crate::component::Hook::Command { needs_sudo, .. }) => *needs_sudo,
-        Some(crate::component::Hook::ShippedScript { needs_sudo, .. }) => *needs_sudo,
-        Some(crate::component::Hook::Script { needs_sudo, script, .. }) => {
-            *needs_sudo || script.contains("sudo ")
-        }
-        None => false,
+    order.iter().any(|c| {
+        // System-scope wiring (apt/nix/cdi/alt) runs sudo during apply/revert.
+        has_system_scope(&c.wiring)
+            || match c.hook(phase) {
+                Some(crate::component::Hook::Command { needs_sudo, .. }) => *needs_sudo,
+                Some(crate::component::Hook::ShippedScript { needs_sudo, .. }) => *needs_sudo,
+                Some(crate::component::Hook::Script { needs_sudo, script, .. }) => {
+                    *needs_sudo || script.contains("sudo ")
+                }
+                None => false,
+            }
     })
 }
 

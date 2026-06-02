@@ -57,9 +57,14 @@ add(){ grep -qF -- "$1" /etc/nix/nix.custom.conf || echo "$1" | sudo tee -a /etc
 add "extra-substituters = https://yazelix.cachix.org"
 sudo systemctl restart nix-daemon 2>/dev/null || true
 '''
-[component.remove]
-kind = "script"
-script = "sudo sed -i '/yazelix.cachix.org/d; /eval-cores = 0/d' /etc/nix/nix.custom.conf; sudo systemctl restart nix-daemon 2>/dev/null || true"
+# Declarative: reset removes ONLY these exact owned lines from
+# /etc/nix/nix.custom.conf (foreign lines survive) and restarts nix-daemon once.
+[[component.wiring.nix_conf_lines]]
+line = "eval-cores = 0"
+[[component.wiring.nix_conf_lines]]
+line = "extra-substituters = https://yazelix.cachix.org"
+[[component.wiring.nix_conf_lines]]
+line = "extra-trusted-public-keys = yazelix.cachix.org-1:ZgxIjQvaP0VTWL8Racx27mpUNzDJ97xC2y7QWYjmGNM="
 
 
 [[component]]
@@ -172,9 +177,13 @@ script = "command -v ghostty >/dev/null && { sudo update-alternatives --install 
 kind = "command"
 command = "bash"
 args = ["-lc", "update-alternatives --query x-terminal-emulator 2>/dev/null | grep -qi ghostty"]
-[component.remove]
-kind = "script"
-script = "sudo update-alternatives --remove x-terminal-emulator \"$(command -v ghostty)\" 2>/dev/null || true"
+# Declarative: reset uses `update-alternatives --remove` (NOT --remove-all),
+# excising only the ghostty slot envctl added (target resolved via `which`).
+[[component.wiring.alternatives]]
+link = "/usr/bin/x-terminal-emulator"
+name = "x-terminal-emulator"
+target = "ghostty"
+priority = 60
 
 
 [[component]]

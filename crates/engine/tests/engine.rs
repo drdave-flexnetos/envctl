@@ -142,3 +142,53 @@ fn drift_flags_missing_and_unhealthy() {
     let bun = drift.iter().find(|d| d.component == "bun").unwrap();
     assert!(bun.suggested_verb.contains("install bun"));
 }
+
+// ---- Phase 3 ----
+
+#[test]
+fn runsummary_ok_counts_incomplete() {
+    let mut s = envctl_engine::RunSummary::default();
+    assert!(s.ok());
+    s.incomplete.push("x".into());
+    assert!(!s.ok(), "an incomplete (acted-but-post-state-wrong) run is NOT ok");
+}
+
+#[test]
+fn untargeted_reset_refused_without_all_confirm() {
+    let eng = envctl_engine::Engine::with_runner(manifest_dir(), Box::new(envctl_engine::DryRunRunner))
+        .expect("engine loads");
+    let sink = envctl_engine::EventSink::null();
+    // Whole-roster reset (no targets) with no gates -> one synthetic Refused, early return.
+    let s = eng
+        .run(envctl_engine::RunPlan::new(envctl_engine::Phase::Remove, vec![], false), &sink)
+        .expect("run ok");
+    assert!(s.refused.iter().any(|x| x == "<reset>"), "must refuse: {:?}", s.refused);
+    assert!(!s.ok());
+}
+
+#[test]
+fn reverse_dependents_transitive() {
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    let rdeps: Vec<String> = reg.reverse_dependents("bun").iter().map(|c| c.id.clone()).collect();
+    assert!(rdeps.contains(&"node-via-bun".to_string()), "direct: {rdeps:?}");
+    assert!(rdeps.contains(&"group-ai-clis".to_string()), "transitive (via node-via-bun): {rdeps:?}");
+}
+
+#[test]
+fn manifest_phase3_wiring_loads() {
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    assert!(!reg.get("gh").unwrap().wiring.apt_repos.is_empty());
+    assert!(!reg.get("nix-yazelix-cache").unwrap().wiring.nix_conf_lines.is_empty());
+    assert!(!reg.get("ghostty-default-terminal").unwrap().wiring.alternatives.is_empty());
+    let nct = reg.get("nvidia-container-toolkit").unwrap();
+    assert!(!nct.wiring.apt_repos.is_empty() && !nct.wiring.cdi_specs.is_empty());
+}
+
+#[test]
+fn guard_verify_path_uuid_fail_closed() {
+    let ctx = RunContext::default();
+    // missing path -> refuse
+    assert!(envctl_engine::guard::verify_path_uuid("/no/such/envctl-x", "1111", &ctx).is_some());
+    // existing path with a bogus UUID that can't resolve -> refuse (never deletes on doubt)
+    assert!(envctl_engine::guard::verify_path_uuid("/", "deadbeef-0000-0000", &ctx).is_some());
+}

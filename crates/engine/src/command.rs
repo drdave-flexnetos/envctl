@@ -55,13 +55,13 @@ pub fn run_event_loop(
                 let _ = engine.detect(&sink);
             }
             EngineCommand::Install { targets, dry_run } => {
-                let _ = engine.run(RunPlan { phase: Phase::Install, targets, dry_run }, &sink);
+                let _ = engine.run(RunPlan::new(Phase::Install, targets, dry_run), &sink);
             }
             EngineCommand::Fix { targets, dry_run } => {
-                let _ = engine.run(RunPlan { phase: Phase::Fix, targets, dry_run }, &sink);
+                let _ = engine.run(RunPlan::new(Phase::Fix, targets, dry_run), &sink);
             }
             EngineCommand::Remove { targets, dry_run } => {
-                let _ = engine.run(RunPlan { phase: Phase::Remove, targets, dry_run }, &sink);
+                let _ = engine.run(RunPlan::new(Phase::Remove, targets, dry_run), &sink);
             }
             EngineCommand::AddRepo { spec, dry_run } => {
                 let _ = engine.add_repo(spec, dry_run, &sink);

@@ -69,7 +69,9 @@ requires = ["bun"]
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v node >/dev/null && readlink -f \"$(command -v node)\" 2>/dev/null | grep -q bun"]
+# Check the symlink directly (robust regardless of PATH: ~/.bun/bin is only on
+# PATH via the ~/.bashrc block, which login shells like `bash -lc` don't source).
+args = ["-lc", "{ command -v node || echo \"$HOME/.bun/bin/node\"; } | { read n; [ -x \"$n\" ] && readlink -f \"$n\" 2>/dev/null | grep -q bun; }"]
 [component.install]
 kind = "command"
 command = "bash"

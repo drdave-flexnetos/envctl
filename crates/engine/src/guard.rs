@@ -4,9 +4,10 @@
 //! cannot resolve, re-verify, or prove its precondition returns `Some(reason)`
 //! (→ `OpStatus::Refused`) — it NEVER silently passes. If `blkid`/`findmnt` are
 //! missing or error, that is treated as "cannot prove safe" → refuse.
-use crate::component::{Guard, HookRunner, Phase};
+use crate::component::{Guard, Hook, HookRunner, Phase};
 use crate::error::RunContext;
-use crate::model::OpStatus;
+use crate::event::EventSink;
+use crate::model::{OpResult, OpStatus};
 use std::path::Path;
 use std::process::Command;
 
@@ -173,4 +174,61 @@ fn uuid_is_mounted(uuid: &str) -> bool {
 /// Resolve the live root UUID once, for `RunContext` (findmnt / → blkid UUID).
 pub fn resolve_live_root_uuid() -> Option<String> {
     live_root_source().and_then(|dev| uuid_of(&dev))
+}
+
+/// A no-op HookRunner (every hook → Failed). `verify_path_uuid` only exercises
+/// UuidResolves/NotLiveDevice (which don't touch the runner), so this just
+/// satisfies `check_one`'s signature.
+struct NullRunner;
+impl HookRunner for NullRunner {
+    fn run(&self, comp: &str, phase: Phase, _h: &Hook, _d: bool, _s: &EventSink) -> OpResult {
+        OpResult {
+            component: comp.into(),
+            phase,
+            status: OpStatus::Failed,
+            exit_code: None,
+            duration_ms: 0,
+            message: "null runner".into(),
+            dry_run: false,
+        }
+    }
+}
+
+/// Fail-closed UUID re-verify for a `--purge` target: the path must exist, its
+/// UUID must resolve + re-verify, it must NOT be the live root, and the mount
+/// carrying the path must actually report the declared UUID. Returns
+/// `Some(reason)` to REFUSE (never deletes on uncertainty).
+pub fn verify_path_uuid(path: &str, uuid: &str, ctx: &RunContext) -> Option<String> {
+    let p = expand_tilde(path);
+    if !Path::new(&p).exists() {
+        return Some(format!("refused: purge target missing: {path}"));
+    }
+    if let Some(r) = check_one(&Guard::UuidResolves { uuid: uuid.into() }, &NullRunner, ctx) {
+        return Some(r);
+    }
+    if let Some(r) = check_one(&Guard::NotLiveDevice { uuid: uuid.into() }, &NullRunner, ctx) {
+        return Some(r);
+    }
+    match mount_uuid_of(&p) {
+        Some(f) if f == uuid => None,
+        Some(f) => Some(format!("refused: {path} is on UUID {f}, not the declared {uuid}")),
+        None => Some(format!("refused: cannot determine the fs UUID carrying {path}")),
+    }
+}
+
+/// `findmnt -no SOURCE --target <path>` → device, then its UUID.
+fn mount_uuid_of(path: &str) -> Option<String> {
+    let out = Command::new("findmnt")
+        .args(["-no", "SOURCE", "--target", path])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let dev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if dev.is_empty() {
+        None
+    } else {
+        uuid_of(&dev)
+    }
 }

@@ -17,8 +17,9 @@ pub mod command; // EngineCommand / EngineEvent + run_event_loop (GUI worker API
 
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
 pub use model::{
-    AddRepoSpec, ComponentState, DesktopEntry, DriftItem, DriftKind, EnvReport, OpResult, OpStatus,
-    Registry, RunPlan, RunSummary, Severity, ShellRcBlock, SystemdUnit, ToolState, Wiring,
+    AddRepoSpec, ComponentState, DataPath, DesktopEntry, DriftItem, DriftKind, EnvReport, OpResult,
+    OpStatus, Registry, ResetGates, RunPlan, RunSummary, Severity, ShellRcBlock, SystemdUnit,
+    ToolState, Wiring,
 };
 pub use event::{Event, EventSink, GpuSample, Stream, Telemetry};
 pub use error::{EngineError, RunContext};

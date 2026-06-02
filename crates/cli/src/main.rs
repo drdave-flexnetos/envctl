@@ -3,7 +3,7 @@
 //! `--apply` to act. `auto-detect` is read-only and prints a real EnvReport.
 use clap::{Parser, Subcommand};
 use envctl_engine::{
-    AddRepoSpec, Engine, EnvReport, Event, EventSink, OpStatus, Phase, RunPlan, Severity,
+    AddRepoSpec, Engine, EnvReport, Event, EventSink, OpStatus, Phase, ResetGates, RunPlan, Severity,
 };
 
 #[derive(Parser)]
@@ -38,12 +38,30 @@ enum Cmd {
         targets: Vec<String>,
         #[arg(long)]
         apply: bool,
+        /// Required (with --confirm) to reset the WHOLE roster (no targets).
+        #[arg(long)]
+        all: bool,
+        /// Acknowledge a destructive whole-roster / cascade / purge reset.
+        #[arg(long)]
+        confirm: bool,
+        /// Also remove live reverse-dependents instead of refusing.
+        #[arg(long)]
+        cascade: bool,
+        /// Keep config-kind paths (revert wiring + remove binaries only).
+        #[arg(long)]
+        keep_config: bool,
+        /// Permit deletion of declared data dirs (UUID re-verified first).
+        #[arg(long)]
+        purge: bool,
     },
     /// Auto-fix = repair broken components. DRY-RUN by default; --apply to act.
     AutoFix {
         targets: Vec<String>,
         #[arg(long)]
         apply: bool,
+        /// Confirm a system-scope fix (apt/nix/cdi/alternatives).
+        #[arg(long)]
+        confirm: bool,
     },
     /// Add a repo as a managed component (build-from-source + wire-in).
     AddRepo {
@@ -74,7 +92,21 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        other => run_action(engine, other, json),
+        other => {
+            // Usage fail-fast (exit 2) before spawning the worker. The executor
+            // also enforces these authoritatively (the GUI hits that path).
+            if let Cmd::Reset { targets, all, confirm, purge, .. } = &other {
+                if targets.is_empty() && !(*all && *confirm) {
+                    eprintln!("envctl: refusing whole-roster reset — pass --all --confirm");
+                    std::process::exit(2);
+                }
+                if *purge && !*confirm {
+                    eprintln!("envctl: refusing --purge without --confirm");
+                    std::process::exit(2);
+                }
+            }
+            run_action(engine, other, json)
+        }
     }
 }
 
@@ -86,13 +118,21 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
     let handle = std::thread::spawn(move || -> anyhow::Result<bool> {
         let ok = match cmd {
             Cmd::Install { targets, dry_run } => eng
-                .run(RunPlan { phase: Phase::Install, targets, dry_run }, &sink)?
+                .run(RunPlan::new(Phase::Install, targets, dry_run), &sink)?
                 .ok(),
-            Cmd::Reset { targets, apply } => eng
-                .run(RunPlan { phase: Phase::Remove, targets, dry_run: !apply }, &sink)?
+            Cmd::Reset { targets, apply, all, confirm, cascade, keep_config, purge } => eng
+                .run(
+                    RunPlan::new(Phase::Remove, targets, !apply)
+                        .with_gates(ResetGates { all, confirm, cascade, keep_config, purge }),
+                    &sink,
+                )?
                 .ok(),
-            Cmd::AutoFix { targets, apply } => eng
-                .run(RunPlan { phase: Phase::Fix, targets, dry_run: !apply }, &sink)?
+            Cmd::AutoFix { targets, apply, confirm } => eng
+                .run(
+                    RunPlan::new(Phase::Fix, targets, !apply)
+                        .with_gates(ResetGates { confirm, ..Default::default() }),
+                    &sink,
+                )?
                 .ok(),
             Cmd::AddRepo { git_url, id, build_cmd, dry_run } => eng
                 .add_repo(
@@ -138,6 +178,7 @@ fn print_event(ev: &Event) {
             OpStatus::SkippedBlocked => println!("\x1b[1;33m  — blocked {} ({})\x1b[0m", result.component, result.message),
             OpStatus::DryRun => println!("  · would {:?} {}", result.phase, result.component),
             OpStatus::RebootRequired => println!("\x1b[1;33m  ⟳ {} needs a REBOOT to take effect\x1b[0m", result.component),
+            OpStatus::Incomplete => println!("\x1b[1;31m  ✗ {} acted but post-state wrong: {}\x1b[0m", result.component, result.message),
             OpStatus::NoHook => {}
         },
         Event::GuardRefused { component, reason } => {
@@ -148,10 +189,11 @@ fn print_event(ev: &Event) {
                 println!("\x1b[1;32mdone.\x1b[0m");
             } else {
                 println!(
-                    "\x1b[1;33mdone with {} failed, {} refused, {} blocked.\x1b[0m",
+                    "\x1b[1;33mdone with {} failed, {} refused, {} blocked, {} incomplete.\x1b[0m",
                     summary.failed.len(),
                     summary.refused.len(),
-                    summary.skipped_blocked.len()
+                    summary.skipped_blocked.len(),
+                    summary.incomplete.len()
                 );
             }
         }

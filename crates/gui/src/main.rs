@@ -156,8 +156,10 @@ impl EnvctlApp {
                 Event::StepFinished { result } => {
                     self.busy.remove(&result.component);
                     if result.status != OpStatus::NoHook {
-                        let stream = if matches!(result.status, OpStatus::Failed | OpStatus::Refused)
-                        {
+                        let stream = if matches!(
+                            result.status,
+                            OpStatus::Failed | OpStatus::Refused | OpStatus::Incomplete
+                        ) {
                             Stream::Stderr
                         } else {
                             Stream::Stdout

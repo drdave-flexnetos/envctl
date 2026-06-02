@@ -207,8 +207,20 @@ needs_sudo = true
 command = "nvidia-ctk"
 args = ["cdi", "generate", "--output=/etc/cdi/nvidia.yaml"]
 [component.remove]
-kind = "script"
-script = "sudo apt-get remove -y nvidia-container-toolkit; sudo rm -f /etc/cdi/nvidia.yaml /etc/apt/sources.list.d/nvidia-container-toolkit.list /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg; sudo apt-get update -y"
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["remove", "-y", "nvidia-container-toolkit"]
+# Declarative system-scope wiring: the apt repo (.list + armored keyring) and the
+# generated CDI spec. reset reverts them in the safe order + backs up first.
+[[component.wiring.apt_repos]]
+list_file = "nvidia-container-toolkit.list"
+list_line = "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /"
+keyring_path = "/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+keyring_url = "https://nvidia.github.io/libnvidia-container/gpgkey"
+dearmor = true
+[[component.wiring.cdi_specs]]
+output = "/etc/cdi/nvidia.yaml"
 
 
 [[component]]
