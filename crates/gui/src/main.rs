@@ -317,6 +317,13 @@ impl eframe::App for EnvctlApp {
             self.tel.set_cadence(10000);
         }
     }
+
+    // Audit fix: on window close, tell the worker loop to shut down so it calls
+    // ctrl.stop(); otherwise the telemetry sampler thread leaks and keeps
+    // spawning nvidia-smi forever.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = self.cmd_tx.send(EngineCommand::Shutdown);
+    }
 }
 
 impl EnvctlApp {
@@ -689,8 +696,11 @@ impl EnvctlApp {
             );
         }
         if let Some(id) = to_fix {
+            // Audit fix: dry_run_default==true means "dry-run by default", so the
+            // checked box must map directly to dry_run (was inverted, running Fix
+            // for real by default and defeating the only GUI safety guard).
             self.dispatch(
-                EngineCommand::Fix { targets: vec![id.clone()], dry_run: !self.dry_run_default },
+                EngineCommand::Fix { targets: vec![id.clone()], dry_run: self.dry_run_default },
                 Some(id),
             );
         }

@@ -110,10 +110,14 @@ impl Registry {
 
 /// Kahn topo sort; ties broken by manifest (BTreeMap key) order for determinism.
 fn topo_sort(by: &BTreeMap<String, Component>) -> anyhow::Result<Vec<String>> {
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{BTreeSet, HashMap, VecDeque};
     let mut indeg: HashMap<&str, usize> = by.keys().map(|k| (k.as_str(), 0)).collect();
     for c in by.values() {
-        for dep in &c.requires {
+        // audit fix: dedup requires before counting indegree. The Kahn decrement
+        // below uses `.any()` (fires once per unique dep), so counting every
+        // occurrence here made a duplicate dep (requires=["bun","bun"]) leave
+        // indegree stuck above 0 -> a bogus DependencyCycle.
+        for dep in c.requires.iter().collect::<BTreeSet<_>>() {
             if !by.contains_key(dep) {
                 return Err(EngineError::UnknownDependency {
                     by: c.id.clone(),
@@ -588,7 +592,17 @@ impl AiAgent {
                 "--output-format".into(),
                 "text".into(),
             ],
-            AiAgent::Codex => vec!["exec".into(), "--cd".into(), clone_dir.into(), prompt.into()],
+            // audit fix: `--cd` only sets cwd; without `--sandbox workspace-write`
+            // codex exec is not filesystem-confined to the clone. Add the sandbox
+            // flag so headless Codex is structurally confined like Claude's --add-dir.
+            AiAgent::Codex => vec![
+                "exec".into(),
+                "--sandbox".into(),
+                "workspace-write".into(),
+                "--cd".into(),
+                clone_dir.into(),
+                prompt.into(),
+            ],
             AiAgent::Gemini => vec!["-p".into(), prompt.into()],
             AiAgent::Kimi => vec!["-p".into(), prompt.into()],
         }

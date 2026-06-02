@@ -264,6 +264,7 @@ fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &Event
             // remote clone). Hooks stay disabled.
             let mut c = Command::new("git");
             c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"])
+                .arg("--") // audit fix: `--` => a local_path starting with `-` can't be parsed as a git flag
                 .arg(local)
                 .arg(clone_dir);
             stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink)?;
@@ -295,7 +296,10 @@ fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &Event
     if let Some(r) = &spec.git_ref {
         let mut c = git_hardened();
         c.arg("-C").arg(clone_dir).args(["checkout", r]);
-        let _ = stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink); // best-effort
+        // audit fix: checkout must be authoritative — a failed checkout would otherwise
+        // leave HEAD on the stale ref and record a misleading resolved_sha. The fresh-clone
+        // path already positions HEAD via `--branch`, but reuse/fetch relies on this checkout.
+        stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink)?;
     }
     Ok(resolve_sha(clone_dir).unwrap_or_default())
 }

@@ -72,7 +72,9 @@ const TABLE: &[Detector] = &[
         system: BuildSystem::Node,
         signals: &["package.json"],
         build_cmd: "if command -v bun >/dev/null; then bun install && (bun run build || true); else npm ci || npm install; npm run build --if-present; fi",
-        artifacts: &["dist/*", "build/*", "bin/*", "node_modules/.bin/*"],
+        // Audit fix: dropped node_modules/.bin/* — those are symlinks to third-party
+        // dep CLIs (eslint/tsc/vite), not the repo's own artifacts.
+        artifacts: &["dist/*", "build/*", "bin/*"],
     },
     Detector {
         system: BuildSystem::Python,

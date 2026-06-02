@@ -19,8 +19,21 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
             // Only flag as Missing if there's actually an install path (an
             // install hook or owned wiring). Pure "operation" components
             // (e.g. boot-repair ops, which only have fix) are not "missing".
+            // AUDIT-FIX (#4): also count system-scope wiring footprints
+            // (path_entries/apt_repos/nix_conf_lines/cdi_specs/alternatives), not
+            // just shell_rc — a component whose only footprint is system wiring was
+            // previously invisible to drift.
             let installable = comp
-                .map(|x| x.install.is_some() || !x.wiring.shell_rc.is_empty())
+                .map(|x| {
+                    let w = &x.wiring;
+                    x.install.is_some()
+                        || !w.shell_rc.is_empty()
+                        || !w.path_entries.is_empty()
+                        || !w.apt_repos.is_empty()
+                        || !w.nix_conf_lines.is_empty()
+                        || !w.cdi_specs.is_empty()
+                        || !w.alternatives.is_empty()
+                })
                 .unwrap_or(false);
             if installable {
                 items.push(DriftItem {

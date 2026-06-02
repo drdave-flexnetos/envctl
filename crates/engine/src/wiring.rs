@@ -397,20 +397,27 @@ fn apply_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> {
             let p = parent.to_string_lossy().into_owned();
             sudo(&["install", "-dm", "755", &p])?;
         }
+        // AUDIT-FIX: `set -o pipefail` so a curl failure aborts the pipe instead
+        // of being masked by tee/gpg success (which would leave an empty/partial
+        // keyring that the exists() guard then skips refetching forever).
         let fetch = if r.dearmor {
             format!(
-                "curl -fsSL {url} | sudo gpg --dearmor -o {out}",
+                "set -o pipefail; curl -fsSL {url} | sudo gpg --dearmor -o {out}",
                 url = sh_q(&r.keyring_url),
                 out = sh_q(&r.keyring_path)
             )
         } else {
             format!(
-                "curl -fsSL {url} | sudo tee {out} >/dev/null",
+                "set -o pipefail; curl -fsSL {url} | sudo tee {out} >/dev/null",
                 url = sh_q(&r.keyring_url),
                 out = sh_q(&r.keyring_path)
             )
         };
-        run_bash(&fetch)?;
+        if let Err(e) = run_bash(&fetch) {
+            // AUDIT-FIX: drop the partial keyring so the next run retries the fetch.
+            let _ = sudo(&["rm", "-f", &r.keyring_path]);
+            return Err(e);
+        }
         sudo(&["chmod", "go+r", &r.keyring_path])?;
         rep.note(format!("wrote keyring {}", r.keyring_path));
         changed = true;
@@ -545,6 +552,17 @@ fn apply_alternative(a: &Alternative, rep: &mut WiringReport) -> anyhow::Result<
 
 fn revert_alternative(a: &Alternative, rep: &mut WiringReport) -> anyhow::Result<()> {
     let Some(target) = resolve_target(&a.target) else {
+        // AUDIT-FIX: the target no longer resolves (e.g. binary uninstalled), but
+        // the engine-owned alternative slot may still be installed. Fall back to
+        // --remove-all so we don't silently leave it behind.
+        if let Err(e) = sudo(&["update-alternatives", "--remove-all", &a.name]) {
+            rep.fail("alternative", e);
+            return Ok(());
+        }
+        rep.note(format!(
+            "removed alternative {} (target '{}' unresolved; used --remove-all)",
+            a.name, a.target
+        ));
         return Ok(());
     };
     if let Err(e) = sudo(&["update-alternatives", "--remove", &a.name, &target]) {

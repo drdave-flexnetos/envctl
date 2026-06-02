@@ -170,7 +170,15 @@ fn install_artifact(plan: &InstallPlan, a: &ArtifactPlan, force: bool, dry_run: 
             if dry_run {
                 return Ok(Some(format!("{target_s} (would back up the existing file first)")));
             }
-            let bak = format!("{target_s}.bak.{}", now_epoch());
+            // AUDIT-FIX: never overwrite an existing backup — bump a suffix until the
+            // `.bak` path is unique so a same-instant second backup can't clobber the
+            // first (data loss).
+            let mut bak = format!("{target_s}.bak.{}", now_epoch());
+            let mut n = 0u32;
+            while Path::new(&bak).symlink_metadata().is_ok() {
+                n += 1;
+                bak = format!("{target_s}.bak.{}.{n}", now_epoch());
+            }
             std::fs::rename(&target, &bak)?;
         }
     }
@@ -193,14 +201,21 @@ fn shadows_system(name: &str) -> bool {
     if WELL_KNOWN.contains(&name) {
         return true;
     }
-    let lb = local_bin();
+    // AUDIT-FIX: canonicalize ~/.local/bin so a PATH entry that points at it via a
+    // trailing slash, unexpanded `~`, or symlinked HOME still excludes itself —
+    // otherwise our OWN managed symlink would count as a shadow and an idempotent
+    // re-install would be falsely refused. Fall back to the raw path if canonicalize
+    // fails (e.g. the dir doesn't exist yet).
+    let lb_raw = local_bin();
+    let lb = std::fs::canonicalize(&lb_raw).unwrap_or_else(|_| lb_raw.clone());
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(':') {
             if dir.is_empty() {
                 continue;
             }
             let p = Path::new(dir);
-            if p == lb {
+            let p_canon = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            if p == lb_raw || p_canon == lb {
                 continue;
             }
             if p.join(name).exists() {
@@ -246,8 +261,11 @@ fn repo_store() -> PathBuf {
 fn ensure_private_bin(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
-fn now_epoch() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+// AUDIT-FIX: nanosecond resolution so two foreign-file backups taken within the
+// same second don't produce the same `.bak.<n>` suffix and clobber each other
+// (matches wiring.rs, which already uses as_nanos()).
+fn now_epoch() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
 }
 
 #[cfg(test)]

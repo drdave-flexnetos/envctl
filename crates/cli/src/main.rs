@@ -364,7 +364,9 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
         // Build the transformed clone AS-IS (don't re-run the agent).
         let bspec = AddRepoSpec { strategy: BuildStrategy::AsIs, allow_build: true, ..spec };
         let (sink, rx) = EventSink::channel();
-        let _ = engine.add_repo(bspec, false, &sink);
+        // Audit fix: capture the summary instead of discarding it so a failed
+        // post-connect build exits 1, matching run_action's contract.
+        let res = engine.add_repo(bspec, false, &sink)?;
         drop(sink);
         for ev in rx.iter() {
             if json {
@@ -372,6 +374,9 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
             } else {
                 print_event(&ev);
             }
+        }
+        if !res.ok() {
+            std::process::exit(1);
         }
     } else {
         println!("\nenvctl: clone is ready. Build what you made with:");

@@ -7,7 +7,7 @@
 //! Graphviz DOT + JSON — optionally annotated with live detect/drift state from an
 //! `EnvReport`. Pure + read-only.
 use crate::model::{EnvReport, Registry, Severity};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 /// Structural summary of the dependency graph.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -137,8 +137,14 @@ pub fn dependency_paths(reg: &Registry, id: &str) -> Vec<Vec<String>> {
     if reg.get(id).is_none() {
         return vec![];
     }
-    // walk requires recursively, collecting paths root..id
-    fn walk(reg: &Registry, id: &str, acc: &mut Vec<String>, out: &mut Vec<Vec<String>>, seen: &mut BTreeSet<String>) {
+    // walk requires recursively, collecting paths root..id.
+    // AUDIT FIX (#15): the cycle guard must be per-path (the current ancestor
+    // chain in `acc`), not a persistent global edge-set. A global `seen` set
+    // skips a shared lower sub-DAG on the second arrival from a different upper
+    // branch, silently dropping valid paths (e.g. a diamond yields 2 of 4
+    // paths). Guarding against `acc.contains(r)` prevents only true cycles
+    // while the DAG guarantee bounds the number of distinct paths.
+    fn walk(reg: &Registry, id: &str, acc: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
         acc.push(id.to_string());
         let comp = reg.get(id);
         let reqs = comp.map(|c| c.requires.clone()).unwrap_or_default();
@@ -148,15 +154,15 @@ pub fn dependency_paths(reg: &Registry, id: &str) -> Vec<Vec<String>> {
             out.push(p);
         } else {
             for r in reqs {
-                if seen.insert(format!("{id}->{r}")) {
-                    walk(reg, &r, acc, out, seen);
+                if !acc.contains(&r) {
+                    walk(reg, &r, acc, out);
                 }
             }
         }
         acc.pop();
     }
     let mut out = Vec::new();
-    walk(reg, id, &mut Vec::new(), &mut out, &mut BTreeSet::new());
+    walk(reg, id, &mut Vec::new(), &mut out);
     out
 }
 

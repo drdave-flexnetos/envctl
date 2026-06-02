@@ -307,13 +307,16 @@ fn has_system_scope(w: &Wiring) -> bool {
         || !w.alternatives.is_empty()
 }
 
-/// True iff every shell_rc marker block this component owns is present (matches
-/// detect.rs::wiring_present; suffix-agnostic so wizard-written blocks count).
+/// True iff every wiring footprint this component owns is present on disk
+/// (matches detect.rs::wiring_present; suffix-agnostic so wizard-written blocks
+/// count). AUDIT-FIX (#4): previously only shell_rc was inspected, so a
+/// component whose only footprint is system-scope wiring (path_entries/apt_repos/
+/// nix_conf_lines/cdi_specs/alternatives) always reported present — its absence
+/// was undetectable. Now each owned footprint is conservatively probed.
 fn wiring_present(comp: &Component) -> bool {
-    if comp.wiring.shell_rc.is_empty() {
-        return true; // nothing to reconcile
-    }
-    comp.wiring.shell_rc.iter().all(|blk| {
+    let w = &comp.wiring;
+
+    let shell_rc_ok = w.shell_rc.iter().all(|blk| {
         let file = match blk.file.strip_prefix("~/") {
             Some(rest) => match std::env::var("HOME") {
                 Ok(h) => format!("{h}/{rest}"),
@@ -324,7 +327,34 @@ fn wiring_present(comp: &Component) -> bool {
         std::fs::read_to_string(&file)
             .map(|t| t.contains(&format!("BEGIN {}", blk.marker)))
             .unwrap_or(false)
-    })
+    });
+
+    // path_entries are realized into the engine-owned "envctl PATH" block in
+    // ~/.bashrc (see wiring::path_block); probe for that marker.
+    let path_ok = w.path_entries.is_empty() || {
+        match std::env::var("HOME") {
+            Ok(h) => std::fs::read_to_string(format!("{h}/.bashrc"))
+                .map(|t| t.contains("BEGIN envctl PATH"))
+                .unwrap_or(false),
+            Err(_) => false,
+        }
+    };
+
+    // System-scope footprints: each is present iff its on-disk target exists
+    // (mirrors wiring.rs apply targets: SOURCES_D/<list_file>, NIX_CONF line,
+    // cdi output file, alternative link).
+    let apt_ok = w.apt_repos.iter().all(|r| {
+        std::path::Path::new(&format!("/etc/apt/sources.list.d/{}", r.list_file)).exists()
+    });
+    let nix_ok = w.nix_conf_lines.is_empty() || {
+        std::fs::read_to_string("/etc/nix/nix.custom.conf")
+            .map(|t| w.nix_conf_lines.iter().all(|l| t.contains(&l.line)))
+            .unwrap_or(false)
+    };
+    let cdi_ok = w.cdi_specs.iter().all(|c| std::path::Path::new(&c.output).exists());
+    let alt_ok = w.alternatives.iter().all(|a| std::path::Path::new(&a.link).exists());
+
+    shell_rc_ok && path_ok && apt_ok && nix_ok && cdi_ok && alt_ok
 }
 
 fn emit_wiring(comp: &Component, sink: &EventSink, rep: &crate::wiring::WiringReport, verb: &str) {
@@ -536,8 +566,22 @@ pub fn add_repo(
     // INSTALL + WIRE-IN (symlink, refuse-shadow, refuse-unmanaged-unless-force).
     let iplan = build_install_plan(&id, &spec, &outcome);
     let ireport = crate::install::install_and_wire(&iplan, spec.force, false, sink);
-    if !ireport.failures.is_empty() {
+    // AUDIT-FIX (#24): a half-installed add-repo must NOT persist a drop-in. If
+    // install_and_wire reported failures — or produced no installed paths when
+    // installs were expected — the symlinks/targets we'd record never landed, so
+    // writing components.d/<id>.toml would create permanent drift (and a later
+    // `reset <id>` would try to unwire links that never existed). Bail BEFORE
+    // write_dropin so a failed install leaves nothing registered.
+    let installs_expected = !iplan.artifacts.is_empty();
+    if !ireport.failures.is_empty() || (installs_expected && ireport.installed_paths.is_empty()) {
         summary.failed.push(format!("{id}/install"));
+        sink.emit(Event::Log {
+            component: id.clone(),
+            stream: Stream::Stderr,
+            line: format!("install failed for '{id}' — not registering a drop-in (no half-installed component persisted)"),
+        });
+        sink.emit(Event::RunFinished { summary: summary.clone() });
+        return Ok(summary);
     }
 
     let final_targets = if ireport.installed_paths.is_empty() { installed.clone() } else { ireport.installed_paths.clone() };

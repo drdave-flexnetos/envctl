@@ -14,6 +14,7 @@ use crate::event::{Event, EventSink, Stream};
 use crate::model::{OpResult, OpStatus};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::process::CommandExt; // for pre_exec (audit fix #20)
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -35,11 +36,21 @@ impl HookRunner for ProcessRunner {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Audit fix (#20): own a process group (setsid) so a per-phase timeout can
+        // reap the whole child tree. Without this we only kill the immediate
+        // bash/sudo and the real grandchild workload survives. Mirrors addrepo.rs.
+        unsafe {
+            cmd.pre_exec(|| {
+                let _ = rustix::process::setsid();
+                Ok(())
+            });
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return mk(comp, phase, OpStatus::Failed, None, &format!("spawn failed: {e}")),
         };
+        let pid = child.id();
 
         let log = Arc::new(Mutex::new(if streaming { open_run_log() } else { None }));
         let tail = Arc::new(Mutex::new(Vec::<String>::new())); // last stderr lines for the message
@@ -51,7 +62,7 @@ impl HookRunner for ProcessRunner {
             pump(r, comp.to_string(), Stream::Stderr, streaming, sink.clone(), log.clone(), Some(tail.clone()))
         });
 
-        let (code, success, timed_out) = wait_timeout(&mut child, timeout_for(phase));
+        let (code, success, timed_out) = wait_timeout(&mut child, timeout_for(phase), pid);
         if let Some(h) = h_out {
             let _ = h.join();
         }
@@ -134,13 +145,16 @@ fn pump<R: Read + Send + 'static>(
 }
 
 /// Poll the child to completion or kill it past the deadline.
-fn wait_timeout(child: &mut Child, dur: Duration) -> (Option<i32>, bool, bool) {
+fn wait_timeout(child: &mut Child, dur: Duration, pid: u32) -> (Option<i32>, bool, bool) {
     let deadline = Instant::now() + dur;
     loop {
         match child.try_wait() {
             Ok(Some(st)) => return (st.code(), st.success(), false),
             Ok(None) => {
                 if Instant::now() >= deadline {
+                    // Audit fix (#20): kill the whole process group (grandchildren
+                    // too), not just the immediate bash/sudo, before reaping.
+                    kill_group(pid);
                     let _ = child.kill();
                     let st = child.wait().ok();
                     return (st.and_then(|s| s.code()), false, true);
@@ -149,6 +163,13 @@ fn wait_timeout(child: &mut Child, dur: Duration) -> (Option<i32>, bool, bool) {
             }
             Err(_) => return (None, false, false),
         }
+    }
+}
+
+/// Kill the child's whole process group (it is the group leader via setsid).
+fn kill_group(pid: u32) {
+    if let Some(p) = rustix::process::Pid::from_raw(pid as i32) {
+        let _ = rustix::process::kill_process_group(p, rustix::process::Signal::Kill);
     }
 }
 
@@ -167,7 +188,13 @@ fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
     } else {
-        &s[s.len() - max..]
+        // Audit fix (#21): walk forward to the next char boundary so slicing a
+        // multibyte UTF-8 tail (real installer failure output) can't panic.
+        let mut start = s.len().saturating_sub(max);
+        while !s.is_char_boundary(start) {
+            start += 1;
+        }
+        &s[start..]
     }
 }
 
