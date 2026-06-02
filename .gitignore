@@ -4,5 +4,5 @@ Cargo.lock.bak
 *.swp
 .DS_Store
 
-/envctl.lock
-manifest/envctl.lock
+# envctl.lock IS committed — it is the content-hashed manifest-of-record and the
+# baseline for `envctl lock --check` (the CI drift gate). Do not ignore it.

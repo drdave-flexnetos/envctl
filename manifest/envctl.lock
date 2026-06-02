@@ -1,0 +1,268 @@
+version = 1
+
+[components.boot-repair-dev]
+content_hash = "9398e002b5c1b054"
+requires = []
+resolved = ""
+
+[components.boot-repair-diagnose]
+content_hash = "5baaa00663c1df2f"
+requires = []
+resolved = ""
+
+[components.boot-repair-finalize]
+content_hash = "8a008bbffa0af6cf"
+requires = []
+resolved = ""
+
+[components.boot-repair-rename-pro]
+content_hash = "85a71b619f2f682a"
+requires = []
+resolved = ""
+
+[components.bun]
+content_hash = "a55314a5a86ba851"
+requires = []
+resolved = ""
+
+[components.claude-code-cli]
+content_hash = "af5110cb4a34882c"
+requires = []
+resolved = ""
+
+[components.codex-cli]
+content_hash = "9471ae9003dfb7a2"
+requires = ["bun"]
+resolved = ""
+
+[components.cuda-oxide]
+content_hash = "bb4fa13d0e0ed95f"
+requires = [
+    "cuda-toolkit",
+    "llvm-clang",
+    "nvidia-open",
+    "rust-nightly-cuda-oxide",
+]
+resolved = ""
+
+[components.cuda-toolkit]
+content_hash = "c5be706d2f4a8bac"
+requires = ["nvidia-cuda-repo"]
+resolved = ""
+
+[components.devin-cli]
+content_hash = "ec7e63442c845941"
+requires = []
+resolved = ""
+
+[components.gemini-cli]
+content_hash = "4a80a4e40bd660aa"
+requires = ["bun"]
+resolved = ""
+
+[components.gh]
+content_hash = "11f7017702ce9809"
+requires = []
+resolved = ""
+
+[components.ghostty]
+content_hash = "ebb42fe2d9cd9fcb"
+requires = []
+resolved = ""
+
+[components.ghostty-default-terminal]
+content_hash = "1762b9eca6e7fb72"
+requires = ["ghostty"]
+resolved = ""
+
+[components.gpu-verify-scripts]
+content_hash = "6856640c3772d786"
+requires = [
+    "cuda-oxide",
+    "nvidia-container-toolkit",
+    "nvidia-open",
+    "pytorch-venv",
+]
+resolved = ""
+
+[components.group-ai-clis]
+content_hash = "120fb5a65c2d2201"
+requires = [
+    "claude-code-cli",
+    "codex-cli",
+    "devin-cli",
+    "gemini-cli",
+    "kimi-cli",
+    "node-via-bun",
+]
+resolved = ""
+
+[components.group-boot-repair]
+content_hash = "6ccc5fd04c0426b0"
+requires = []
+resolved = ""
+
+[components.group-gpu-stack]
+content_hash = "14a9afbfed4792e3"
+requires = [
+    "cuda-oxide",
+    "cuda-toolkit",
+    "gpu-verify-scripts",
+    "llvm-clang",
+    "nvidia-container-toolkit",
+    "nvidia-cuda-repo",
+    "nvidia-open",
+    "pytorch-venv",
+    "rust-nightly-cuda-oxide",
+]
+resolved = ""
+
+[components.group-nix-yazelix]
+content_hash = "c50c7448927d3eae"
+requires = [
+    "ghostty-default-terminal",
+    "home-manager",
+    "nix",
+    "nix-yazelix-cache",
+    "yazelix",
+    "yazelix-config",
+    "yazelix-desktop",
+    "yazelix-shell",
+]
+resolved = ""
+
+[components.home-manager]
+content_hash = "4ba601bcc9326bb6"
+requires = ["nix"]
+resolved = ""
+
+[components.keepassxc]
+content_hash = "e43fd87c3b6f30ac"
+requires = []
+resolved = ""
+
+[components.kimi-cli]
+content_hash = "c9e0c4b4426df1c3"
+requires = []
+resolved = ""
+
+[components.llvm-clang]
+content_hash = "4eca839843e0c197"
+requires = ["nvidia-cuda-repo"]
+resolved = ""
+
+[components.meta-base-sanity]
+content_hash = "91582b35367997db"
+requires = [
+    "ghostty",
+    "podman",
+]
+resolved = ""
+
+[components.nerd-fonts]
+content_hash = "ca4c37420854c9e3"
+requires = []
+resolved = ""
+
+[components.nix]
+content_hash = "b6e1fcab48daf321"
+requires = []
+resolved = ""
+
+[components.nix-yazelix-cache]
+content_hash = "f986c70d2091b3d0"
+requires = ["nix"]
+resolved = ""
+
+[components.node-via-bun]
+content_hash = "34fb0dc5decd8d32"
+requires = ["bun"]
+resolved = ""
+
+[components.nvidia-container-toolkit]
+content_hash = "362fd2ef290986c4"
+requires = [
+    "nvidia-open",
+    "podman",
+]
+resolved = ""
+
+[components.nvidia-cuda-repo]
+content_hash = "74fcdf697a37571b"
+requires = []
+resolved = ""
+
+[components.nvidia-open]
+content_hash = "c3e3d91e6e86ab92"
+requires = ["nvidia-cuda-repo"]
+resolved = ""
+
+[components.podman]
+content_hash = "a8a52b0418fb9be3"
+requires = []
+resolved = ""
+
+[components.pytorch-venv]
+content_hash = "10985f6258af9f59"
+requires = []
+resolved = ""
+
+[components.rtk]
+content_hash = "5f2c300db44fca21"
+requires = ["rustup"]
+resolved = ""
+
+[components.rust-nightly-cuda-oxide]
+content_hash = "2aecc6927295ce12"
+requires = ["rustup"]
+resolved = ""
+
+[components.rustup]
+content_hash = "27302c5aae65a605"
+requires = []
+resolved = ""
+
+[components.uv]
+content_hash = "2a3557de0adfa5c4"
+requires = []
+resolved = ""
+
+[components.virt-stack]
+content_hash = "29f041129e58bdbd"
+requires = []
+resolved = ""
+
+[components.vite]
+content_hash = "7a47bf1d2aec1015"
+requires = ["bun"]
+resolved = ""
+
+[components.wasmer]
+content_hash = "9b42a3bc38d065bc"
+requires = []
+resolved = ""
+
+[components.yazelix]
+content_hash = "bd314a45c059f954"
+requires = [
+    "ghostty",
+    "home-manager",
+    "nix",
+    "nix-yazelix-cache",
+]
+resolved = ""
+
+[components.yazelix-config]
+content_hash = "6db6b3fd332709a9"
+requires = ["yazelix"]
+resolved = ""
+
+[components.yazelix-desktop]
+content_hash = "955af0895be53203"
+requires = ["yazelix"]
+resolved = ""
+
+[components.yazelix-shell]
+content_hash = "d227c7451abed6e3"
+requires = ["yazelix"]
+resolved = ""
