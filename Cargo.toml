@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/engine", "crates/cli", "crates/gui"]
+members = [
+  "crates/engine",
+  "crates/cli",
+  "crates/gui",
+  "crates/secrets-engine",
+  "crates/secrets-proto",
+  "crates/secretd",
+  "crates/secretctl",
+  "crates/secrets-store-libsql",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,22 +18,64 @@ rust-version = "1.80"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+# --- shared rows: keep envctl's tighter pins (superset of env-ctl's caret) ---
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.135"
 toml = "0.8.19"
 anyhow = "1.0.95"
 thiserror = "2.0.11"
-sysinfo = "0.33.1"
-which = "7.0.1"
-glob = "0.3.1"
-rustix = { version = "0.38", features = ["process"] }
 chrono = { version = "0.4.39", default-features = false, features = ["clock"] }
 clap = { version = "4.5.27", features = ["derive"] }
+which = "7.0.1"
+# --- CONFLICT 1 (HF-17 + OI-6): rustix feature delta. envctl=["process"],
+# --- env-ctl=["process","net","time"]. UNION wins (`time` = CLOCK_BOOTTIME for the
+# --- OI-6 monotonic clock-rollback fence on the 24h relay window). All pure-Rust on Linux. ---
+rustix = { version = "0.38", features = ["process", "net", "time"] }
+# --- envctl-only rows (unchanged) ---
+sysinfo = "0.33.1"
+glob = "0.3.1"
 eframe = "0.30.0"
 egui = "0.30.0"
 egui_extras = "0.30.0"
+# --- env-ctl-only rows (added verbatim; no conflict — none of these names exist in envctl today) ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "net", "sync", "fs", "process", "signal", "time", "io-util"] }
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
+tower = "0.5"
+hyper = { version = "1.5", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
+webpki-roots = "0.26"
+# store backend (OI-1 (a)): libSQL `remote` only — default-features=false drops the bundled
+# C-SQLite `core` (libsql-ffi/libsql-sys) so nothing C is linked (proven by ci/gates/no-c.sh Gate 3a).
+libsql = { version = "0.9.30", default-features = false, features = ["remote"] }
+# crypto (engine; pure-Rust, no C/SQLCipher)
+chacha20poly1305 = { version = "0.10", features = ["alloc", "getrandom", "rand_core"] }
+argon2 = { version = "0.5", features = ["zeroize"] }
+hkdf = "0.12"
+sha2 = "0.10"
+blake3 = "1.5"
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+rand = "0.8"
+getrandom = "0.2"
+# TLS / local CA: pin ONE rustls on the RING path (NOT aws-lc-rs)
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pemfile = "2.2"
+rustls-pki-types = "1"
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+x509-parser = "0.16"
+async-trait = "0.1"
+# --- internal path deps: keep envctl's + add the three secrets path deps ---
 envctl-engine = { path = "crates/engine" }
+envctl-secrets-engine = { path = "crates/secrets-engine" }
+envctl-secrets-proto = { path = "crates/secrets-proto" }
+envctl-secrets-store-libsql = { path = "crates/secrets-store-libsql" }
 
-# Build all three crates in release for a snappy GUI.
+# Build all crates in release for a snappy GUI.
 [profile.release]
 opt-level = 2

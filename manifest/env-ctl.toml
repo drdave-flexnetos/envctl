@@ -1,0 +1,163 @@
+# manifest/env-ctl.toml — env-ctl secrets vault + credential broker (Profile A: on-box, USB unlock)
+# Builds the envctl-secrets-* workspace crates (secretd + secretctl; secrets-store-libsql builds
+# transitively as a secretd dep) and wires secretd as a systemd USER service.
+# detect == verify (binaries + unit present, daemon self-check green) so drift never nudges a
+# destructive rebuild. Vault purge is the native data_paths path (reset --purge), NOT a side component.
+#
+# ENABLED (Phase 6 landed): secretd's main now serves the control plane and answers `--self-check`
+# (a non-serving startup pre-flight), so the verify hook below is real and the systemd unit ships
+# enable=true. The CI enable gate (ci/gates/enable.sh) asserts the post-Phase-6 invariant: main.rs is
+# no longer a `todo!()` scaffold AND an enabled manifest's `secretd --self-check` surface exists.
+# (Pre-Phase-6 this stayed enable=false so an auto-enabled unit could not panic-loop into a false
+# "vault is up" signal — that scaffold guard is now retired.)
+
+[[component]]
+id = "env-ctl"
+name = "env-ctl secrets daemon"
+description = "Pure-Rust gRPC secrets vault + credential broker (secretd/secretctl). AEAD-at-rest, <=24h peer-bound relay bearers, in-process TLS for the relay edge. Control = UDS + SO_PEERCRED owner-only; data = loopback."
+requires = ["rustup"]      # cargo + stable >= 1.80 (id "rustup" defined in manifest/base.toml)
+destructive = false
+
+# DETECT == the "already installed AND healthy enough to be present" predicate.
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "test -x \"$HOME/.cargo/bin/secretd\" && test -x \"$HOME/.cargo/bin/secretctl\" && test -f \"$HOME/.config/systemd/user/env-ctl.service\""]
+
+# INSTALL: MSRV-gate, build from the in-workspace sources, place bins, create XDG dirs (0700).
+# Does NOT init the vault or enroll keyslots — those are operator-driven, USB-gated daemon ops.
+[component.install]
+kind = "script"
+script = '''
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# MSRV gate (rust-version = 1.80 in the workspace). Fail closed, do not silently upgrade.
+ver="$(cargo --version | awk '{print $2}')"
+printf '%s\n1.80.0\n' "$ver" | sort -V -C || { echo "FATAL: cargo $ver < MSRV 1.80"; exit 1; }
+
+# Post-merge this IS the envctl workspace; pre-merge override with ENV_CTL_REPO.
+repo="${ENV_CTL_REPO:-$HOME/Desktop/envctl}"
+test -d "$repo" || { echo "FATAL: workspace not found at $repo (set ENV_CTL_REPO)"; exit 1; }
+
+cargo build --release --manifest-path "$repo/Cargo.toml" \
+  -p envctl-secretd -p envctl-secretctl
+
+install -Dm755 "$repo/target/release/secretd"   "$HOME/.cargo/bin/secretd"
+install -Dm755 "$repo/target/release/secretctl" "$HOME/.cargo/bin/secretctl"
+
+# XDG dirs, fail-closed perms (ARCHITECTURE layout). RUNTIME dir is created by the unit at start.
+install -d -m700 "$HOME/.config/env-ctl"
+install -d -m700 "$HOME/.local/share/env-ctl"
+install -d -m700 "$HOME/.local/state/env-ctl"
+'''
+
+# VERIFY: bins answer, AND secretd's own non-serving self-check passes. `secretd --self-check` runs
+# the daemon's startup pre-flight (ring crypto provider, XDG paths, store-config validation) and
+# EXITS — it never binds the socket, connects the store, or serves, so verify cannot block and is safe
+# to run while the daemon is live. A misconfigured/un-built daemon reports verify=false (drift
+# visible) WITHOUT triggering a destructive fix — detect, not verify, is the install predicate.
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; secretctl --help >/dev/null && secretd --self-check >/dev/null"]
+
+# FIX: idempotent rebuild + reinstall (the dev-tools.toml `cargo install --force` analogue).
+[component.fix]
+kind = "script"
+script = '''
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+repo="${ENV_CTL_REPO:-$HOME/Desktop/envctl}"
+cargo build --release --manifest-path "$repo/Cargo.toml" -p envctl-secretd -p envctl-secretctl
+install -Dm755 "$repo/target/release/secretd"   "$HOME/.cargo/bin/secretd"
+install -Dm755 "$repo/target/release/secretctl" "$HOME/.cargo/bin/secretctl"
+systemctl --user daemon-reload || true
+systemctl --user try-restart env-ctl.service || true
+'''
+
+# REMOVE: disable + drop the unit and bins. The vault is data_paths and is touched ONLY on --purge.
+[component.remove]
+kind = "script"
+script = '''
+set -euo pipefail
+systemctl --user disable --now env-ctl.service 2>/dev/null || true
+rm -f "$HOME/.cargo/bin/secretd" "$HOME/.cargo/bin/secretctl"
+systemctl --user daemon-reload || true
+# vault.db / ca/ / audit are data_paths+config_paths below — envctl deletes them ONLY with --purge,
+# after a UUID re-verify. remove() never touches user data (THREAT-MODEL: user data is never touched).
+'''
+
+# ---- WIRING (engine-owned, reversible: backup-then-excise on reset; see engine/src/wiring.rs) ----
+[component.wiring]
+path_entries = ["~/.cargo/bin"]
+
+[[component.wiring.shell_rc]]
+file = "~/.bashrc"
+marker = "env-ctl"     # engine writes "BEGIN env-ctl (added by envctl)" / "END env-ctl" guard lines
+content = '''
+export SECRETCTL_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/env-ctl/control.sock"
+'''
+
+[[component.wiring.systemd_user]]
+name = "env-ctl.service"
+enable = true           # Phase 6 landed: secretd serves + answers --self-check (CI-asserted invariant).
+content = '''
+[Unit]
+Description=env-ctl secrets vault + credential broker
+Documentation=file:///home/drdave/Desktop/envctl/docs/ARCHITECTURE.md
+# No network ordering for the control/data planes (UDS + loopback). Only the relay HTTPS
+# edge needs the network, and that is operator-enabled, not a startup dependency.
+After=default.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=%h/.cargo/bin/secretd
+Restart=on-failure
+RestartSec=10
+# Fail-closed memory hygiene is enforced IN secretd (mlockall + RLIMIT_CORE=0 + MADV_DONTDUMP;
+# the daemon refuses to start if mlockall fails — FS-S4). The unit only RAISES the ceiling the
+# daemon needs; it never substitutes for the in-process refusal.
+LimitMEMLOCK=infinity
+LimitCORE=0
+# Defense-in-depth sandbox (does not weaken the in-process TCB story):
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/env-ctl %h/.local/state/env-ctl %t/env-ctl
+RuntimeDirectory=env-ctl
+RuntimeDirectoryMode=0700
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# Pulling the enrolled USB auto-relocks within the drain grace; stop must allow the daemon to
+# drain in-flight relays/streams.
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=default.target
+'''
+
+# ---- VAULT DATA: deleted ONLY by `envctl reset env-ctl --purge` (after UUID re-verify) ----
+[[component.wiring.data_paths]]
+path = "~/.local/share/env-ctl"   # vault.db (0600), ca/ (local CA private material)
+[[component.wiring.data_paths]]
+path = "~/.local/state/env-ctl"   # secretd.log, durable hash-chained audit mirror
+
+# ---- CONFIG: kept with `--keep-config`, else engine-removed on reset ----
+# This is where docs/ops/08's secretd.toml store-backend selection lives; auth tokens are NEVER
+# stored here.
+[[component.wiring.config_paths]]
+path = "~/.config/env-ctl"
+
+# ---- GUARD: USB/storage PARTUUID pre-filter on destructive phases. This is a fast pre-flight ----
+# ---- ONLY; the daemon proves keyfile POSSESSION cryptographically (REQ-SEC-3, FS-S9). ----
+[[component.guards]]
+kind = "hook_succeeds"
+[component.guards.hook]
+kind = "command"
+command = "bash"
+args = ["-lc", "lsblk -dno PARTUUID | grep -q . || { echo 'FATAL: no PARTUUID storage for USB keyslot pre-filter'; exit 1; }"]

@@ -1,0 +1,54 @@
+# envctl-secrets-store-libsql
+#
+# WORKSPACE MEMBER (OI-1 RESOLVED (a)). The libSQL `Store` backend, C-quarantined to this crate.
+#
+# C-purity boundary (the upheld tenet = "no C *library* in the trust boundary"):
+#   - `default-features=false, features=["remote"]` does NOT pull the bundled C-SQLite `core`
+#     (`libsql-ffi`/`libsql-sys`/`sqlite3-sys`) — nothing C is LINKED. Proven by ci/gates/no-c.sh §3a.
+#   - `remote` DOES pull `libsql-sqlite3-parser`, whose build.rs runs `cc` on `third_party/lemon/
+#     lemon.c` to CODEGEN the SQL grammar as Rust. That is a build-time toolchain need, not a linked
+#     C library — and `cc` is already mandatory for the engine itself (ring + blake3). So this adds
+#     no new *class* of dependency to the build, and no C to any address space that handles secrets.
+#   - This crate is consumed ONLY by secretd, behind the engine `Store` trait; engine/proto/cli
+#     never link it. Engine default store stays `inmem-store`; secretd runtime selection is Phase 1.
+#   - Target remains strict C-toolchain-free (blake3 `pure` + a pure-Rust Hrana client) — see OI-1.
+
+[package]
+name = "envctl-secrets-store-libsql"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+description = "libSQL remote Store backend (C-quarantined, links no C library) — adopted, OI-1 RESOLVED (a)"
+
+[dependencies]
+# Consumes ONLY the engine's public Store trait + row types. The engine itself never links libSQL.
+envctl-secrets-engine = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+# Store bridges the sync `Store` trait to async libSQL via a PRIVATE current-thread runtime
+# (`Builder::new_current_thread`, see sync.rs). Features unify to the workspace tokio superset at the
+# member level; the store never spawns a `rt-multi-thread` worker pool of its own. All pure-Rust.
+tokio = { workspace = true }
+tracing = { workspace = true }
+# remote-only libSQL client (pinned in root [workspace.dependencies], OI-1 RESOLVED (a)):
+# `default-features=false, features=["remote"]` — no linked C-SQLite; see this crate's header + README.
+libsql = { workspace = true }
+# Plaintext HTTP connector for the libSQL `remote` client. libSQL's `remote` feature ships NO
+# connector unless its `tls` feature is enabled — and that `tls` feature pulls hyper-rustls 0.25 ->
+# rustls 0.22, a SECOND rustls major (the workspace pins one ring-only rustls 0.23). We deliberately
+# avoid that to keep Gate 4 (single ring-only rustls) green, and instead supply this plaintext
+# connector. This is the SAME legacy hyper 0.14 libSQL's client already uses (no new major). Result:
+# LOOPBACK sqld only; for a remote DB, front it with a loopback TLS terminator (stunnel/spiped). See
+# README + DESIGN-NOTES OI-1. Pure-Rust; no C library.
+hyper = { version = "0.14", default-features = false, features = ["client", "tcp"] }
+
+[features]
+# `remote` is the ONLY supported wiring (pure HTTP/Hrana, no C-SQLite `core`). `embedded` is a
+# placeholder for a future risk-accepted in-process C-SQLite fallback (NOT implemented here).
+default = ["remote"]
+remote = []
+embedded = []
+
+[package.metadata.docs.rs]
+features = ["remote"]
