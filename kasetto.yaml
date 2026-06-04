@@ -1,0 +1,30 @@
+# kasetto — agent environment for the envctl workspace.
+# Provisions a curated, locked agent toolkit (skills + MCP baseline) into the
+# Claude Code and Codex environments. This is the source of truth for the agent
+# config; it supersedes the ECC-auto-generated .claude/.codex files.
+#
+# Stabilize/refresh:  kasetto sync          (authoritative; no-op when in sync)
+# CI enforcement:     kasetto sync --locked (never fetches; fails on drift)
+
+scope: project
+
+agent:
+  - claude-code
+  - codex
+
+skills:
+  # Curated, envctl-grounded dev skills (correct Rust conventions).
+  - source: ./agent-skills
+    skills: "*"
+
+mcps:
+  # Standard tool surface for envctl work; kept identical across Claude (.mcp.json)
+  # and Codex (.codex/config.toml [mcp_servers.*]).
+  - source: ./agent-skills
+    mcps:
+      - github
+      - context7
+      - exa
+      - memory
+      - playwright
+      - sequential-thinking

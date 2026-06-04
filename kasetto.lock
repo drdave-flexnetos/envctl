@@ -1,0 +1,69 @@
+version: 2
+skills:
+  ./agent-skills::agent-env-config:
+    destination: .claude/skills/agent-env-config
+    hash: fad0e12b3c7f26705bd082e5a37a03086515c3af17349d08a1f3e35eff983f4f
+    skill: agent-env-config
+    description: '"The CORRECT conventions and agent-environment configuration for the envctl Rust workspace — supersedes the broken ECC-auto-generated skill/instincts that assert JavaScript conventions. Use whenever writing or reviewing envctl code, naming files/types, writing tests, composing commits, or configuring the .claude/.codex agent setup (skills, MCP servers, multi-agent roles). Triggers: ''what conventions'', ''how do I name this'', ''write a test'', ''commit message'', ''configure the agents'', ''MCP setup'', ''is camelCase right''."'
+    source: ./agent-skills
+    source_revision: local
+    scope: project
+  ./agent-skills::env-stabilize:
+    destination: .claude/skills/env-stabilize
+    hash: a8fed861f8b5713e4f387072e2e7daab9508d267d845e8161a421a38ed1333d3
+    skill: env-stabilize
+    description: '"How to keep the environment reproducible and drift-free — the detect/drift, doctor-diagnostic, and content-hashed lock discipline envctl uses, plus how kasetto provisions and locks the agent config. Use when checking environment health, diagnosing drift, regenerating or verifying a lock, or making the agent environment reproducible. Triggers: ''is the environment stable'', ''check for drift'', ''run doctor'', ''the lock is stale'', ''make this reproducible'', ''env is inconsistent'', ''sync the agents''."'
+    source: ./agent-skills
+    source_revision: local
+    scope: project
+  ./agent-skills::env-toolchain-install:
+    destination: .claude/skills/env-toolchain-install
+    hash: 6fb44c38b51c3f0f4f4c134ac4f33470e69f3efb8be5ee20a59859c42f081a97
+    skill: env-toolchain-install
+    description: '"How to install and configure the developer toolchain the way envctl does it — declaratively, idempotently, with detect→install→verify→fix→remove lifecycle hooks per component. Use whenever installing, repairing, or configuring environment tooling (Rust, bun/node, CUDA/GPU stack, ai-clis, nix-yazelix, boot-repair, the secretd daemon) or authoring a new component. Triggers: ''install the toolchain'', ''set up the environment'', ''add a component'', ''why is X not on PATH'', ''repair the environment'', ''the install isn''t idempotent''."'
+    source: ./agent-skills
+    source_revision: local
+    scope: project
+assets:
+  mcp::./agent-skills::context7.json:
+    kind: mcp
+    name: context7.json
+    hash: 5b78e56c2a3f76948d9c4a151930b87a16e47504d5a20f2164e884f1e4cfe042
+    source: ./agent-skills
+    destination: context7
+    source_revision: local
+  mcp::./agent-skills::exa.json:
+    kind: mcp
+    name: exa.json
+    hash: c56e84148f520efd573a149bb29badbada5671e3e8777896216060622776301a
+    source: ./agent-skills
+    destination: exa
+    source_revision: local
+  mcp::./agent-skills::github.json:
+    kind: mcp
+    name: github.json
+    hash: ce44ee927c972233f7dac3abbe1b4acf820537a49d331dbb379f102e79b3ba3f
+    source: ./agent-skills
+    destination: github
+    source_revision: local
+  mcp::./agent-skills::memory.json:
+    kind: mcp
+    name: memory.json
+    hash: a1e431c28f92e4f3460194b07a5e0d078b9894c48e5b24c8b96b8678233e117e
+    source: ./agent-skills
+    destination: memory
+    source_revision: local
+  mcp::./agent-skills::playwright.json:
+    kind: mcp
+    name: playwright.json
+    hash: f13f91deddff2cf6fe33298ca8c7424759af9c34e8b51d8646909cce79fb38cb
+    source: ./agent-skills
+    destination: playwright
+    source_revision: local
+  mcp::./agent-skills::sequential-thinking.json:
+    kind: mcp
+    name: sequential-thinking.json
+    hash: 6763a1bd906c5b471b86e00661bdaed6aef78ad8ed85fb770e794edfd0d9b634
+    source: ./agent-skills
+    destination: sequential-thinking
+    source_revision: local

@@ -1,48 +1,61 @@
-#:schema https://developers.openai.com/codex/config-schema.json
-
-# ECC Tools generated Codex baseline
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 web_search = "live"
 
-[mcp_servers.github]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
+[agents]
+max_depth = 1
+max_threads = 6
 
-[mcp_servers.context7]
-command = "npx"
-args = ["-y", "@upstash/context7-mcp@latest"]
+[agents.docs_researcher]
+config_file = "agents/docs-researcher.toml"
+description = "Documentation specialist that verifies APIs, framework behavior, and release notes."
 
-[mcp_servers.exa]
-url = "https://mcp.exa.ai/mcp"
+[agents.explorer]
+config_file = "agents/explorer.toml"
+description = "Read-only codebase explorer for gathering evidence before changes are proposed."
 
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
-
-[mcp_servers.playwright]
-command = "npx"
-args = ["-y", "@playwright/mcp@latest", "--extension"]
-
-[mcp_servers.sequential-thinking]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+[agents.reviewer]
+config_file = "agents/reviewer.toml"
+description = "PR reviewer focused on correctness, security, and missing tests."
 
 [features]
 multi_agent = true
 
-[agents]
-max_threads = 6
-max_depth = 1
+[mcp_servers.context7]
+args = [
+    "-y",
+    "@upstash/context7-mcp@latest",
+]
+command = "npx"
 
-[agents.explorer]
-description = "Read-only codebase explorer for gathering evidence before changes are proposed."
-config_file = "agents/explorer.toml"
+[mcp_servers.exa]
+url = "https://mcp.exa.ai/mcp"
 
-[agents.reviewer]
-description = "PR reviewer focused on correctness, security, and missing tests."
-config_file = "agents/reviewer.toml"
+[mcp_servers.github]
+args = [
+    "-y",
+    "@modelcontextprotocol/server-github",
+]
+command = "npx"
 
-[agents.docs_researcher]
-description = "Documentation specialist that verifies APIs, framework behavior, and release notes."
-config_file = "agents/docs-researcher.toml"
+[mcp_servers.memory]
+args = [
+    "-y",
+    "@modelcontextprotocol/server-memory",
+]
+command = "npx"
+
+[mcp_servers.playwright]
+args = [
+    "-y",
+    "@playwright/mcp@latest",
+    "--extension",
+]
+command = "npx"
+
+[mcp_servers.sequential-thinking]
+args = [
+    "-y",
+    "@modelcontextprotocol/server-sequential-thinking",
+]
+command = "npx"
