@@ -1,8 +1,13 @@
-# HANDOFF — kasetto agent environment + Phase-8 progress
+# HANDOFF — kasetto agent environment + Phase-8 progress + consolidation
 
-**Paused:** 2026-06-04. **Scope of this doc:** the agent-environment stabilization (done via the
-`kasetto` tool) and the envctl secrets Phase-8 code progress made in the same session. This is
-SEPARATE from the project's own `HANDOFF.md` (the secrets-stack verification guide) — read both.
+**Updated:** 2026-06-04. **Scope:** the agent-environment stabilization (via the `kasetto` tool), the
+envctl secrets Phase-8 code progress, and the repo consolidation/cleanup. SEPARATE from the project's
+own `HANDOFF.md` (the secrets-stack verification guide) — read both.
+
+> **Repo state is now CLEAN.** `FlexNetOS/envctl` has a single branch `master` (canonical). The
+> divergent ECC `master`, plus `env-ctl-2` and `merge/env-ctl`, were consolidated/deleted; PR #7
+> (envctl) and PR #1 (vault_hub) are MERGED. `env-ctl` + `envctl-merge-envctl` are archived. Only the
+> F2/F5/F6 design spike remains.
 
 ## TL;DR
 
@@ -11,49 +16,49 @@ SEPARATE from the project's own `HANDOFF.md` (the secrets-stack verification gui
 | Agent env (`.claude`/`.codex`) now kasetto-managed + locked; ECC config retired | ✅ done | `28c207e` |
 | F15/F12 ported from env-ctl (remote bearer registry/mint + plane-bound row MAC) | ✅ done | `838d347` |
 | F14 — `PresenceGate` egress-gate abstraction | ✅ done | `e82a21e` |
+| Repo consolidation: `env-ctl-2` → `master`, stale branches deleted, PRs #7/#1 merged | ✅ done | `0376e5a` |
+| Secrets design corpus carried into `docs/secrets/` (incl. `SERVER-MODE.md`) | ✅ done | `4b219a3` |
+| `env-ctl` + `envctl-merge-envctl` archived to `~/Desktop/_archives/` | ✅ done | — |
 | F2 / F5 / F6 — internet-facing relay edge | ⛔ NOT started — needs a design spike first | — |
-| Consolidate the duplicate worktree (Phase E) | ⛔ pending | — |
 
-All three completed commits are on branch **`env-ctl-2`**, build clean, tests green
-(116 secrets tests + 70 engine tests), clippy `-D warnings` clean, and pass `ci/gates/{no-c,shape,enable}.sh`.
+All completed work is on branch **`master`** (the sole branch), builds clean, tests green
+(116 secrets tests + 70 engine tests), clippy `-D warnings` clean, passes `ci/gates/{no-c,shape,enable}.sh`.
 
-## NEXT SESSION — START HERE (operator direction, 2026-06-04)
+## Consolidation — DONE (2026-06-04)
 
-**Consolidation is FINAL: envctl is the sole go-forward repo.** `env-ctl` and `envctl-merge-envctl`
-will be archived, and the operator will then remove them from GitHub. (This supersedes the earlier
-"where do future features land" question — answer: **directly in envctl**.)
+The repo cleanup the operator asked for is COMPLETE (verified upgrades-only — no work lost):
 
-**Sequence — AUDIT BEFORE ARCHIVE (never archive unverified):**
+- **envctl is one clean repo.** `env-ctl-2` was consolidated onto `master` via a history-preserving
+  `-s ours` merge (`0376e5a`, a fast-forward — the old ECC `master` history is retained, not orphaned).
+  A 5-agent adversarial safety workflow + an inline check both confirmed `master` held ZERO real work
+  `env-ctl-2` lacked (only ECC-regenerated config + older pre-F12/F15 secrets ancestors). Stale
+  branches `env-ctl-2` and `merge/env-ctl` deleted. PR #7 → MERGED.
+- **vault_hub** PR #1 (the kasetto harness) → MERGED into `main`; branch deleted.
+- **Audit + carry-over.** env-ctl is fully ⊆ envctl for code (no missing crates; F15/F12 verified). Its
+  unique **secrets design docs** were carried into `envctl/docs/secrets/` (`4b219a3`) so envctl owns the
+  design basis; the `workflows/*.js` build scripts were left in the archive only.
+- **Archives** (full `.git`, `target/` excluded): `~/Desktop/_archives/env-ctl-2026-06-04.tar.gz`
+  (338M), `~/Desktop/_archives/envctl-merge-envctl-2026-06-04.tar.gz` (394K).
 
-1. **Deep audit — verify every feature is in envctl.**
-   - **`envctl-merge-envctl` — provably contained; NO content diff needed.** It is a git worktree of
-     envctl's OWN `.git` at commit `77fd8fe`, confirmed an ANCESTOR of envctl HEAD
-     (`git -C ~/Desktop/envctl merge-base --is-ancestor 77fd8fe HEAD` exits 0). It can hold nothing
-     envctl lacks. `git worktree remove` it, then archive.
-   - **`env-ctl` — separate repo; do the real audit.** Pre-findings (already checked this session):
-     NO crate is missing — env-ctl has only the 5 secrets crates, all ⊆ envctl; F15/F12 ported &
-     verified (envctl is now AHEAD via F14). REMAINING audit targets: **`env-ctl/workflows/`** (12 JS
-     orchestration scripts, unique to env-ctl, absent from envctl) and any `docs/`/`ci/` deltas. Diff
-     `~/Desktop/env-ctl` vs `~/Desktop/envctl`; confirm envctl ⊇ env-ctl modulo envctl's own additions
-     (`--self-check`, the `manifest/` tree, `cli`/`engine`/`gui`). Decide whether env-ctl/workflows +
-     any env-ctl-only docs should be copied into envctl first, or intentionally left behind as build
-     history that ships inside the archive.
-2. **Compress + archive** both repos (e.g. `tar czf <name>-archive-YYYYMMDD.tar.gz <dir>`), ONLY after
-   the audit is clean.
-3. Operator removes the two repos from GitHub.
+**Operator TODO:** remove the `env-ctl` GitHub repo, and the local `~/Desktop/env-ctl` +
+`~/Desktop/envctl-merge-envctl` directories (the local worktree still holds branch `merge/env-ctl`;
+remove it with `git -C ~/Desktop/envctl worktree remove ~/Desktop/envctl-merge-envctl`). All content is
+preserved in the archives + envctl history.
 
-## Which copy is canonical (READ THIS — avoids the #1 confusion)
+**Actual remaining work:** the **F2/F5/F6 design spike** (see "Phase-8 remaining" below) — the only
+thing left.
 
-There are three directories on the Desktop, each with a distinct ROLE (per the operator). **`/home/drdave/Desktop/envctl`
-(branch `env-ctl-2`) is the single canonical workspace.** Do all work there.
+## Repo roles (historical — now consolidated)
 
-| Dir | Role (operator's words) | What it is now | Use |
-|-----|-------------------------|----------------|-----|
-| `~/Desktop/envctl` (`env-ctl-2`) | **the original project** | **Canonical** unified 8-crate workspace; current head. | **Work here.** |
-| `~/Desktop/env-ctl` (separate repo, `main`) | **the project to enhance features for envctl** | The feature-development source (F15/F12 etc. were authored here, then ported into envctl). Currently `2f7f8e9`; envctl is now AHEAD of it (F14 lives only in envctl). | **To be ARCHIVED + removed from GitHub** after the audit (see NEXT SESSION). |
-| `~/Desktop/envctl-merge-envctl` (`merge/env-ctl`) | **the merge repo a prior Claude session created to merge the two together** | A **git worktree of envctl's `.git`** (branch `merge/env-ctl`), now **3 commits STALE** (stuck at `77fd8fe`). The merge it was made for has effectively landed in envctl. | **Provably contained → archive + remove** (see NEXT SESSION). Do NOT edit. |
+**`/home/drdave/Desktop/envctl` (branch `master`) is the single canonical repo.** Do all work there.
 
-**Resolved (operator, 2026-06-04):** envctl is the sole go-forward repo; future features land **directly in envctl**. env-ctl + envctl-merge-envctl get audited → archived → removed from GitHub. See **NEXT SESSION** at the top of this doc.
+| Dir | Role (operator's words) | Status now |
+|-----|-------------------------|------------|
+| `~/Desktop/envctl` (`master`) | **the original project** | **Canonical** unified 8-crate workspace; the sole repo going forward. |
+| `~/Desktop/env-ctl` | **the project to enhance features for envctl** | Consolidated in (code ported; secrets docs carried to `docs/secrets/`). **ARCHIVED** → `~/Desktop/_archives/env-ctl-2026-06-04.tar.gz`. Operator to remove from GitHub + locally. |
+| `~/Desktop/envctl-merge-envctl` | **a merge worktree a prior Claude session created** | Provably contained in envctl (`77fd8fe`). **ARCHIVED** → `~/Desktop/_archives/envctl-merge-envctl-2026-06-04.tar.gz`. Remove the local worktree. |
+
+Future features land **directly in envctl `master`**.
 
 ## The kasetto-managed agent environment
 
@@ -79,7 +84,7 @@ F2 (in-process TLS+DPoP/EKM HTTPS listener), F5 (streaming-revocation tear-down)
 replay store) were **deliberately not implemented**. They are one coupled, **internet-facing** subsystem
 (the whole A13–A16 threat model) and have hard blockers:
 
-1. **Open spec (OI-SM-1 in `env-ctl/docs/SERVER-MODE.md`):** `jti` replay-store sizing/eviction,
+1. **Open spec (OI-SM-1 in `docs/secrets/SERVER-MODE.md`):** `jti` replay-store sizing/eviction,
    server-issued nonce lifecycle, and clock-drift window are *unspecified*. F6 can't be built right
    without these decisions.
 2. **New deps vs. the `no-c` gate:** F2 needs a DPoP/RFC-9449 verifier, rustls `ServerConfig` + EKM,
@@ -100,7 +105,7 @@ row MAC), and F14 (`broker::gate::{GateState, PresenceGate, gate_absent_since_ms
 choke point the Profile-B operator-box gate will plug into). The listener is the missing serving layer.
 
 ## Spec / reference pointers
-- Phase-8 spec: `env-ctl/docs/SERVER-MODE.md` (also covers FS-S16..S25, OI-SM-1..6).
+- Phase-8 spec: `docs/secrets/SERVER-MODE.md` (also covers FS-S16..S25, OI-SM-1..6).
 - Engine gate (F14): `crates/secrets-engine/src/broker/gate.rs`.
 - Cross-effort plan: `~/.claude/plans/elegant-growing-turtle.md` (has a Progress section).
 - kasetto adoptions catalog: `docs/KASETTO-FEATURES.md` (other lower-risk envctl enhancements:
