@@ -78,3 +78,8 @@ docs/            # ARCHITECTURE.md · ROADMAP.md · DESIGN-NOTES.md
 
 Design produced by a multi-agent design swarm and adversarially reviewed; the applied
 review fixes are listed in `docs/DESIGN-NOTES.md`.
+
+## References and Acknowledgments 
+
+- pivoshenko/kasetto
+
