@@ -1,0 +1,64 @@
+# Desktop integration for the native GUI (`envctl-gui`).
+#
+# The eframe/egui binary IS a native desktop app; this component makes the OS
+# treat it like an *installed* one: binary on PATH, an app-menu launcher, and a
+# scalable icon — all user-scoped (no sudo), driven by the repo's idempotent
+# packaging/install-desktop.sh (which is also the standalone entry point).
+#
+# Build deps: the GUI needs the system dev libs listed under README "Native GUI"
+# (cmake, libxkbcommon/wayland/xcb, libgl1-mesa, libgtk-3). They are assumed
+# present (the build fails loudly otherwise); this component does not pull apt.
+
+[[component]]
+id = "desktop-app"
+name = "envctl-gui desktop integration"
+description = "Install the native GUI as a desktop app: ~/.local/bin binary + app-menu .desktop launcher + scalable icon (user-scoped, no sudo)."
+requires = ["rustup"]
+
+# Present iff the launcher exists AND the binary is resolvable on PATH.
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "test -f \"${XDG_DATA_HOME:-$HOME/.local/share}/applications/envctl-gui.desktop\" && command -v envctl-gui >/dev/null"]
+
+# Build (release) + install binary, launcher, and icon. cwd-independent: the repo
+# root is derived from the manifest dir (ENVCTL_MANIFEST_DIR defaults to ./manifest).
+[component.install]
+kind = "script"
+login_shell = true
+script = '''
+set -e
+ROOT="$(cd "${ENVCTL_MANIFEST_DIR:-./manifest}/.." && pwd)"
+bash "$ROOT/packaging/install-desktop.sh"
+'''
+
+# Smoke test: binary launches and the launcher parses (when validator is present).
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v envctl-gui >/dev/null && { command -v desktop-file-validate >/dev/null && desktop-file-validate \"${XDG_DATA_HOME:-$HOME/.local/share}/applications/envctl-gui.desktop\" || true; }"]
+
+# Idempotent repair: reinstall integration from the already-built binary if present,
+# else build then install.
+[component.fix]
+kind = "script"
+login_shell = true
+script = '''
+set -e
+ROOT="$(cd "${ENVCTL_MANIFEST_DIR:-./manifest}/.." && pwd)"
+if [ -x "$ROOT/target/release/envctl-gui" ]; then
+  bash "$ROOT/packaging/install-desktop.sh" --no-build
+else
+  bash "$ROOT/packaging/install-desktop.sh"
+fi
+'''
+
+# Unwire: remove binary, launcher, and icon (leaves the built target/ alone).
+[component.remove]
+kind = "script"
+login_shell = true
+script = '''
+set -e
+ROOT="$(cd "${ENVCTL_MANIFEST_DIR:-./manifest}/.." && pwd)"
+bash "$ROOT/packaging/install-desktop.sh" --uninstall
+'''

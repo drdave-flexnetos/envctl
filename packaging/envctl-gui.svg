@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f2937"/>
+      <stop offset="1" stop-color="#0b1120"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
+  <!-- control "gauge" arc -->
+  <path d="M40 84 A28 28 0 1 1 88 84" fill="none" stroke="#f97316" stroke-width="8" stroke-linecap="round"/>
+  <!-- needle -->
+  <line x1="64" y1="68" x2="80" y2="48" stroke="#38bdf8" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="64" cy="68" r="7" fill="#38bdf8"/>
+</svg>

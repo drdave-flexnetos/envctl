@@ -48,6 +48,29 @@ cargo run -p envctl-gui
 Dashboard (live GPU/CPU/mem telemetry) · Components grid (install/fix per row) ·
 Add-Repo form · Live Logs · Settings. The engine runs on a worker thread; the UI never blocks.
 
+#### Install as a desktop app
+
+To make the GUI a first-class desktop application (binary on `PATH`, app-menu
+launcher, and icon — all user-scoped, no sudo), either run the packaging
+installer directly:
+
+```bash
+bash packaging/install-desktop.sh            # build (release) + install for the current user
+bash packaging/install-desktop.sh --no-build # install an already-built binary
+bash packaging/install-desktop.sh --uninstall
+```
+
+or drive it through the engine like any other component:
+
+```bash
+cargo run -p envctl -- install desktop-app   # idempotent; reset removes the launcher + icon
+```
+
+It installs `~/.local/bin/envctl-gui`, an `applications/envctl-gui.desktop`
+launcher (`Categories=System;Monitor;`), and a scalable icon under
+`hicolor/scalable/apps/`. Re-running is a no-op; `reset desktop-app` (or
+`--uninstall`) unwinds it.
+
 ## Status
 
 **Phase 0 + a working `auto-detect`.** The workspace compiles green on stable Rust; the
