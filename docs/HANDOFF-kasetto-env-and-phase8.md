@@ -17,6 +17,31 @@ SEPARATE from the project's own `HANDOFF.md` (the secrets-stack verification gui
 All three completed commits are on branch **`env-ctl-2`**, build clean, tests green
 (116 secrets tests + 70 engine tests), clippy `-D warnings` clean, and pass `ci/gates/{no-c,shape,enable}.sh`.
 
+## NEXT SESSION — START HERE (operator direction, 2026-06-04)
+
+**Consolidation is FINAL: envctl is the sole go-forward repo.** `env-ctl` and `envctl-merge-envctl`
+will be archived, and the operator will then remove them from GitHub. (This supersedes the earlier
+"where do future features land" question — answer: **directly in envctl**.)
+
+**Sequence — AUDIT BEFORE ARCHIVE (never archive unverified):**
+
+1. **Deep audit — verify every feature is in envctl.**
+   - **`envctl-merge-envctl` — provably contained; NO content diff needed.** It is a git worktree of
+     envctl's OWN `.git` at commit `77fd8fe`, confirmed an ANCESTOR of envctl HEAD
+     (`git -C ~/Desktop/envctl merge-base --is-ancestor 77fd8fe HEAD` exits 0). It can hold nothing
+     envctl lacks. `git worktree remove` it, then archive.
+   - **`env-ctl` — separate repo; do the real audit.** Pre-findings (already checked this session):
+     NO crate is missing — env-ctl has only the 5 secrets crates, all ⊆ envctl; F15/F12 ported &
+     verified (envctl is now AHEAD via F14). REMAINING audit targets: **`env-ctl/workflows/`** (12 JS
+     orchestration scripts, unique to env-ctl, absent from envctl) and any `docs/`/`ci/` deltas. Diff
+     `~/Desktop/env-ctl` vs `~/Desktop/envctl`; confirm envctl ⊇ env-ctl modulo envctl's own additions
+     (`--self-check`, the `manifest/` tree, `cli`/`engine`/`gui`). Decide whether env-ctl/workflows +
+     any env-ctl-only docs should be copied into envctl first, or intentionally left behind as build
+     history that ships inside the archive.
+2. **Compress + archive** both repos (e.g. `tar czf <name>-archive-YYYYMMDD.tar.gz <dir>`), ONLY after
+   the audit is clean.
+3. Operator removes the two repos from GitHub.
+
 ## Which copy is canonical (READ THIS — avoids the #1 confusion)
 
 There are three directories on the Desktop, each with a distinct ROLE (per the operator). **`/home/drdave/Desktop/envctl`
@@ -25,10 +50,10 @@ There are three directories on the Desktop, each with a distinct ROLE (per the o
 | Dir | Role (operator's words) | What it is now | Use |
 |-----|-------------------------|----------------|-----|
 | `~/Desktop/envctl` (`env-ctl-2`) | **the original project** | **Canonical** unified 8-crate workspace; current head. | **Work here.** |
-| `~/Desktop/env-ctl` (separate repo, `main`) | **the project to enhance features for envctl** | The feature-development source (F15/F12 etc. were authored here, then ported into envctl). Currently `2f7f8e9`; envctl is now AHEAD of it (F14 lives only in envctl). | Active feature source — but envctl is canonical. See open question below. |
-| `~/Desktop/envctl-merge-envctl` (`merge/env-ctl`) | **the merge repo a prior Claude session created to merge the two together** | A **git worktree of envctl's `.git`** (branch `merge/env-ctl`), now **3 commits STALE** (stuck at `77fd8fe`). The merge it was made for has effectively landed in envctl. | Spent — ignore / retire (Phase E). Do NOT edit. |
+| `~/Desktop/env-ctl` (separate repo, `main`) | **the project to enhance features for envctl** | The feature-development source (F15/F12 etc. were authored here, then ported into envctl). Currently `2f7f8e9`; envctl is now AHEAD of it (F14 lives only in envctl). | **To be ARCHIVED + removed from GitHub** after the audit (see NEXT SESSION). |
+| `~/Desktop/envctl-merge-envctl` (`merge/env-ctl`) | **the merge repo a prior Claude session created to merge the two together** | A **git worktree of envctl's `.git`** (branch `merge/env-ctl`), now **3 commits STALE** (stuck at `77fd8fe`). The merge it was made for has effectively landed in envctl. | **Provably contained → archive + remove** (see NEXT SESSION). Do NOT edit. |
 
-**Open question for the operator (don't assume):** now that the merge has landed and envctl is ahead, should future feature work go (a) directly into envctl (canonical), or (b) into env-ctl first then port/merge into envctl? F15/F12 were authored in env-ctl and ported; F14 was authored directly in envctl. Confirm the intended workflow before the next feature lands.
+**Resolved (operator, 2026-06-04):** envctl is the sole go-forward repo; future features land **directly in envctl**. env-ctl + envctl-merge-envctl get audited → archived → removed from GitHub. See **NEXT SESSION** at the top of this doc.
 
 ## The kasetto-managed agent environment
 
