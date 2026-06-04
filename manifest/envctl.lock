@@ -55,6 +55,11 @@ content_hash = "ec7e63442c845941"
 requires = []
 resolved = ""
 
+[components.env-ctl]
+content_hash = "19aa30d16dd8d42a"
+requires = ["rustup"]
+resolved = ""
+
 [components.gemini-cli]
 content_hash = "4a80a4e40bd660aa"
 requires = ["bun"]
