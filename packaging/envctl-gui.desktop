@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=envctl
+GenericName=Environment Control
+Comment=Declaratively manage the dual-RTX-5090 workstation (live telemetry, components, repos)
+Exec=envctl-gui
+Icon=envctl-gui
+Terminal=false
+Categories=System;Monitor;
+Keywords=envctl;environment;gpu;components;secrets;workstation;
+StartupNotify=true
+StartupWMClass=envctl-gui

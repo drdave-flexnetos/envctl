@@ -50,13 +50,18 @@ content_hash = "c5be706d2f4a8bac"
 requires = ["nvidia-cuda-repo"]
 resolved = ""
 
+[components.desktop-app]
+content_hash = "264f738506ab4ce1"
+requires = ["rustup"]
+resolved = ""
+
 [components.devin-cli]
 content_hash = "ec7e63442c845941"
 requires = []
 resolved = ""
 
 [components.env-ctl]
-content_hash = "19aa30d16dd8d42a"
+content_hash = "d8d5999ece9620a3"
 requires = ["rustup"]
 resolved = ""
 
