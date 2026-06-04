@@ -19,14 +19,16 @@ All three completed commits are on branch **`env-ctl-2`**, build clean, tests gr
 
 ## Which copy is canonical (READ THIS — avoids the #1 confusion)
 
-There are three directories on the Desktop. **`/home/drdave/Desktop/envctl` (branch `env-ctl-2`) is the
-single canonical workspace.** Do all work there.
+There are three directories on the Desktop, each with a distinct ROLE (per the operator). **`/home/drdave/Desktop/envctl`
+(branch `env-ctl-2`) is the single canonical workspace.** Do all work there.
 
-| Dir | What it is | Use |
-|-----|-----------|-----|
-| `~/Desktop/envctl` (`env-ctl-2`) | **Canonical** unified 8-crate workspace. Current head. | **Work here.** |
-| `~/Desktop/envctl-merge-envctl` (`merge/env-ctl`) | A **git worktree of the SAME repo** (shared `.git`), now **3 commits STALE** (stuck at `77fd8fe`). | Ignore / retire (Phase E). Do NOT edit. |
-| `~/Desktop/env-ctl` (separate repo, `main`) | The standalone secrets dev head (`2f7f8e9`). envctl is now **ahead** of it (F14 lives only in envctl). | Historical reference only. |
+| Dir | Role (operator's words) | What it is now | Use |
+|-----|-------------------------|----------------|-----|
+| `~/Desktop/envctl` (`env-ctl-2`) | **the original project** | **Canonical** unified 8-crate workspace; current head. | **Work here.** |
+| `~/Desktop/env-ctl` (separate repo, `main`) | **the project to enhance features for envctl** | The feature-development source (F15/F12 etc. were authored here, then ported into envctl). Currently `2f7f8e9`; envctl is now AHEAD of it (F14 lives only in envctl). | Active feature source — but envctl is canonical. See open question below. |
+| `~/Desktop/envctl-merge-envctl` (`merge/env-ctl`) | **the merge repo a prior Claude session created to merge the two together** | A **git worktree of envctl's `.git`** (branch `merge/env-ctl`), now **3 commits STALE** (stuck at `77fd8fe`). The merge it was made for has effectively landed in envctl. | Spent — ignore / retire (Phase E). Do NOT edit. |
+
+**Open question for the operator (don't assume):** now that the merge has landed and envctl is ahead, should future feature work go (a) directly into envctl (canonical), or (b) into env-ctl first then port/merge into envctl? F15/F12 were authored in env-ctl and ported; F14 was authored directly in envctl. Confirm the intended workflow before the next feature lands.
 
 ## The kasetto-managed agent environment
 
