@@ -1243,12 +1243,16 @@ impl Engine {
         let relay_id = policy_row.policy.relay_id.clone();
         let secret_name = policy_row.policy.secret_name.clone();
 
-        // USB possession gate snapshot: absent => the gate is currently unproven.
-        let usb_absent_since_ms = if self.usb_possession_proven()? {
-            None
+        // Presence gate snapshot (F14, SERVER-MODE §5.1): Profile A resolves the egress gate from
+        // the on-box USB probe. `decide()` treats Unproven EXACTLY like AbsentSince(now), so an
+        // absent/unproven factor fails closed with no grace (REQ-SEC-13). A Profile-B daemon injects
+        // an operator-box `PresenceGate` through this same single choke point.
+        let gate_state = if self.usb_possession_proven()? {
+            crate::broker::GateState::Present
         } else {
-            Some(now_ms)
+            crate::broker::GateState::Unproven
         };
+        let gate_absent_since_ms = crate::broker::gate_absent_since_ms(gate_state, now_ms);
 
         // 3. Bump the broker's ephemeral usage counters (post-bump tallies feed the pure budgets). A
         // poisoned broker lock fails closed (Err -> InternalRefused), never a panic.
@@ -1300,7 +1304,7 @@ impl Engine {
             &canon,
             now_ms,
             boottime_now_ms,
-            usb_absent_since_ms,
+            gate_absent_since_ms,
             issuance_floor_ms,
         ) {
             RelayDecision::Deny { reason } => {

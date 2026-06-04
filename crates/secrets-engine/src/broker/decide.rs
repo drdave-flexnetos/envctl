@@ -139,7 +139,7 @@ pub fn decide(
     req: &CanonRequest,
     now_ms: i64,
     boottime_now_ms: i64,
-    usb_absent_since_ms: Option<i64>,
+    gate_absent_since_ms: Option<i64>,
     issuance_floor_ms: i64,
 ) -> RelayDecision {
     // 2. Disabled — the relay policy is administratively off.
@@ -246,9 +246,11 @@ pub fn decide(
             return deny(DenyReason::RateLimited);
         }
     }
-    // 16. GateAbsent — the USB possession gate is currently UNPROVEN; default-deny the swap (the
-    // runtime mirror of the mint-time USB gate; absence fails closed).
-    if usb_absent_since_ms.is_some() {
+    // 16. GateAbsent — the presence gate (F14) is currently absent/unproven; default-deny the swap
+    // (the runtime mirror of the mint-time gate; both absence and Unproven fail closed). Profile A
+    // feeds this from the on-box USB probe; Profile B from an operator-box presence token — the
+    // mapping (incl. Unproven == AbsentSince(now)) lives in `broker::gate::gate_absent_since_ms`.
+    if gate_absent_since_ms.is_some() {
         return deny(DenyReason::GateAbsent);
     }
     // 17. ClockRollback — the wall clock regressed below the vault issuance floor OR the bearer's
