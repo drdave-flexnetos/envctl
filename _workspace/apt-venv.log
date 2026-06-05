@@ -1,29 +1,0 @@
-Reading package lists...
-Building dependency tree...
-Reading state information...
-Solving dependencies...
-The following additional packages will be installed:
-  python3-pip-whl python3-setuptools-whl
-The following NEW packages will be installed:
-  python3-pip-whl python3-setuptools-whl python3.14-venv
-0 upgraded, 3 newly installed, 0 to remove and 1 not upgraded.
-Need to get 2,609 kB of archives.
-After this operation, 2,952 kB of additional disk space will be used.
-Get:1 http://us.archive.ubuntu.com/ubuntu resolute/universe amd64 python3-pip-whl all 25.1.1+dfsg-1ubuntu2 [1,430 kB]
-Get:2 http://us.archive.ubuntu.com/ubuntu resolute/universe amd64 python3-setuptools-whl all 78.1.1-0.1build1 [1,174 kB]
-Get:3 http://us.archive.ubuntu.com/ubuntu resolute/universe amd64 python3.14-venv amd64 3.14.4-1 [5,340 B]
-dpkg-preconfigure: unable to re-open stdin: No such file or directory
-Fetched 2,609 kB in 1s (5,169 kB/s)
-Selecting previously unselected package python3-pip-whl.
-(Reading database… (Reading database… 5%(Reading database… 10%(Reading database… 15%(Reading database… 20%(Reading database… 25%(Reading database… 30%(Reading database… 35%(Reading database… 40%(Reading database… 45%(Reading database… 50%(Reading database… 55%(Reading database… 60%(Reading database… 65%(Reading database… 70%(Reading database… 75%(Reading database… 80%(Reading database… 85%(Reading database… 90%(Reading database… 95%(Reading database… 100%(Reading database… 194789 files and directories currently installed.)
-Preparing to unpack …/python3-pip-whl_25.1.1+dfsg-1ubuntu2_all.deb…
-Unpacking python3-pip-whl (25.1.1+dfsg-1ubuntu2)…
-Selecting previously unselected package python3-setuptools-whl.
-Preparing to unpack …/python3-setuptools-whl_78.1.1-0.1build1_all.deb…
-Unpacking python3-setuptools-whl (78.1.1-0.1build1)…
-Selecting previously unselected package python3.14-venv.
-Preparing to unpack …/python3.14-venv_3.14.4-1_amd64.deb…
-Unpacking python3.14-venv (3.14.4-1)…
-Setting up python3-setuptools-whl (78.1.1-0.1build1)…
-Setting up python3-pip-whl (25.1.1+dfsg-1ubuntu2)…
-Setting up python3.14-venv (3.14.4-1)…

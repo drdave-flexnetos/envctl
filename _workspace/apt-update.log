@@ -1,7 +1,0 @@
-Hit:1 https://dl.google.com/linux/chrome-stable/deb stable InRelease
-Hit:2 http://security.ubuntu.com/ubuntu resolute-security InRelease
-Hit:3 https://packages.microsoft.com/repos/code stable InRelease
-Hit:4 http://us.archive.ubuntu.com/ubuntu resolute InRelease
-Hit:5 http://us.archive.ubuntu.com/ubuntu resolute-updates InRelease
-Hit:6 http://us.archive.ubuntu.com/ubuntu resolute-backports InRelease
-Reading package lists...
