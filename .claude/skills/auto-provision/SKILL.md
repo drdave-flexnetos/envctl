@@ -50,7 +50,17 @@ RALPH_APPLY=1 bash .claude/skills/auto-provision/scripts/ralph-provision.sh
 
 Tunables (env): `RALPH_WORKTREE` (default cwd), `RALPH_BUDGET` (cycles/process, default 3),
 `RALPH_MAX_ITERS` (restart backstop, default 50), `RALPH_SLEEP` (default 5s), `RALPH_MODEL`
-(default `opus`). Kill switch any time: `touch _workspace/STOP`.
+(default `opus`), `RALPH_RESEARCH` (run the component-research/audit pass, default `1`). Kill switch
+any time: `touch _workspace/STOP`.
+
+## Research is inherited from env-install-loop
+Each spawned agent also runs `env-install-loop`'s **Research** pass: it deep-probes every declared
+component (past `detect`/`verify`) and auto-appends classified upgrade/hardening items to the
+backlog — `harden:`/`fix:`/`upgrade:` (loop-fixable, worked in later cycles) and `feature:` (routed
+to `feature-forge`, surfaced not built). Read-only and evidence-based; set `RALPH_RESEARCH=0` to skip
+it for a pure install pass. `feature:` items are committed to the backlog (audit trail for the human)
+and do **not** change the runner's terminal contract: `DONE` still means Tier-1 *provisioned*
+(doctor green + gates), with routed upgrades reported alongside.
 
 ## Install ↔ reset remediation (the "cycle install and reset" the loop performs)
 Per backlog item, the spawned `env-install-loop` walks a remediation ladder, fail-closed at every
