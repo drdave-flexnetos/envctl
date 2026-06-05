@@ -101,8 +101,8 @@ pub fn canonical_row(rec: &AuditRecord) -> Vec<u8> {
     }
     // Serialize the detail exactly once; this byte string is what is hashed AND what the store
     // persists, so two backends (or two runs) can never disagree on the detail encoding.
-    let detail_json = serde_json::to_vec(&rec.detail)
-        .expect("serde_json::Value always serializes to bytes");
+    let detail_json =
+        serde_json::to_vec(&rec.detail).expect("serde_json::Value always serializes to bytes");
     push_len_prefixed(&mut out, &detail_json);
     out.push(outcome_byte(rec.outcome));
     out
@@ -282,7 +282,11 @@ mod tests {
         a.subject = None;
         let mut b = unsealed(0, "e", json!({}));
         b.subject = Some(String::new());
-        assert_ne!(canonical_row(&a), canonical_row(&b), "None vs Some(\"\") must differ");
+        assert_ne!(
+            canonical_row(&a),
+            canonical_row(&b),
+            "None vs Some(\"\") must differ"
+        );
     }
 
     #[test]
@@ -291,7 +295,11 @@ mod tests {
         a.actor_uid = None;
         let mut b = unsealed(0, "e", json!({}));
         b.actor_uid = Some(0);
-        assert_ne!(canonical_row(&a), canonical_row(&b), "None vs Some(0) must differ");
+        assert_ne!(
+            canonical_row(&a),
+            canonical_row(&b),
+            "None vs Some(0) must differ"
+        );
     }
 
     #[test]

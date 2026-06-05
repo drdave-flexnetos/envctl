@@ -66,13 +66,19 @@ mod tests {
 
     #[test]
     fn absent_since_passes_the_timestamp_through() {
-        assert_eq!(gate_absent_since_ms(GateState::AbsentSince(42), 1_000), Some(42));
+        assert_eq!(
+            gate_absent_since_ms(GateState::AbsentSince(42), 1_000),
+            Some(42)
+        );
     }
 
     #[test]
     fn unproven_is_absent_now_fail_closed() {
         // REQ-SEC-13: Unproven is treated EXACTLY like AbsentSince(now) — Some(now) drives the
         // GateAbsent deny in `decide()`, with no grace. A VPS/misconfigured gate denies here.
-        assert_eq!(gate_absent_since_ms(GateState::Unproven, 1_000), Some(1_000));
+        assert_eq!(
+            gate_absent_since_ms(GateState::Unproven, 1_000),
+            Some(1_000)
+        );
     }
 }

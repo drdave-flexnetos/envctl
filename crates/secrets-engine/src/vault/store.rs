@@ -14,7 +14,9 @@
 //! at open time (the AAD is NEVER stored — HF-2). The durable, hash-chained audit log is committed
 //! here BEFORE security RPCs return (HF-14): `append_audit` links + pushes synchronously.
 #[cfg(not(feature = "inmem-store"))]
-compile_error!("select a store backend feature (`inmem-store`, or the OI-1-ruled pure-Rust backend)");
+compile_error!(
+    "select a store backend feature (`inmem-store`, or the OI-1-ruled pure-Rust backend)"
+);
 
 use crate::event::AuditRecord;
 use crate::keyslot::Keyslot;
@@ -34,8 +36,8 @@ pub struct SecretRow {
     pub note: String,
     pub broker_only: bool,
     pub dek_generation: i64,
-    pub nonce: Vec<u8>,  // 24-byte XChaCha20 nonce
-    pub ct_tag: Vec<u8>, // ct||Poly1305 tag
+    pub nonce: Vec<u8>,     // 24-byte XChaCha20 nonce
+    pub ct_tag: Vec<u8>,    // ct||Poly1305 tag
     pub created_ts: String, // RFC3339, from Clock
 }
 
@@ -285,7 +287,10 @@ impl Store for InMemStore {
             );
         }
         if g.secrets.iter().any(|r| r.row_id == row.row_id) {
-            anyhow::bail!("put_secret row_id {} collides with an existing row", row.row_id);
+            anyhow::bail!(
+                "put_secret row_id {} collides with an existing row",
+                row.row_id
+            );
         }
         // M-1: version-monotonicity. Codify the store contract (the engine computes
         // `version = max_secret_version + 1` under the write lock): the next version for `row.name`
@@ -314,8 +319,7 @@ impl Store for InMemStore {
 
     fn get_secret_latest(&self, name: &str) -> anyhow::Result<Option<SecretRow>> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .secrets
+        Ok(g.secrets
             .iter()
             .filter(|r| r.name == name)
             .max_by_key(|r| r.version)
@@ -324,8 +328,7 @@ impl Store for InMemStore {
 
     fn get_secret_version(&self, name: &str, version: u32) -> anyhow::Result<Option<SecretRow>> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .secrets
+        Ok(g.secrets
             .iter()
             .find(|r| r.name == name && r.version == version)
             .cloned())
@@ -333,8 +336,7 @@ impl Store for InMemStore {
 
     fn max_secret_version(&self, name: &str) -> anyhow::Result<u32> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .secrets
+        Ok(g.secrets
             .iter()
             .filter(|r| r.name == name)
             .map(|r| r.version)
@@ -403,8 +405,7 @@ impl Store for InMemStore {
 
     fn query_audit(&self, since_seq: i64, limit: usize) -> anyhow::Result<Vec<AuditRecord>> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .audit
+        Ok(g.audit
             .iter()
             .filter(|r| r.seq > since_seq)
             .take(limit)
@@ -444,8 +445,7 @@ impl Store for InMemStore {
 
     fn load_relay_policy(&self, relay_id: &str) -> anyhow::Result<Option<RelayPolicyRow>> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .relays
+        Ok(g.relays
             .iter()
             .find(|r| r.policy.relay_id == relay_id)
             .cloned())
@@ -481,8 +481,7 @@ impl Store for InMemStore {
         else {
             return Ok(Vec::new());
         };
-        Ok(g
-            .bearers
+        Ok(g.bearers
             .iter()
             .filter(|b| b.policy_id == policy_id)
             .cloned()
@@ -526,8 +525,7 @@ impl Store for InMemStore {
 
     fn load_remote_client(&self, client_id: &str) -> anyhow::Result<Option<RemoteClient>> {
         let g = self.inner.lock().map_err(|_| lock_poisoned())?;
-        Ok(g
-            .remote_clients
+        Ok(g.remote_clients
             .iter()
             .find(|c| c.client_id == client_id)
             .cloned())

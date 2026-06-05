@@ -109,8 +109,7 @@ pub const INCREMENT_ROW_ID_COUNTER: &str =
 pub const GET_NEXT_ROW_ID: &str = "SELECT next_id FROM row_id_counter WHERE id = 1";
 
 // ---- secrets ----
-pub const MAX_SECRET_VERSION: &str =
-    "SELECT COALESCE(MAX(version), 0) FROM secrets WHERE name = ?";
+pub const MAX_SECRET_VERSION: &str = "SELECT COALESCE(MAX(version), 0) FROM secrets WHERE name = ?";
 pub const SECRET_ROW_ID_EXISTS: &str = "SELECT 1 FROM secrets WHERE row_id = ?";
 pub const INSERT_SECRET_VERSION: &str = "\
 INSERT INTO secrets(row_id, name, version, provider, note, broker_only, dek_generation, nonce, ct_tag, created_ts) \
@@ -159,13 +158,11 @@ FROM audit_log WHERE seq > ? ORDER BY seq ASC LIMIT ?";
 
 // ---- relay policies ----
 pub const SELECT_RELAY_MAX_ID: &str = "SELECT COALESCE(MAX(id), 0) FROM relay_policies";
-pub const SELECT_RELAY_ID_BY_NAME: &str =
-    "SELECT id FROM relay_policies WHERE relay_id = ?";
+pub const SELECT_RELAY_ID_BY_NAME: &str = "SELECT id FROM relay_policies WHERE relay_id = ?";
 pub const UPSERT_RELAY_POLICY: &str = "\
 INSERT INTO relay_policies(id, relay_id, policy_json, enabled) VALUES(?, ?, ?, ?) \
 ON CONFLICT(relay_id) DO UPDATE SET policy_json = excluded.policy_json, enabled = excluded.enabled";
-pub const LOAD_RELAY_POLICY: &str =
-    "SELECT id, policy_json FROM relay_policies WHERE relay_id = ?";
+pub const LOAD_RELAY_POLICY: &str = "SELECT id, policy_json FROM relay_policies WHERE relay_id = ?";
 pub const LIST_RELAY_POLICIES: &str =
     "SELECT id, policy_json FROM relay_policies WHERE enabled = 1 ORDER BY id";
 

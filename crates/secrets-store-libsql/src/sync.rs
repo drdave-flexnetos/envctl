@@ -76,7 +76,8 @@ impl SyncConnection {
             .map_err(|e| Error::RuntimeCreation(e.to_string()))?;
         let (db, conn) = rt.block_on(async {
             // Plaintext loopback connector (see the doc comment above for why not libSQL's `tls`).
-            #[allow(deprecated)] // open_remote_with_connector is the documented custom-connector entry
+            #[allow(deprecated)]
+            // open_remote_with_connector is the documented custom-connector entry
             let db = libsql::Database::open_remote_with_connector(
                 url.to_string(),
                 auth_token.to_string(),
@@ -106,7 +107,10 @@ impl SyncConnection {
 
     /// Re-establish the connection after a Hrana stream-expiry (a fresh `db.connect()`).
     fn reconnect(&self) -> Result<()> {
-        let fresh = self.db.connect().map_err(|e| Error::Connect(e.to_string()))?;
+        let fresh = self
+            .db
+            .connect()
+            .map_err(|e| Error::Connect(e.to_string()))?;
         *self.conn.lock().expect("conn lock poisoned") = fresh;
         Ok(())
     }
@@ -127,11 +131,7 @@ impl SyncConnection {
 
     /// Run a `SELECT` and return the FIRST row (or `None`). Parameterized only — `params` is a
     /// `Vec<libsql::Value>` bound positionally to the `?` placeholders in `sql`.
-    pub fn query_one(
-        &self,
-        sql: &str,
-        params: Vec<libsql::Value>,
-    ) -> Result<Option<libsql::Row>> {
+    pub fn query_one(&self, sql: &str, params: Vec<libsql::Value>) -> Result<Option<libsql::Row>> {
         self.run_retry(|conn, rt| {
             rt.block_on(async {
                 let mut rows = conn
@@ -146,11 +146,7 @@ impl SyncConnection {
     }
 
     /// Run a `SELECT` and collect ALL rows.
-    pub fn query_all(
-        &self,
-        sql: &str,
-        params: Vec<libsql::Value>,
-    ) -> Result<Vec<libsql::Row>> {
+    pub fn query_all(&self, sql: &str, params: Vec<libsql::Value>) -> Result<Vec<libsql::Row>> {
         self.run_retry(|conn, rt| {
             rt.block_on(async {
                 let mut rows = conn
@@ -195,14 +191,23 @@ mod tests {
              inactivity\",\"code\":\"STREAM_EXPIRED\"}``"
                 .into(),
         );
-        assert!(is_stream_expired(&real), "must match the real STREAM_EXPIRED error");
+        assert!(
+            is_stream_expired(&real),
+            "must match the real STREAM_EXPIRED error"
+        );
         // Case-insensitive + the prose-only variant (defends against a libSQL Display tweak).
-        assert!(is_stream_expired(&Error::QueryFailed("The Stream Has Expired".into())));
-        assert!(is_stream_expired(&Error::ExecuteFailed("stream_expired".into())));
+        assert!(is_stream_expired(&Error::QueryFailed(
+            "The Stream Has Expired".into()
+        )));
+        assert!(is_stream_expired(&Error::ExecuteFailed(
+            "stream_expired".into()
+        )));
         // Unrelated errors must NOT trigger a reconnect (no spurious retry of a genuine failure).
         assert!(!is_stream_expired(&Error::ExecuteFailed(
             "UNIQUE constraint failed: secrets.row_id".into()
         )));
-        assert!(!is_stream_expired(&Error::Connect("connection refused".into())));
+        assert!(!is_stream_expired(&Error::Connect(
+            "connection refused".into()
+        )));
     }
 }

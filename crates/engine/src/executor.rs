@@ -10,7 +10,9 @@
 use crate::component::{Component, HookRunner, Phase};
 use crate::error::{run_phase, RunContext};
 use crate::event::{Event, EventSink, Stream};
-use crate::model::{AddRepoSpec, OpResult, OpStatus, Registry, ResetGates, RunPlan, RunSummary, Wiring};
+use crate::model::{
+    AddRepoSpec, OpResult, OpStatus, Registry, ResetGates, RunPlan, RunSummary, Wiring,
+};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -48,7 +50,9 @@ pub fn run(
             }
             set.insert(id.as_str());
         }
-        reg.ordered().filter(|c| set.contains(c.id.as_str())).collect()
+        reg.ordered()
+            .filter(|c| set.contains(c.id.as_str()))
+            .collect()
     } else {
         let mut v: Vec<&Component> = Vec::new();
         for id in &plan.targets {
@@ -71,10 +75,25 @@ pub fn run(
         // (1) Untargeted whole-roster reset requires --all AND --confirm.
         if plan.targets.is_empty() && !(plan.gates.all && plan.gates.confirm) {
             let reason = "refusing whole-roster reset: pass --all --confirm".to_string();
-            sink.emit(Event::GuardRefused { component: "<reset>".into(), reason: reason.clone() });
+            sink.emit(Event::GuardRefused {
+                component: "<reset>".into(),
+                reason: reason.clone(),
+            });
             summary.refused.push("<reset>".into());
-            finish(sink, &mut summary, mkres_id("<reset>", Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
-            sink.emit(Event::RunFinished { summary: summary.clone() });
+            finish(
+                sink,
+                &mut summary,
+                mkres_id(
+                    "<reset>",
+                    Phase::Remove,
+                    OpStatus::Refused,
+                    &reason,
+                    plan.dry_run,
+                ),
+            );
+            sink.emit(Event::RunFinished {
+                summary: summary.clone(),
+            });
             return Ok(summary);
         }
         // (2)+(3) Reverse-dependent refusal / cascade fold (explicit targets only).
@@ -87,7 +106,8 @@ pub fn run(
                     // audit fix (minor): the reverse-dependent's Detect hook is run here
                     // purely as a liveness PROBE to decide refuse/cascade — detect hooks
                     // must therefore be side-effect-free (idempotent, read-only).
-                    let live = run_phase(sink, rdep, Phase::Detect, runner, false, &ctx).status == OpStatus::Ok;
+                    let live = run_phase(sink, rdep, Phase::Detect, runner, false, &ctx).status
+                        == OpStatus::Ok;
                     if live && !target_set.contains(&rdep.id) {
                         if plan.gates.cascade {
                             fold.insert(rdep.id.clone());
@@ -99,18 +119,47 @@ pub fn run(
             }
             for tid in &refuse {
                 let reason = format!("refusing remove of {tid}: a live reverse-dependent is not in the set (use --cascade)");
-                sink.emit(Event::GuardRefused { component: tid.clone(), reason: reason.clone() });
+                sink.emit(Event::GuardRefused {
+                    component: tid.clone(),
+                    reason: reason.clone(),
+                });
                 summary.refused.push(tid.clone());
-                finish(sink, &mut summary, mkres_id(tid, Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
+                finish(
+                    sink,
+                    &mut summary,
+                    mkres_id(tid, Phase::Remove, OpStatus::Refused, &reason, plan.dry_run),
+                );
             }
             // Folding extra components beyond the named targets needs --confirm on --apply.
             if !fold.is_empty() && !plan.gates.confirm && !plan.dry_run {
-                let list: Vec<String> = { let mut v: Vec<String> = fold.into_iter().collect(); v.sort(); v };
-                let reason = format!("refusing cascade: would also remove {} — pass --confirm", list.join(", "));
-                sink.emit(Event::GuardRefused { component: "<cascade>".into(), reason: reason.clone() });
+                let list: Vec<String> = {
+                    let mut v: Vec<String> = fold.into_iter().collect();
+                    v.sort();
+                    v
+                };
+                let reason = format!(
+                    "refusing cascade: would also remove {} — pass --confirm",
+                    list.join(", ")
+                );
+                sink.emit(Event::GuardRefused {
+                    component: "<cascade>".into(),
+                    reason: reason.clone(),
+                });
                 summary.refused.push("<cascade>".into());
-                finish(sink, &mut summary, mkres_id("<cascade>", Phase::Remove, OpStatus::Refused, &reason, plan.dry_run));
-                sink.emit(Event::RunFinished { summary: summary.clone() });
+                finish(
+                    sink,
+                    &mut summary,
+                    mkres_id(
+                        "<cascade>",
+                        Phase::Remove,
+                        OpStatus::Refused,
+                        &reason,
+                        plan.dry_run,
+                    ),
+                );
+                sink.emit(Event::RunFinished {
+                    summary: summary.clone(),
+                });
                 return Ok(summary);
             }
             // Rebuild the removal set = (surviving named targets) ∪ (folded
@@ -156,7 +205,13 @@ pub fn run(
         if matches!(plan.phase, Phase::Install | Phase::Fix)
             && comp.requires.iter().any(|d| failed_ids.contains(d))
         {
-            let res = mkres(comp, plan.phase, OpStatus::SkippedBlocked, "dependency failed", plan.dry_run);
+            let res = mkres(
+                comp,
+                plan.phase,
+                OpStatus::SkippedBlocked,
+                "dependency failed",
+                plan.dry_run,
+            );
             summary.skipped_blocked.push(comp.id.clone());
             finish(sink, &mut summary, res);
             continue;
@@ -172,7 +227,13 @@ pub fn run(
                 && run_phase(sink, comp, Phase::Detect, runner, false, &ctx).status == OpStatus::Ok
             {
                 {
-                    let mut res = mkres(comp, plan.phase, OpStatus::Skipped, "already present", false);
+                    let mut res = mkres(
+                        comp,
+                        plan.phase,
+                        OpStatus::Skipped,
+                        "already present",
+                        false,
+                    );
                     apply_wiring(comp, sink, &mut res, &mut summary);
                     finish(sink, &mut summary, res);
                     continue;
@@ -185,21 +246,48 @@ pub fn run(
             if comp.detect.is_some()
                 && run_phase(sink, comp, Phase::Detect, runner, false, &ctx).status != OpStatus::Ok
             {
-                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Skipped, "not installed; use install", false));
+                finish(
+                    sink,
+                    &mut summary,
+                    mkres(
+                        comp,
+                        Phase::Fix,
+                        OpStatus::Skipped,
+                        "not installed; use install",
+                        false,
+                    ),
+                );
                 continue;
             }
             let healthy = comp.verify.is_none()
                 || run_phase(sink, comp, Phase::Verify, runner, false, &ctx).status == OpStatus::Ok;
             if healthy && wiring_present(comp) {
-                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Skipped, "already healthy", false));
+                finish(
+                    sink,
+                    &mut summary,
+                    mkres(
+                        comp,
+                        Phase::Fix,
+                        OpStatus::Skipped,
+                        "already healthy",
+                        false,
+                    ),
+                );
                 continue;
             }
             // A system-scope fix (apt/nix/cdi/alt) is destructive infra — gate it.
             if has_system_scope(&comp.wiring) && !plan.gates.confirm {
                 let reason = "system-scope fix needs --confirm".to_string();
-                sink.emit(Event::GuardRefused { component: comp.id.clone(), reason: reason.clone() });
+                sink.emit(Event::GuardRefused {
+                    component: comp.id.clone(),
+                    reason: reason.clone(),
+                });
                 summary.refused.push(comp.id.clone());
-                finish(sink, &mut summary, mkres(comp, Phase::Fix, OpStatus::Refused, &reason, false));
+                finish(
+                    sink,
+                    &mut summary,
+                    mkres(comp, Phase::Fix, OpStatus::Refused, &reason, false),
+                );
                 continue;
             }
         }
@@ -274,7 +362,9 @@ fn mkres(comp: &Component, phase: Phase, status: OpStatus, msg: &str, dry_run: b
 }
 
 fn finish(sink: &EventSink, summary: &mut RunSummary, res: OpResult) {
-    sink.emit(Event::StepFinished { result: res.clone() });
+    sink.emit(Event::StepFinished {
+        result: res.clone(),
+    });
     summary.results.push(res);
 }
 
@@ -354,15 +444,25 @@ fn wiring_present(comp: &Component) -> bool {
             .map(|t| w.nix_conf_lines.iter().all(|l| t.contains(&l.line)))
             .unwrap_or(false)
     };
-    let cdi_ok = w.cdi_specs.iter().all(|c| std::path::Path::new(&c.output).exists());
-    let alt_ok = w.alternatives.iter().all(|a| std::path::Path::new(&a.link).exists());
+    let cdi_ok = w
+        .cdi_specs
+        .iter()
+        .all(|c| std::path::Path::new(&c.output).exists());
+    let alt_ok = w
+        .alternatives
+        .iter()
+        .all(|a| std::path::Path::new(&a.link).exists());
 
     shell_rc_ok && path_ok && apt_ok && nix_ok && cdi_ok && alt_ok
 }
 
 fn emit_wiring(comp: &Component, sink: &EventSink, rep: &crate::wiring::WiringReport, verb: &str) {
     for n in &rep.notes {
-        sink.emit(Event::Log { component: comp.id.clone(), stream: Stream::Stdout, line: n.clone() });
+        sink.emit(Event::Log {
+            component: comp.id.clone(),
+            stream: Stream::Stdout,
+            line: n.clone(),
+        });
     }
     for (kind, e) in &rep.failures {
         sink.emit(Event::Log {
@@ -372,7 +472,11 @@ fn emit_wiring(comp: &Component, sink: &EventSink, rep: &crate::wiring::WiringRe
         });
     }
     if rep.notes.is_empty() && rep.failures.is_empty() {
-        sink.emit(Event::Log { component: comp.id.clone(), stream: Stream::Stdout, line: format!("wiring {verb}") });
+        sink.emit(Event::Log {
+            component: comp.id.clone(),
+            stream: Stream::Stdout,
+            line: format!("wiring {verb}"),
+        });
     }
 }
 
@@ -411,11 +515,21 @@ fn revert_wiring(
 
 /// reset/Remove postcondition: detect must now FAIL (absent). No detect hook =>
 /// unverifiable => satisfied (None).
-fn reverify_absent(comp: &Component, runner: &dyn HookRunner, sink: &EventSink, ctx: &RunContext) -> Option<OpResult> {
+fn reverify_absent(
+    comp: &Component,
+    runner: &dyn HookRunner,
+    sink: &EventSink,
+    ctx: &RunContext,
+) -> Option<OpResult> {
     comp.detect.as_ref()?;
     if run_phase(sink, comp, Phase::Detect, runner, false, ctx).status == OpStatus::Ok {
-        Some(mkres(comp, Phase::Remove, OpStatus::Incomplete,
-            "removed, but still detected (orphaned/partial remove) — re-run reset or inspect", false))
+        Some(mkres(
+            comp,
+            Phase::Remove,
+            OpStatus::Incomplete,
+            "removed, but still detected (orphaned/partial remove) — re-run reset or inspect",
+            false,
+        ))
     } else {
         None
     }
@@ -423,13 +537,23 @@ fn reverify_absent(comp: &Component, runner: &dyn HookRunner, sink: &EventSink, 
 
 /// auto-fix/Fix postcondition: verify must now SUCCEED (healthy). No verify hook
 /// => unverifiable => satisfied (None).
-fn reverify_healthy(comp: &Component, runner: &dyn HookRunner, sink: &EventSink, ctx: &RunContext) -> Option<OpResult> {
+fn reverify_healthy(
+    comp: &Component,
+    runner: &dyn HookRunner,
+    sink: &EventSink,
+    ctx: &RunContext,
+) -> Option<OpResult> {
     comp.verify.as_ref()?;
     if run_phase(sink, comp, Phase::Verify, runner, false, ctx).status == OpStatus::Ok {
         None
     } else {
-        Some(mkres(comp, Phase::Fix, OpStatus::Incomplete,
-            "fix ran, but verify still fails — review log / escalate", false))
+        Some(mkres(
+            comp,
+            Phase::Fix,
+            OpStatus::Incomplete,
+            "fix ran, but verify still fails — review log / escalate",
+            false,
+        ))
     }
 }
 
@@ -456,15 +580,20 @@ fn needs_sudo(order: &[&Component], phase: Phase) -> bool {
             || match c.hook(phase) {
                 Some(crate::component::Hook::Command { needs_sudo, .. }) => *needs_sudo,
                 Some(crate::component::Hook::ShippedScript { needs_sudo, .. }) => *needs_sudo,
-                Some(crate::component::Hook::Script { needs_sudo, script, .. }) => {
-                    *needs_sudo || script.contains("sudo ")
-                }
+                Some(crate::component::Hook::Script {
+                    needs_sudo, script, ..
+                }) => *needs_sudo || script.contains("sudo "),
                 None => false,
             }
     })
 }
 
-fn prewarm_sudo(order: &[&Component], phase: Phase, dry_run: bool, sink: &EventSink) -> Option<SudoKeepalive> {
+fn prewarm_sudo(
+    order: &[&Component],
+    phase: Phase,
+    dry_run: bool,
+    sink: &EventSink,
+) -> Option<SudoKeepalive> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     if dry_run || !matches!(phase, Phase::Install | Phase::Fix | Phase::Remove) {
@@ -498,7 +627,10 @@ fn prewarm_sudo(order: &[&Component], phase: Phase, dry_run: bool, sink: &EventS
     let stop2 = stop.clone();
     let handle = std::thread::spawn(move || {
         while !stop2.load(Ordering::Relaxed) {
-            let _ = std::process::Command::new("sudo").arg("-n").arg("true").status();
+            let _ = std::process::Command::new("sudo")
+                .arg("-n")
+                .arg("true")
+                .status();
             for _ in 0..50 {
                 if stop2.load(Ordering::Relaxed) {
                     break;
@@ -507,7 +639,10 @@ fn prewarm_sudo(order: &[&Component], phase: Phase, dry_run: bool, sink: &EventS
             }
         }
     });
-    Some(SudoKeepalive { stop, handle: Some(handle) })
+    Some(SudoKeepalive {
+        stop,
+        handle: Some(handle),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +661,9 @@ pub fn add_repo(
     let id = spec.id.trim().to_string();
     validate_add_repo_spec(&spec)?; // shared gate: id slug + ''' + leading-dash guard
     if reg.get(&id).is_some() {
-        anyhow::bail!("component id '{id}' already exists — refusing to shadow it (pick another --id)");
+        anyhow::bail!(
+            "component id '{id}' already exists — refusing to shadow it (pick another --id)"
+        );
     }
 
     // Run the staged pipeline (acquire → [transform] → detect → build → locate →
@@ -562,7 +699,9 @@ pub fn add_repo(
     // orphaned ~/.local/bin symlinks + a PATH block behind on the bail path (audit fix).
     if let Ok(fresh) = Registry::load(manifest_dir) {
         if fresh.get(&id).is_some() {
-            anyhow::bail!("component id '{id}' was registered concurrently — refusing to overwrite");
+            anyhow::bail!(
+                "component id '{id}' was registered concurrently — refusing to overwrite"
+            );
         }
     }
 
@@ -583,12 +722,21 @@ pub fn add_repo(
             stream: Stream::Stderr,
             line: format!("install failed for '{id}' — not registering a drop-in (no half-installed component persisted)"),
         });
-        sink.emit(Event::RunFinished { summary: summary.clone() });
+        sink.emit(Event::RunFinished {
+            summary: summary.clone(),
+        });
         return Ok(summary);
     }
 
-    let final_targets = if ireport.installed_paths.is_empty() { installed.clone() } else { ireport.installed_paths.clone() };
-    let rspec = RegisterSpec { installed_targets: final_targets, ..rspec };
+    let final_targets = if ireport.installed_paths.is_empty() {
+        installed.clone()
+    } else {
+        ireport.installed_paths.clone()
+    };
+    let rspec = RegisterSpec {
+        installed_targets: final_targets,
+        ..rspec
+    };
     let toml = crate::register::synth_dropin(&rspec);
     write_dropin(manifest_dir, &id, &toml, sink)?;
 
@@ -597,7 +745,9 @@ pub fn add_repo(
         stream: Stream::Stdout,
         line: format!("registered '{id}' (build-from-source). Manage with: envctl auto-detect / install {id} / reset {id} --apply"),
     });
-    sink.emit(Event::RunFinished { summary: summary.clone() });
+    sink.emit(Event::RunFinished {
+        summary: summary.clone(),
+    });
     Ok(summary)
 }
 
@@ -614,7 +764,9 @@ use crate::register::RegisterSpec;
 pub(crate) fn validate_add_repo_spec(spec: &AddRepoSpec) -> anyhow::Result<()> {
     let id = spec.id.trim();
     if !is_valid_slug(id) {
-        anyhow::bail!("invalid component id '{id}': start [a-z0-9], then [a-z0-9._-] (no spaces/slashes/..)");
+        anyhow::bail!(
+            "invalid component id '{id}': start [a-z0-9], then [a-z0-9._-] (no spaces/slashes/..)"
+        );
     }
     validate_spec_strings(spec)
 }
@@ -636,8 +788,16 @@ pub(crate) fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
         strs.push(("artifact", g.clone()));
     }
     match &spec.strategy {
-        BuildStrategy::Refactor { refactor: Refactor::Patch { command } } => strs.push(("patch_cmd", command.clone())),
-        BuildStrategy::Refactor { refactor: Refactor::Ai { instruction: Some(i), .. } } => strs.push(("ai_instruction", i.clone())),
+        BuildStrategy::Refactor {
+            refactor: Refactor::Patch { command },
+        } => strs.push(("patch_cmd", command.clone())),
+        BuildStrategy::Refactor {
+            refactor:
+                Refactor::Ai {
+                    instruction: Some(i),
+                    ..
+                },
+        } => strs.push(("ai_instruction", i.clone())),
         BuildStrategy::Rename { renames } => {
             for r in renames {
                 if !is_valid_slug(&r.to) {
@@ -669,7 +829,11 @@ pub(crate) fn validate_spec_strings(spec: &AddRepoSpec) -> anyhow::Result<()> {
         }
     }
     if let Some(r) = &spec.git_ref {
-        if r.starts_with('-') || !r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/')) {
+        if r.starts_with('-')
+            || !r
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+        {
             anyhow::bail!("invalid --git-ref '{r}' (use [A-Za-z0-9._/-], no leading '-')");
         }
     }
@@ -686,16 +850,29 @@ fn local_bin_target(_spec: &AddRepoSpec, name: &str) -> String {
     format!("{home}/.local/bin/{name}")
 }
 
-fn build_install_plan(id: &str, _spec: &AddRepoSpec, outcome: &crate::addrepo::PipelineOutcome) -> InstallPlan {
+fn build_install_plan(
+    id: &str,
+    _spec: &AddRepoSpec,
+    outcome: &crate::addrepo::PipelineOutcome,
+) -> InstallPlan {
     let artifacts = outcome
         .installs
         .iter()
         .map(|(name, src)| {
             let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            ArtifactPlan { source: src.clone(), install_name: name.clone(), renamed: name != stem }
+            ArtifactPlan {
+                source: src.clone(),
+                install_name: name.clone(),
+                renamed: name != stem,
+            }
         })
         .collect();
-    InstallPlan { id: id.into(), slug: id.into(), artifacts, extra_path_entries: vec![] }
+    InstallPlan {
+        id: id.into(),
+        slug: id.into(),
+        artifacts,
+        extra_path_entries: vec![],
+    }
 }
 
 fn build_register_spec(
@@ -709,22 +886,36 @@ fn build_register_spec(
         BuildStrategy::AsIs => "as-is",
         BuildStrategy::CherryPick { .. } => "cherry-pick",
         BuildStrategy::Rename { .. } => "rename",
-        BuildStrategy::Refactor { refactor: Refactor::Patch { .. } } => "refactor:patch",
-        BuildStrategy::Refactor { refactor: Refactor::Ai { .. } } => "refactor:ai",
+        BuildStrategy::Refactor {
+            refactor: Refactor::Patch { .. },
+        } => "refactor:patch",
+        BuildStrategy::Refactor {
+            refactor: Refactor::Ai { .. },
+        } => "refactor:ai",
     }
     .to_string();
     let transform = match &spec.strategy {
-        BuildStrategy::Refactor { refactor: Refactor::Patch { command } } => Some(command.clone()),
-        BuildStrategy::Refactor { refactor: Refactor::Ai { goal, instruction, .. } } => {
-            Some(format!("ai goal={goal:?} {}", instruction.clone().unwrap_or_default()))
-        }
+        BuildStrategy::Refactor {
+            refactor: Refactor::Patch { command },
+        } => Some(command.clone()),
+        BuildStrategy::Refactor {
+            refactor: Refactor::Ai {
+                goal, instruction, ..
+            },
+        } => Some(format!(
+            "ai goal={goal:?} {}",
+            instruction.clone().unwrap_or_default()
+        )),
         _ => None,
     };
     let relinks: Vec<(String, String)> = outcome
         .installs
         .iter()
         .map(|(name, src)| {
-            let rel = src.strip_prefix(&outcome.clone_dir).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| src.to_string_lossy().into_owned());
+            let rel = src
+                .strip_prefix(&outcome.clone_dir)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| src.to_string_lossy().into_owned());
             (name.clone(), rel)
         })
         .collect();
@@ -747,7 +938,12 @@ fn build_register_spec(
     }
 }
 
-fn write_dropin(manifest_dir: &Path, id: &str, toml_text: &str, sink: &EventSink) -> anyhow::Result<()> {
+fn write_dropin(
+    manifest_dir: &Path,
+    id: &str,
+    toml_text: &str,
+    sink: &EventSink,
+) -> anyhow::Result<()> {
     let dir = manifest_dir.join("components.d");
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(format!("{id}.toml"));
@@ -761,7 +957,11 @@ fn write_dropin(manifest_dir: &Path, id: &str, toml_text: &str, sink: &EventSink
             bak = dir.join(format!("{id}.toml.bak.{}.{n}", now_epoch()));
         }
         std::fs::copy(&target, &bak)?;
-        sink.emit(Event::Log { component: id.into(), stream: Stream::Stdout, line: format!("backed up existing drop-in -> {}", bak.display()) });
+        sink.emit(Event::Log {
+            component: id.into(),
+            stream: Stream::Stdout,
+            line: format!("backed up existing drop-in -> {}", bak.display()),
+        });
     }
     let tmp = dir.join(format!(".{id}.toml.tmp"));
     std::fs::write(&tmp, toml_text)?;
@@ -775,7 +975,9 @@ pub(crate) fn is_valid_slug(s: &str) -> bool {
         Some(c) if c.is_ascii_alphanumeric() => {}
         _ => return false,
     }
-    s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 // audit fix (minor): nanosecond resolution so two same-second backups produce

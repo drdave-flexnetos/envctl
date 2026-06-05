@@ -133,6 +133,12 @@ impl Component {
 /// real `ProcessRunner` does this for action phases). Read-only/dry runners
 /// simply ignore it.
 pub trait HookRunner: Send + Sync {
-    fn run(&self, comp: &str, phase: Phase, hook: &Hook, dry_run: bool, sink: &EventSink)
-        -> OpResult;
+    fn run(
+        &self,
+        comp: &str,
+        phase: Phase,
+        hook: &Hook,
+        dry_run: bool,
+        sink: &EventSink,
+    ) -> OpResult;
 }

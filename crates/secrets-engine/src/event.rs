@@ -7,18 +7,32 @@ use std::sync::mpsc::{Receiver, Sender};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SecretEvent {
-    VaultUnlocked { factor: crate::keyslot::Factor },
+    VaultUnlocked {
+        factor: crate::keyslot::Factor,
+    },
     VaultLocked,
     Audit(AuditRecord),
-    SecretWritten { name: String, version: u32 },
-    SecretRead { name: String, by_uid: u32 },
+    SecretWritten {
+        name: String,
+        version: u32,
+    },
+    SecretRead {
+        name: String,
+        by_uid: u32,
+    },
     RelayMinted {
         relay: String,
         kind: crate::broker::RelayKind,
         expires_at: String,
     }, // bearer NEVER in payload
-    RelayRotated { relay: String, expires_at: String },
-    RelayRevoked { relay: String, reason: String },
+    RelayRotated {
+        relay: String,
+        expires_at: String,
+    },
+    RelayRevoked {
+        relay: String,
+        reason: String,
+    },
     /// token_id + client identity for per-swap traceability (OI-11); bearer NEVER included.
     RelaySwapped {
         relay: String,
@@ -29,12 +43,31 @@ pub enum SecretEvent {
         client_uid: u32,
         client_label: String,
     },
-    GuardRefused { subject: String, reason: String },
-    CaIssued { serial: String, cn: String, not_after: String },
-    LeafMinted { sni: String, relay: String, not_after: String },
-    Log { source: String, stream: Stream, line: String },
-    ChildExited { code: i32 },
-    RunFinished { summary: RunSummary },
+    GuardRefused {
+        subject: String,
+        reason: String,
+    },
+    CaIssued {
+        serial: String,
+        cn: String,
+        not_after: String,
+    },
+    LeafMinted {
+        sni: String,
+        relay: String,
+        not_after: String,
+    },
+    Log {
+        source: String,
+        stream: Stream,
+        line: String,
+    },
+    ChildExited {
+        code: i32,
+    },
+    RunFinished {
+        summary: RunSummary,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

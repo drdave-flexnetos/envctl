@@ -61,7 +61,9 @@ pub fn synth_dropin(spec: &RegisterSpec) -> String {
         ),
     };
     let transform_step = match &spec.transform {
-        Some(t) if spec.strategy_tag == "refactor:patch" => format!("# replay refactor:patch transform\n{t}\n"),
+        Some(t) if spec.strategy_tag == "refactor:patch" => {
+            format!("# replay refactor:patch transform\n{t}\n")
+        }
         _ => String::new(),
     };
     // AUDIT-FIX (blocker): the relink line interpolates name+rel into a shell
@@ -95,22 +97,39 @@ pub fn synth_dropin(spec: &RegisterSpec) -> String {
     // AUDIT-FIX: an embedded newline/CR in a user-derived field (source, ref,
     // build_cmd) would terminate the `#` comment and inject a top-level TOML key.
     // Collapse line breaks to spaces, same treatment as `transform` below.
-    s.push_str(&format!("#   source        = {}\n", comment_safe(&spec.source)));
-    s.push_str(&format!("#   ref           = {}\n", comment_safe(&ref_disp)));
+    s.push_str(&format!(
+        "#   source        = {}\n",
+        comment_safe(&spec.source)
+    ));
+    s.push_str(&format!(
+        "#   ref           = {}\n",
+        comment_safe(&ref_disp)
+    ));
     s.push_str(&format!("#   resolved_sha  = {sha}\n"));
-    s.push_str(&format!("#   build_system  = {}\n", comment_safe(&spec.build_system)));
-    s.push_str(&format!("#   build_cmd     = {}\n", comment_safe(&spec.build_cmd)));
+    s.push_str(&format!(
+        "#   build_system  = {}\n",
+        comment_safe(&spec.build_system)
+    ));
+    s.push_str(&format!(
+        "#   build_cmd     = {}\n",
+        comment_safe(&spec.build_cmd)
+    ));
     if let Some(t) = &spec.transform {
         s.push_str(&format!("#   transform     = {}\n", t.replace('\n', " / ")));
     }
-    s.push_str(&format!("#   artifacts     = {}\n", comment_safe(&spec.installed_targets.join(", "))));
+    s.push_str(&format!(
+        "#   artifacts     = {}\n",
+        comment_safe(&spec.installed_targets.join(", "))
+    ));
     s.push('\n');
 
     s.push_str("[[component]]\n");
     s.push_str(&format!("id = \"{id}\"\n"));
     s.push_str(&format!("name = {}\n", toml_str(&spec.display_name)));
     s.push_str("description = \"\"\"\n");
-    s.push_str("Built from source via envctl add-repo (build-from-source; only runs when named).\n");
+    s.push_str(
+        "Built from source via envctl add-repo (build-from-source; only runs when named).\n",
+    );
     // AUDIT-FIX: this is a TOML `"""` multi-line basic string. Interpolating
     // user-derived fields raw lets a `"""` (or stray `"`/`\`/newline) close the
     // string and inject arbitrary TOML (e.g. a second `[[component]]` with an
@@ -123,16 +142,25 @@ pub fn synth_dropin(spec: &RegisterSpec) -> String {
         desc_safe(&ref_disp),
         desc_safe(&spec.build_system)
     ));
-    s.push_str(&format!("artifacts={}\n", desc_safe(&spec.installed_targets.join(" "))));
+    s.push_str(&format!(
+        "artifacts={}\n",
+        desc_safe(&spec.installed_targets.join(" "))
+    ));
     s.push_str("\"\"\"\n\n");
 
     s.push_str("[component.detect]\nkind = \"command\"\ncommand = \"bash\"\n");
-    s.push_str(&format!("args = [\"-lc\", {}]\n\n", toml_str(&format!("command -v {primary}"))));
+    s.push_str(&format!(
+        "args = [\"-lc\", {}]\n\n",
+        toml_str(&format!("command -v {primary}"))
+    ));
 
     s.push_str("[component.install]\nkind = \"script\"\nlogin_shell = true\nscript = '''\n");
     s.push_str("set -euo pipefail\n");
     s.push_str("install -d -m 700 \"$HOME/.local/share/envctl/repos\"\n");
-    s.push_str(&format!("SRC=\"$HOME/.local/share/envctl/repos/{}\"\n", spec.slug));
+    s.push_str(&format!(
+        "SRC=\"$HOME/.local/share/envctl/repos/{}\"\n",
+        spec.slug
+    ));
     s.push_str(&format!(
         "if [ -d \"$SRC/.git\" ]; then git -C \"$SRC\" remote set-url origin {src_sq} || true; else git clone {src_sq} \"$SRC\"; fi\n"
     ));
@@ -192,14 +220,16 @@ fn safe_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
         && !s.starts_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 /// A safe clone-relative path: no `..`, no shell metachars, no leading `-`.
 fn safe_rel(s: &str) -> bool {
     !s.is_empty()
         && !s.contains("..")
         && !s.starts_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
 /// TOML basic-string for an args[] element.

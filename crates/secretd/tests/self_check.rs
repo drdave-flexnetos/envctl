@@ -31,7 +31,9 @@ fn self_check_cmd(home: &Path) -> Command {
 #[test]
 fn self_check_passes_on_default_inmem() {
     let home = scratch("self_check_ok");
-    let out = self_check_cmd(&home).output().expect("run secretd --self-check");
+    let out = self_check_cmd(&home)
+        .output()
+        .expect("run secretd --self-check");
     assert!(
         out.status.success(),
         "self-check should pass on a clean default (in-memory) config; stderr:\n{}",

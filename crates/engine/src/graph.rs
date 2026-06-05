@@ -60,14 +60,26 @@ pub fn analyze(reg: &Registry) -> GraphReport {
     let ids: Vec<String> = reg.ids().cloned().collect();
     let edges: usize = reg.ordered().map(|c| c.requires.len()).sum();
 
-    let roots: Vec<String> = reg.ordered().filter(|c| c.requires.is_empty()).map(|c| c.id.clone()).collect();
-    let leaves: Vec<String> = ids.iter().filter(|id| !rev.contains_key(*id)).cloned().collect();
+    let roots: Vec<String> = reg
+        .ordered()
+        .filter(|c| c.requires.is_empty())
+        .map(|c| c.id.clone())
+        .collect();
+    let leaves: Vec<String> = ids
+        .iter()
+        .filter(|id| !rev.contains_key(*id))
+        .cloned()
+        .collect();
     let orphans: Vec<String> = reg
         .ordered()
         .filter(|c| c.requires.is_empty() && !rev.contains_key(&c.id))
         .map(|c| c.id.clone())
         .collect();
-    let groups: Vec<String> = ids.iter().filter(|id| id.starts_with("group-") || id.starts_with("meta-")).cloned().collect();
+    let groups: Vec<String> = ids
+        .iter()
+        .filter(|id| id.starts_with("group-") || id.starts_with("meta-"))
+        .cloned()
+        .collect();
 
     // Longest requires-chain via DP over the topo order (reg.ids() is topo-sorted).
     let mut dist: HashMap<&str, usize> = HashMap::new();
@@ -97,7 +109,10 @@ pub fn analyze(reg: &Registry) -> GraphReport {
     }
     critical_path.reverse();
 
-    let max_dependents = rev.iter().max_by_key(|(_, v)| v.len()).map(|(k, v)| (k.clone(), v.len()));
+    let max_dependents = rev
+        .iter()
+        .max_by_key(|(_, v)| v.len())
+        .map(|(k, v)| (k.clone(), v.len()));
     let max_requires = reg
         .ordered()
         .filter(|c| !c.requires.is_empty())
@@ -120,7 +135,11 @@ pub fn analyze(reg: &Registry) -> GraphReport {
 pub fn impact(reg: &Registry, id: &str) -> Option<Impact> {
     let comp = reg.get(id)?;
     let install_closure = reg.closure(id).ok()?.iter().map(|c| c.id.clone()).collect();
-    let cascade_removes = reg.reverse_dependents(id).iter().map(|c| c.id.clone()).collect();
+    let cascade_removes = reg
+        .reverse_dependents(id)
+        .iter()
+        .map(|c| c.id.clone())
+        .collect();
     let required_by = reverse_edges(reg).get(id).cloned().unwrap_or_default();
     Some(Impact {
         component: id.into(),
@@ -168,7 +187,10 @@ pub fn dependency_paths(reg: &Registry, id: &str) -> Vec<Vec<String>> {
 
 // ── exports ──────────────────────────────────────────────────────────────────
 
-fn state_for<'a>(report: Option<&'a EnvReport>, id: &str) -> Option<&'a crate::model::ComponentState> {
+fn state_for<'a>(
+    report: Option<&'a EnvReport>,
+    id: &str,
+) -> Option<&'a crate::model::ComponentState> {
     report.and_then(|r| r.components.iter().find(|c| c.id == id))
 }
 
@@ -188,7 +210,12 @@ pub fn to_dot(reg: &Registry, report: Option<&EnvReport>) -> String {
         }
     };
     let drift_sev: HashMap<&str, Severity> = report
-        .map(|r| r.drift.iter().map(|d| (d.component.as_str(), d.severity)).collect())
+        .map(|r| {
+            r.drift
+                .iter()
+                .map(|d| (d.component.as_str(), d.severity))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut s = String::from("digraph envctl {\n  rankdir=LR;\n  node [shape=box, style=\"rounded,filled\", fontname=\"monospace\", fillcolor=\"#161b22\", color=\"#30363d\", fontcolor=\"#c9d1d9\"];\n  edge [color=\"#484f58\"];\n  bgcolor=\"#0d1117\";\n");
@@ -233,7 +260,11 @@ pub fn to_json(reg: &Registry, report: Option<&EnvReport>) -> serde_json::Value 
         .collect();
     let edges: Vec<serde_json::Value> = reg
         .ordered()
-        .flat_map(|c| c.requires.iter().map(move |d| serde_json::json!({"from": d, "to": c.id})))
+        .flat_map(|c| {
+            c.requires
+                .iter()
+                .map(move |d| serde_json::json!({"from": d, "to": c.id}))
+        })
         .collect();
     serde_json::json!({ "nodes": nodes, "edges": edges, "summary": analyze(reg) })
 }
@@ -249,7 +280,11 @@ mod tests {
     fn analyze_finds_roots_and_critical_path() {
         let g = analyze(&reg());
         assert!(g.nodes > 0 && g.edges > 0);
-        assert!(g.roots.contains(&"rustup".to_string()), "rustup is a root: {:?}", g.roots);
+        assert!(
+            g.roots.contains(&"rustup".to_string()),
+            "rustup is a root: {:?}",
+            g.roots
+        );
         // critical path is a real chain (each step requires the previous)
         assert!(g.critical_path.len() >= 2);
     }
@@ -263,6 +298,6 @@ mod tests {
     fn dot_and_json_export() {
         let r = reg();
         assert!(to_dot(&r, None).starts_with("digraph"));
-        assert!(to_json(&r, None)["nodes"].as_array().unwrap().len() > 0);
+        assert!(!to_json(&r, None)["nodes"].as_array().unwrap().is_empty());
     }
 }

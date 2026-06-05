@@ -108,10 +108,11 @@ impl Store for LibSqlStore {
             .conn
             .query_one(schema::GET_META, vec![Value::Text(k.to_string())])?;
         match row {
-            Some(r) => Ok(Some(
-                r.get::<String>(0)
-                    .map_err(|e| Error::SerializationError(format!("meta.v: {e}")))?,
-            )),
+            Some(r) => {
+                Ok(Some(r.get::<String>(0).map_err(|e| {
+                    Error::SerializationError(format!("meta.v: {e}"))
+                })?))
+            }
             None => Ok(None),
         }
     }
@@ -171,75 +172,81 @@ impl Store for LibSqlStore {
         // check and returns a clean Contract error rather than double-inserting.
         let row_id = self.conn.run_retry(|conn, rt| {
             rt.block_on(async {
-            let txn = conn
-                .transaction()
-                .await
-                .map_err(|e| Error::TransactionFailed(e.to_string()))?;
-
-            // next reserved high-water mark
-            let next_id = {
-                let mut rows = txn
-                    .query(schema::GET_NEXT_ROW_ID, ())
+                let txn = conn
+                    .transaction()
                     .await
-                    .map_err(|e| Error::QueryFailed(e.to_string()))?;
-                rows.next()
-                    .await
-                    .map_err(|e| Error::QueryFailed(e.to_string()))?
-                    .ok_or_else(|| Error::QueryFailed("row_id_counter row missing".into()))?
-                    .get::<i64>(0)
-                    .map_err(|e| Error::SerializationError(format!("next_id: {e}")))?
-            };
-            if row.row_id <= 0 || row.row_id > next_id {
-                return Err(Error::Contract(format!(
-                    "put_secret row_id {} was not reserved (max reserved {})",
-                    row.row_id, next_id
-                )));
-            }
+                    .map_err(|e| Error::TransactionFailed(e.to_string()))?;
 
-            // collision check
-            let collides = txn
-                .query(schema::SECRET_ROW_ID_EXISTS, vec![Value::Integer(row.row_id)])
-                .await
-                .map_err(|e| Error::QueryFailed(e.to_string()))?
-                .next()
-                .await
-                .map_err(|e| Error::QueryFailed(e.to_string()))?
-                .is_some();
-            if collides {
-                return Err(Error::Contract(format!(
-                    "put_secret row_id {} collides with an existing row",
-                    row.row_id
-                )));
-            }
+                // next reserved high-water mark
+                let next_id = {
+                    let mut rows = txn
+                        .query(schema::GET_NEXT_ROW_ID, ())
+                        .await
+                        .map_err(|e| Error::QueryFailed(e.to_string()))?;
+                    rows.next()
+                        .await
+                        .map_err(|e| Error::QueryFailed(e.to_string()))?
+                        .ok_or_else(|| Error::QueryFailed("row_id_counter row missing".into()))?
+                        .get::<i64>(0)
+                        .map_err(|e| Error::SerializationError(format!("next_id: {e}")))?
+                };
+                if row.row_id <= 0 || row.row_id > next_id {
+                    return Err(Error::Contract(format!(
+                        "put_secret row_id {} was not reserved (max reserved {})",
+                        row.row_id, next_id
+                    )));
+                }
 
-            // version monotonicity
-            let max_version = {
-                let mut rows = txn
-                    .query(schema::MAX_SECRET_VERSION, vec![Value::Text(row.name.clone())])
-                    .await
-                    .map_err(|e| Error::QueryFailed(e.to_string()))?;
-                rows.next()
+                // collision check
+                let collides = txn
+                    .query(
+                        schema::SECRET_ROW_ID_EXISTS,
+                        vec![Value::Integer(row.row_id)],
+                    )
                     .await
                     .map_err(|e| Error::QueryFailed(e.to_string()))?
-                    .ok_or_else(|| Error::QueryFailed("MAX(version) returned no row".into()))?
-                    .get::<i64>(0)
-                    .map_err(|e| Error::SerializationError(format!("max_version: {e}")))?
-            };
-            let expected = (max_version as u32) + 1;
-            if row.version != expected {
-                return Err(Error::Contract(format!(
-                    "put_secret version {} for {:?} violates monotonicity (expected {})",
-                    row.version, row.name, expected
-                )));
-            }
+                    .next()
+                    .await
+                    .map_err(|e| Error::QueryFailed(e.to_string()))?
+                    .is_some();
+                if collides {
+                    return Err(Error::Contract(format!(
+                        "put_secret row_id {} collides with an existing row",
+                        row.row_id
+                    )));
+                }
 
-            txn.execute(schema::INSERT_SECRET_VERSION, serial::bind_secret_row(&row))
-                .await
-                .map_err(|e| Error::ExecuteFailed(e.to_string()))?;
-            txn.commit()
-                .await
-                .map_err(|e| Error::TransactionFailed(e.to_string()))?;
-            Ok::<i64, Error>(row.row_id)
+                // version monotonicity
+                let max_version = {
+                    let mut rows = txn
+                        .query(
+                            schema::MAX_SECRET_VERSION,
+                            vec![Value::Text(row.name.clone())],
+                        )
+                        .await
+                        .map_err(|e| Error::QueryFailed(e.to_string()))?;
+                    rows.next()
+                        .await
+                        .map_err(|e| Error::QueryFailed(e.to_string()))?
+                        .ok_or_else(|| Error::QueryFailed("MAX(version) returned no row".into()))?
+                        .get::<i64>(0)
+                        .map_err(|e| Error::SerializationError(format!("max_version: {e}")))?
+                };
+                let expected = (max_version as u32) + 1;
+                if row.version != expected {
+                    return Err(Error::Contract(format!(
+                        "put_secret version {} for {:?} violates monotonicity (expected {})",
+                        row.version, row.name, expected
+                    )));
+                }
+
+                txn.execute(schema::INSERT_SECRET_VERSION, serial::bind_secret_row(&row))
+                    .await
+                    .map_err(|e| Error::ExecuteFailed(e.to_string()))?;
+                txn.commit()
+                    .await
+                    .map_err(|e| Error::TransactionFailed(e.to_string()))?;
+                Ok::<i64, Error>(row.row_id)
             })
         })?;
         self.fsync_barrier()?;
@@ -247,9 +254,10 @@ impl Store for LibSqlStore {
     }
 
     fn get_secret_latest(&self, name: &str) -> anyhow::Result<Option<SecretRow>> {
-        let row = self
-            .conn
-            .query_one(schema::GET_SECRET_LATEST, vec![Value::Text(name.to_string())])?;
+        let row = self.conn.query_one(
+            schema::GET_SECRET_LATEST,
+            vec![Value::Text(name.to_string())],
+        )?;
         match row {
             Some(r) => Ok(Some(serial::deserialize_secret_row(&r)?)),
             None => Ok(None),
@@ -259,7 +267,10 @@ impl Store for LibSqlStore {
     fn get_secret_version(&self, name: &str, version: u32) -> anyhow::Result<Option<SecretRow>> {
         let row = self.conn.query_one(
             schema::GET_SECRET_VERSION,
-            vec![Value::Text(name.to_string()), Value::Integer(version as i64)],
+            vec![
+                Value::Text(name.to_string()),
+                Value::Integer(version as i64),
+            ],
         )?;
         match row {
             Some(r) => Ok(Some(serial::deserialize_secret_row(&r)?)),
@@ -268,9 +279,10 @@ impl Store for LibSqlStore {
     }
 
     fn max_secret_version(&self, name: &str) -> anyhow::Result<u32> {
-        let row = self
-            .conn
-            .query_one(schema::MAX_SECRET_VERSION, vec![Value::Text(name.to_string())])?;
+        let row = self.conn.query_one(
+            schema::MAX_SECRET_VERSION,
+            vec![Value::Text(name.to_string())],
+        )?;
         match row {
             Some(r) => Ok(r
                 .get::<i64>(0)
@@ -293,9 +305,10 @@ impl Store for LibSqlStore {
     }
 
     fn list_secret_versions(&self, name: &str) -> anyhow::Result<Vec<u32>> {
-        let rows = self
-            .conn
-            .query_all(schema::LIST_SECRET_VERSIONS, vec![Value::Text(name.to_string())])?;
+        let rows = self.conn.query_all(
+            schema::LIST_SECRET_VERSIONS,
+            vec![Value::Text(name.to_string())],
+        )?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
             out.push(
@@ -310,7 +323,8 @@ impl Store for LibSqlStore {
     // ---- keyslots ----
 
     fn save_keyslot(&self, slot: &Keyslot) -> anyhow::Result<()> {
-        self.conn.execute(schema::SAVE_KEYSLOT, serial::bind_keyslot(slot)?)?;
+        self.conn
+            .execute(schema::SAVE_KEYSLOT, serial::bind_keyslot(slot)?)?;
         self.fsync_barrier()?;
         Ok(())
     }
@@ -325,7 +339,9 @@ impl Store for LibSqlStore {
     }
 
     fn load_keyslot(&self, id: i64) -> anyhow::Result<Option<Keyslot>> {
-        let row = self.conn.query_one(schema::LOAD_KEYSLOT, vec![Value::Integer(id)])?;
+        let row = self
+            .conn
+            .query_one(schema::LOAD_KEYSLOT, vec![Value::Integer(id)])?;
         match row {
             Some(r) => Ok(Some(serial::deserialize_keyslot(&r)?)),
             None => Ok(None),
@@ -383,9 +399,10 @@ impl Store for LibSqlStore {
     fn save_relay_policy(&self, row: RelayPolicyRow) -> anyhow::Result<i64> {
         // Upsert by relay_id, reusing the existing id (so live bearers' policy_id is never orphaned).
         // id == 0 => assign: reuse existing, else max+1.
-        let existing = self
-            .conn
-            .query_one(schema::SELECT_RELAY_ID_BY_NAME, vec![Value::Text(row.policy.relay_id.clone())])?;
+        let existing = self.conn.query_one(
+            schema::SELECT_RELAY_ID_BY_NAME,
+            vec![Value::Text(row.policy.relay_id.clone())],
+        )?;
         let existing_id = match existing {
             Some(r) => Some(
                 r.get::<i64>(0)
@@ -405,16 +422,19 @@ impl Store for LibSqlStore {
                 .unwrap_or(0);
             max + 1
         };
-        self.conn
-            .execute(schema::UPSERT_RELAY_POLICY, serial::bind_relay_policy(id, &row)?)?;
+        self.conn.execute(
+            schema::UPSERT_RELAY_POLICY,
+            serial::bind_relay_policy(id, &row)?,
+        )?;
         self.fsync_barrier()?;
         Ok(id)
     }
 
     fn load_relay_policy(&self, relay_id: &str) -> anyhow::Result<Option<RelayPolicyRow>> {
-        let row = self
-            .conn
-            .query_one(schema::LOAD_RELAY_POLICY, vec![Value::Text(relay_id.to_string())])?;
+        let row = self.conn.query_one(
+            schema::LOAD_RELAY_POLICY,
+            vec![Value::Text(relay_id.to_string())],
+        )?;
         match row {
             Some(r) => Ok(Some(serial::deserialize_relay_policy(&r)?)),
             None => Ok(None),
@@ -422,7 +442,9 @@ impl Store for LibSqlStore {
     }
 
     fn list_relay_policies(&self) -> anyhow::Result<Vec<RelayPolicyRow>> {
-        let rows = self.conn.query_all(schema::LIST_RELAY_POLICIES, Vec::new())?;
+        let rows = self
+            .conn
+            .query_all(schema::LIST_RELAY_POLICIES, Vec::new())?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
             out.push(serial::deserialize_relay_policy(r)?);
@@ -433,7 +455,8 @@ impl Store for LibSqlStore {
     // ---- relay bearers ----
 
     fn save_bearer(&self, row: BearerRow) -> anyhow::Result<()> {
-        self.conn.execute(schema::SAVE_BEARER, serial::bind_bearer_row(&row))?;
+        self.conn
+            .execute(schema::SAVE_BEARER, serial::bind_bearer_row(&row))?;
         self.fsync_barrier()?;
         Ok(())
     }
@@ -449,9 +472,10 @@ impl Store for LibSqlStore {
     }
 
     fn list_bearers_for_relay(&self, relay_id: &str) -> anyhow::Result<Vec<BearerRow>> {
-        let rows = self
-            .conn
-            .query_all(schema::LIST_BEARERS_FOR_RELAY, vec![Value::Text(relay_id.to_string())])?;
+        let rows = self.conn.query_all(
+            schema::LIST_BEARERS_FOR_RELAY,
+            vec![Value::Text(relay_id.to_string())],
+        )?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
             out.push(serial::deserialize_bearer_row(r)?);
@@ -460,9 +484,10 @@ impl Store for LibSqlStore {
     }
 
     fn revoke_bearers_for_relay(&self, relay_id: &str) -> anyhow::Result<u32> {
-        let n = self
-            .conn
-            .execute(schema::REVOKE_BEARERS_FOR_RELAY, vec![Value::Text(relay_id.to_string())])?;
+        let n = self.conn.execute(
+            schema::REVOKE_BEARERS_FOR_RELAY,
+            vec![Value::Text(relay_id.to_string())],
+        )?;
         self.fsync_barrier()?;
         Ok(n as u32)
     }
@@ -477,9 +502,10 @@ impl Store for LibSqlStore {
     }
 
     fn load_remote_client(&self, client_id: &str) -> anyhow::Result<Option<RemoteClient>> {
-        let row = self
-            .conn
-            .query_one(schema::LOAD_REMOTE_CLIENT, vec![Value::Text(client_id.to_string())])?;
+        let row = self.conn.query_one(
+            schema::LOAD_REMOTE_CLIENT,
+            vec![Value::Text(client_id.to_string())],
+        )?;
         match row {
             Some(r) => Ok(Some(serial::deserialize_remote_client(&r)?)),
             None => Ok(None),
@@ -487,7 +513,9 @@ impl Store for LibSqlStore {
     }
 
     fn list_remote_clients(&self) -> anyhow::Result<Vec<RemoteClient>> {
-        let rows = self.conn.query_all(schema::LIST_REMOTE_CLIENTS, Vec::new())?;
+        let rows = self
+            .conn
+            .query_all(schema::LIST_REMOTE_CLIENTS, Vec::new())?;
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
             out.push(serial::deserialize_remote_client(r)?);
@@ -507,7 +535,8 @@ impl Store for LibSqlStore {
     // ---- ca / certs ----
 
     fn save_cert(&self, row: CertRow) -> anyhow::Result<()> {
-        self.conn.execute(schema::SAVE_CERT, serial::bind_cert_row(&row))?;
+        self.conn
+            .execute(schema::SAVE_CERT, serial::bind_cert_row(&row))?;
         self.fsync_barrier()?;
         Ok(())
     }

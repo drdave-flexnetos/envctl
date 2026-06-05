@@ -9,9 +9,15 @@ use std::time::SystemTime;
 fn all_uncertain_context_refuses_every_guard() {
     let ctx = UnlockContext::uncertain(1000, SystemTime::UNIX_EPOCH);
     let guards = [
-        SecGuard::UsbPresent { partition_uuid: "x".into() },
-        SecGuard::RelayValid { relay_id: "claude-main".into() },
-        SecGuard::LeafBackedByRelay { host: "api.anthropic.com".into() },
+        SecGuard::UsbPresent {
+            partition_uuid: "x".into(),
+        },
+        SecGuard::RelayValid {
+            relay_id: "claude-main".into(),
+        },
+        SecGuard::LeafBackedByRelay {
+            host: "api.anthropic.com".into(),
+        },
         SecGuard::PeerIsOwner,
         SecGuard::VaultEncryptedAtRest,
     ];
@@ -92,7 +98,9 @@ fn relay_policy_deserializes_from_toml() {
 #[test]
 fn swap_mode_and_kdf_json_round_trip() {
     let modes = [
-        SwapMode::BaseUrlRepoint { upstream_base: "https://api.anthropic.com".into() },
+        SwapMode::BaseUrlRepoint {
+            upstream_base: "https://api.anthropic.com".into(),
+        },
         SwapMode::ProxyMitm,
         SwapMode::NativeSubToken { ttl_secs: 3600 },
     ];

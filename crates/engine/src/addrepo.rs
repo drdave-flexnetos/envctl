@@ -11,12 +11,12 @@
 //! killed wholesale on timeout; the AI agent is invoked non-interactively, TTY-less,
 //! confined to the clone dir, never with a skip-permissions flag, and never
 //! auto-commits/pushes.
+use crate::component::Phase;
 use crate::detect_build::{detect, BuildPlan};
 use crate::event::{Event, EventSink, Stream};
 use crate::model::{
     AddRepoSpec, AiAgent, BuildStrategy, OpResult, OpStatus, Refactor, RefactorGoal, RunSummary,
 };
-use crate::component::Phase;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -67,36 +67,65 @@ pub fn run_pipeline(
     // SAFETY: never as root.
     if let Some(res) = refuse_if_root_inner(id, euid_is_root(), dry_run) {
         summary.refused.push(id.into());
-        sink.emit(Event::StepFinished { result: res.clone() });
+        sink.emit(Event::StepFinished {
+            result: res.clone(),
+        });
         summary.results.push(res);
-        sink.emit(Event::RunFinished { summary: summary.clone() });
+        sink.emit(Event::RunFinished {
+            summary: summary.clone(),
+        });
         return Ok((summary, None));
     }
 
     // preview = dry-run OR no --build opt-in. A bare add-repo never runs upstream code.
     let preview = dry_run || !spec.allow_build;
     if !spec.allow_build && !dry_run {
-        sink.emit(plainlog(id, "preview only — pass --build to acquire + build + install (and run any refactor agent)".into()));
+        sink.emit(plainlog(
+            id,
+            "preview only — pass --build to acquire + build + install (and run any refactor agent)"
+                .into(),
+        ));
     }
 
     macro_rules! stage {
         ($name:expr, $body:expr) => {{
             let t = Instant::now();
-            sink.emit(Event::StepStarted { component: id.into(), phase: Phase::Install, index: 0, total: 0 });
+            sink.emit(Event::StepStarted {
+                component: id.into(),
+                phase: Phase::Install,
+                index: 0,
+                total: 0,
+            });
             let r: Result<String, String> = $body;
             let (status, msg) = match &r {
-                Ok(m) => (if preview { OpStatus::DryRun } else { OpStatus::Ok }, m.clone()),
+                Ok(m) => (
+                    if preview {
+                        OpStatus::DryRun
+                    } else {
+                        OpStatus::Ok
+                    },
+                    m.clone(),
+                ),
                 Err(e) => (OpStatus::Failed, e.clone()),
             };
             let res = OpResult {
-                component: id.into(), phase: Phase::Install, status, exit_code: None,
-                duration_ms: t.elapsed().as_millis(), message: format!("{}: {}", $name, msg), dry_run: preview,
+                component: id.into(),
+                phase: Phase::Install,
+                status,
+                exit_code: None,
+                duration_ms: t.elapsed().as_millis(),
+                message: format!("{}: {}", $name, msg),
+                dry_run: preview,
             };
-            sink.emit(Event::StepFinished { result: res.clone() });
+            sink.emit(Event::StepFinished {
+                result: res.clone(),
+            });
             summary.results.push(res);
             if r.is_err() {
                 summary.failed.push(format!("{id}/{}", $name));
-                sink.emit(Event::RunFinished { summary: summary.clone() });
+                sink.emit(Event::RunFinished {
+                    summary: summary.clone(),
+                });
                 return Ok((summary, None));
             }
             r.unwrap()
@@ -107,39 +136,69 @@ pub fn run_pipeline(
 
     // 1. ACQUIRE (real even in preview? no — clone is a real fetch; only when building).
     let resolved_sha: Option<String> = if preview {
-        stage!("acquire", { Ok(format!("[preview] would clone {} -> {}", spec.git_url, clone_dir.display())) });
+        stage!("acquire", {
+            Ok(format!(
+                "[preview] would clone {} -> {}",
+                spec.git_url,
+                clone_dir.display()
+            ))
+        });
         None
     } else {
-        let sha = stage!("acquire", { acquire(spec, repos_root, &clone_dir, sink).map_err(|e| e.to_string()) });
-        sha.is_empty().then(|| ()).map_or(Some(sha), |_| None)
+        let sha = stage!("acquire", {
+            acquire(spec, repos_root, &clone_dir, sink).map_err(|e| e.to_string())
+        });
+        sha.is_empty().then_some(()).map_or(Some(sha), |_| None)
     };
 
     // 2. STRATEGY TRANSFORM.
     if let BuildStrategy::Refactor { refactor } = &spec.strategy {
-        stage!("refactor", { apply_refactor(refactor, &clone_dir, preview, sink).map(|_| "refactor applied".to_string()).map_err(|e| e.to_string()) });
+        stage!("refactor", {
+            apply_refactor(refactor, &clone_dir, preview, sink)
+                .map(|_| "refactor applied".to_string())
+                .map_err(|e| e.to_string())
+        });
     }
 
     // 3. DETECT (read-only; runs even in preview if the clone exists).
     let build_plan = if preview && !clone_dir.join(".git").is_dir() {
         // nothing cloned in preview: predict from overrides only.
-        stage!("detect", { Ok(format!("[preview] build_system={:?} (predicted)", spec.build_system.unwrap_or(crate::model::BuildSystem::Auto))) });
+        stage!("detect", {
+            Ok(format!(
+                "[preview] build_system={:?} (predicted)",
+                spec.build_system.unwrap_or(crate::model::BuildSystem::Auto)
+            ))
+        });
         crate::detect_build::BuildPlan {
             system: spec.build_system.unwrap_or(crate::model::BuildSystem::Auto),
-            build_cmd: if spec.build_cmd.is_empty() { "<detected at build time>".into() } else { spec.build_cmd.clone() },
-            artifact_globs: if spec.artifacts.is_empty() { vec!["target/release/*".into()] } else { spec.artifacts.clone() },
+            build_cmd: if spec.build_cmd.is_empty() {
+                "<detected at build time>".into()
+            } else {
+                spec.build_cmd.clone()
+            },
+            artifact_globs: if spec.artifacts.is_empty() {
+                vec!["target/release/*".into()]
+            } else {
+                spec.artifacts.clone()
+            },
         }
     } else {
         // audit fix (minor): in preview, detect/locate run against the on-disk clone.
         // If we did NOT just fetch (preview never clones), a pre-existing clone from a
         // prior run may be stale — label the results so they aren't read as a fresh fetch.
         if preview {
-            sink.emit(plainlog(id, "[preview — detect/locate from existing on-disk clone, may be stale]".into()));
+            sink.emit(plainlog(
+                id,
+                "[preview — detect/locate from existing on-disk clone, may be stale]".into(),
+            ));
         }
         match detect(&clone_dir, spec) {
             Ok(p) => {
                 let sys = p.system;
                 let cmd = p.build_cmd.clone();
-                stage!("detect", { Ok::<_, String>(format!("build_system={sys:?} cmd=`{cmd}`")) });
+                stage!("detect", {
+                    Ok::<_, String>(format!("build_system={sys:?} cmd=`{cmd}`"))
+                });
                 p
             }
             Err(e) => {
@@ -152,11 +211,20 @@ pub fn run_pipeline(
     // 4. BUILD.
     stage!("build", {
         if preview {
-            Ok(format!("[preview] would run `{}` in {}", build_plan.build_cmd, clone_dir.display()))
+            Ok(format!(
+                "[preview] would run `{}` in {}",
+                build_plan.build_cmd,
+                clone_dir.display()
+            ))
         } else {
-            stream_command(shell_in(&clone_dir, &build_plan.build_cmd), id, BUILD_TIMEOUT, sink)
-                .map(|_| "build ok".into())
-                .map_err(|e| e.to_string())
+            stream_command(
+                shell_in(&clone_dir, &build_plan.build_cmd),
+                id,
+                BUILD_TIMEOUT,
+                sink,
+            )
+            .map(|_| "build ok".into())
+            .map_err(|e| e.to_string())
         }
     });
 
@@ -166,8 +234,15 @@ pub fn run_pipeline(
         if artifacts.is_empty() && !preview {
             Err("no build artifacts matched (pass --artifact <glob>)".into())
         } else {
-            Ok(format!("{} artifact(s): {}", artifacts.len(),
-                artifacts.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")))
+            Ok(format!(
+                "{} artifact(s): {}",
+                artifacts.len(),
+                artifacts
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
         }
     });
 
@@ -177,11 +252,24 @@ pub fn run_pipeline(
         if installs.is_empty() && !preview {
             Err("strategy filtered out every artifact (check --bin / --rename)".into())
         } else {
-            Ok(installs.iter().map(|(n, p)| format!("{n} -> {}", p.display())).collect::<Vec<_>>().join(", "))
+            Ok(installs
+                .iter()
+                .map(|(n, p)| format!("{n} -> {}", p.display()))
+                .collect::<Vec<_>>()
+                .join(", "))
         }
     });
 
-    Ok((summary, Some(PipelineOutcome { clone_dir, resolved_sha, build_plan, artifacts, installs })))
+    Ok((
+        summary,
+        Some(PipelineOutcome {
+            clone_dir,
+            resolved_sha,
+            build_plan,
+            artifacts,
+            installs,
+        }),
+    ))
 }
 
 /// INTERACTIVE handoff: clone the repo, write the goal to `.envctl-task.md`, and
@@ -199,19 +287,37 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
     // --local/--git-ref becomes git option-injection.
     crate::executor::validate_add_repo_spec(spec)?;
     let (agent, prompt) = match &spec.strategy {
-        BuildStrategy::Refactor { refactor: Refactor::Ai { agent, goal, instruction } } => {
-            (resolve_agent(*agent), build_ai_prompt(*goal, instruction.as_deref()))
-        }
-        BuildStrategy::Refactor { refactor: Refactor::Patch { .. } } => {
-            (resolve_agent(None), build_ai_prompt(RefactorGoal::Custom, None))
-        }
+        BuildStrategy::Refactor {
+            refactor:
+                Refactor::Ai {
+                    agent,
+                    goal,
+                    instruction,
+                },
+        } => (
+            resolve_agent(*agent),
+            build_ai_prompt(*goal, instruction.as_deref()),
+        ),
+        BuildStrategy::Refactor {
+            refactor: Refactor::Patch { .. },
+        } => (
+            resolve_agent(None),
+            build_ai_prompt(RefactorGoal::Custom, None),
+        ),
         BuildStrategy::CherryPick { bins } => (
             resolve_agent(None),
-            build_ai_prompt(RefactorGoal::CherryPickToCrate, Some(&format!("Focus on: {}", bins.join(", ")))),
+            build_ai_prompt(
+                RefactorGoal::CherryPickToCrate,
+                Some(&format!("Focus on: {}", bins.join(", "))),
+            ),
         ),
-        _ => (resolve_agent(None), build_ai_prompt(RefactorGoal::Custom, None)),
+        _ => (
+            resolve_agent(None),
+            build_ai_prompt(RefactorGoal::Custom, None),
+        ),
     };
-    let agent = agent.ok_or_else(|| anyhow::anyhow!("no AI coding CLI found; {}", available_agents_msg()))?;
+    let agent = agent
+        .ok_or_else(|| anyhow::anyhow!("no AI coding CLI found; {}", available_agents_msg()))?;
 
     let repos_root = {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
@@ -227,17 +333,36 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
         // this id can't drop the agent into untrusted code. Local clones have no
         // meaningful origin URL to compare, so this only applies when local_path is None.
         if spec.local_path.is_none() {
-            let origin = Command::new("git").arg("-C").arg(&clone_dir).args(["remote", "get-url", "origin"]).output().ok()
-                .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            let origin = Command::new("git")
+                .arg("-C")
+                .arg(&clone_dir)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
             if origin.as_deref() != Some(spec.git_url.as_str()) {
-                anyhow::bail!("refusing to reuse clone {}: origin is {:?}, not {}", clone_dir.display(), origin, spec.git_url);
+                anyhow::bail!(
+                    "refusing to reuse clone {}: origin is {:?}, not {}",
+                    clone_dir.display(),
+                    origin,
+                    spec.git_url
+                );
             }
         }
     } else {
-        let mut c = if spec.local_path.is_some() {
+        let mut c = if let Some(local_path) = &spec.local_path {
             let mut c = Command::new("git");
-            c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"]);
-            c.arg("--").arg(spec.local_path.as_ref().unwrap()); // `--` => no git-arg injection
+            c.args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "--local",
+                "--no-hardlinks",
+            ]);
+            c.arg("--").arg(local_path); // `--` => no git-arg injection
             c
         } else {
             let mut c = git_hardened();
@@ -261,18 +386,34 @@ pub fn connect_agent(spec: &AddRepoSpec) -> anyhow::Result<()> {
         format!("# envctl refactor task\n\n{prompt}\n\nWhen finished, exit the agent. envctl will not commit or push.\n"),
     )?;
 
-    println!("\nenvctl: connecting you to `{}` in {}", agent.bin(), clone_dir.display());
+    println!(
+        "\nenvctl: connecting you to `{}` in {}",
+        agent.bin(),
+        clone_dir.display()
+    );
     println!("        the task is written to .envctl-task.md; collaborate, then exit the agent.");
-    println!("        afterward, build it with:  envctl add-repo {} --id {} --build\n", spec.git_url, spec.id);
+    println!(
+        "        afterward, build it with:  envctl add-repo {} --id {} --build\n",
+        spec.git_url, spec.id
+    );
 
     // Interactive: inherit stdio so the agent attaches to the real terminal.
     let status = Command::new(agent.bin()).current_dir(&clone_dir).status()?;
-    println!("\nenvctl: agent session ended (exit {:?}). Clone is at {}", status.code(), clone_dir.display());
+    println!(
+        "\nenvctl: agent session ended (exit {:?}). Clone is at {}",
+        status.code(),
+        clone_dir.display()
+    );
     Ok(())
 }
 
 // ── acquire ─────────────────────────────────────────────────────────────────
-fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &EventSink) -> anyhow::Result<String> {
+fn acquire(
+    spec: &AddRepoSpec,
+    repos_root: &Path,
+    clone_dir: &Path,
+    sink: &EventSink,
+) -> anyhow::Result<String> {
     ensure_private_dir(repos_root)?;
 
     if let Some(local) = &spec.local_path {
@@ -281,21 +422,42 @@ fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &Event
             // file.allow=never hardening is only to block file:// SUBMODULES on a
             // remote clone). Hooks stay disabled.
             let mut c = Command::new("git");
-            c.args(["-c", "core.hooksPath=/dev/null", "-c", "protocol.file.allow=always", "clone", "--local", "--no-hardlinks"])
-                .arg("--") // audit fix: `--` => a local_path starting with `-` can't be parsed as a git flag
-                .arg(local)
-                .arg(clone_dir);
+            c.args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "--local",
+                "--no-hardlinks",
+            ])
+            .arg("--") // audit fix: `--` => a local_path starting with `-` can't be parsed as a git flag
+            .arg(local)
+            .arg(clone_dir);
             stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink)?;
         }
     } else if clone_dir.join(".git").is_dir() {
         // reuse: verify origin matches the requested URL before fetching (SAFETY).
-        let origin = Command::new("git").arg("-C").arg(clone_dir).args(["remote", "get-url", "origin"]).output().ok()
-            .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let origin = Command::new("git")
+            .arg("-C")
+            .arg(clone_dir)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
         if origin.as_deref() != Some(spec.git_url.as_str()) {
-            anyhow::bail!("refusing to reuse clone {}: origin is {:?}, not {}", clone_dir.display(), origin, spec.git_url);
+            anyhow::bail!(
+                "refusing to reuse clone {}: origin is {:?}, not {}",
+                clone_dir.display(),
+                origin,
+                spec.git_url
+            );
         }
         let mut c = git_hardened();
-        c.arg("-C").arg(clone_dir).args(["fetch", "--all", "--tags", "--prune"]);
+        c.arg("-C")
+            .arg(clone_dir)
+            .args(["fetch", "--all", "--tags", "--prune"]);
         stream_command(c, &spec.id, ACQUIRE_TIMEOUT, sink)?;
     } else {
         let mut c = git_hardened();
@@ -325,28 +487,63 @@ fn acquire(spec: &AddRepoSpec, repos_root: &Path, clone_dir: &Path, sink: &Event
 /// git with file-protocol + hooks disabled (no surprise hook execution on clone).
 fn git_hardened() -> Command {
     let mut c = Command::new("git");
-    c.args(["-c", "protocol.file.allow=never", "-c", "core.hooksPath=/dev/null"]);
+    c.args([
+        "-c",
+        "protocol.file.allow=never",
+        "-c",
+        "core.hooksPath=/dev/null",
+    ]);
     c
 }
 
 fn resolve_sha(clone_dir: &Path) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(clone_dir).args(["rev-parse", "HEAD"]).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(clone_dir)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 // ── refactor (patch | AI) ────────────────────────────────────────────────────
-fn apply_refactor(refactor: &Refactor, clone_dir: &Path, preview: bool, sink: &EventSink) -> anyhow::Result<()> {
+fn apply_refactor(
+    refactor: &Refactor,
+    clone_dir: &Path,
+    preview: bool,
+    sink: &EventSink,
+) -> anyhow::Result<()> {
     match refactor {
         Refactor::Patch { command } => {
             if preview {
-                sink.emit(plainlog("refactor", format!("[preview] patch: bash -lc `{command}` in {}", clone_dir.display())));
+                sink.emit(plainlog(
+                    "refactor",
+                    format!(
+                        "[preview] patch: bash -lc `{command}` in {}",
+                        clone_dir.display()
+                    ),
+                ));
                 return Ok(());
             }
-            stream_command(shell_in(clone_dir, command), "refactor", REFACTOR_TIMEOUT, sink).map(|_| ())
+            stream_command(
+                shell_in(clone_dir, command),
+                "refactor",
+                REFACTOR_TIMEOUT,
+                sink,
+            )
+            .map(|_| ())
         }
-        Refactor::Ai { agent, goal, instruction } => {
-            let agent = resolve_agent(*agent)
-                .ok_or_else(|| anyhow::anyhow!("no AI coding CLI found; tried {}", available_agents_msg()))?;
+        Refactor::Ai {
+            agent,
+            goal,
+            instruction,
+        } => {
+            let agent = resolve_agent(*agent).ok_or_else(|| {
+                anyhow::anyhow!("no AI coding CLI found; tried {}", available_agents_msg())
+            })?;
             // AUDIT-FIX: only Claude/Codex are structurally confined to the clone
             // (--add-dir / --cd). Refuse Gemini/Kimi headless — they have no
             // enforceable FS sandbox flag; use --connect for a supervised session.
@@ -371,7 +568,12 @@ fn apply_refactor(refactor: &Refactor, clone_dir: &Path, preview: bool, sink: &E
             c.current_dir(clone_dir).args(&argv);
             stream_command(c, "refactor", REFACTOR_TIMEOUT, sink)?;
             // audit the change, then the pipeline re-detects + builds the result.
-            if let Ok(out) = Command::new("git").arg("-C").arg(clone_dir).args(["diff", "--stat"]).output() {
+            if let Ok(out) = Command::new("git")
+                .arg("-C")
+                .arg(clone_dir)
+                .args(["diff", "--stat"])
+                .output()
+            {
                 for line in String::from_utf8_lossy(&out.stdout).lines() {
                     sink.emit(plainlog("refactor", format!("  {line}")));
                 }
@@ -390,12 +592,25 @@ fn resolve_agent(explicit: Option<AiAgent>) -> Option<AiAgent> {
 }
 fn agent_present(a: AiAgent) -> bool {
     which::which(a.bin()).is_ok()
-        || Command::new("bash").args(["-lc", &format!("command -v {}", a.bin())])
-            .stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+        || Command::new("bash")
+            .args(["-lc", &format!("command -v {}", a.bin())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
 }
 fn available_agents_msg() -> String {
-    let avail: Vec<&str> = AiAgent::preference().into_iter().filter(|a| agent_present(*a)).map(|a| a.bin()).collect();
-    if avail.is_empty() { "claude/codex/gemini/kimi (none installed)".into() } else { format!("available: {}", avail.join(", ")) }
+    let avail: Vec<&str> = AiAgent::preference()
+        .into_iter()
+        .filter(|a| agent_present(*a))
+        .map(|a| a.bin())
+        .collect();
+    if avail.is_empty() {
+        "claude/codex/gemini/kimi (none installed)".into()
+    } else {
+        format!("available: {}", avail.join(", "))
+    }
 }
 
 fn build_ai_prompt(goal: RefactorGoal, extra: Option<&str>) -> String {
@@ -416,8 +631,17 @@ fn build_ai_prompt(goal: RefactorGoal, extra: Option<&str>) -> String {
 }
 
 // ── locate + strategy shaping ────────────────────────────────────────────────
-fn locate_artifacts(clone_dir: &Path, spec: &AddRepoSpec, plan: &BuildPlan, preview: bool) -> Vec<PathBuf> {
-    let globs: Vec<String> = if !spec.artifacts.is_empty() { spec.artifacts.clone() } else { plan.artifact_globs.clone() };
+fn locate_artifacts(
+    clone_dir: &Path,
+    spec: &AddRepoSpec,
+    plan: &BuildPlan,
+    preview: bool,
+) -> Vec<PathBuf> {
+    let globs: Vec<String> = if !spec.artifacts.is_empty() {
+        spec.artifacts.clone()
+    } else {
+        plan.artifact_globs.clone()
+    };
     let mut found = Vec::new();
     for g in &globs {
         let pat = clone_dir.join(g);
@@ -448,23 +672,46 @@ fn locate_artifacts(clone_dir: &Path, spec: &AddRepoSpec, plan: &BuildPlan, prev
 }
 
 fn shape_installs(artifacts: &[PathBuf], strategy: &BuildStrategy) -> Vec<(String, PathBuf)> {
-    let stem = |p: &Path| p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+    let stem = |p: &Path| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string()
+    };
     match strategy {
-        BuildStrategy::AsIs | BuildStrategy::Refactor { .. } => artifacts.iter().map(|p| (stem(p), p.clone())).collect(),
-        BuildStrategy::CherryPick { bins } => artifacts.iter()
+        BuildStrategy::AsIs | BuildStrategy::Refactor { .. } => {
+            artifacts.iter().map(|p| (stem(p), p.clone())).collect()
+        }
+        BuildStrategy::CherryPick { bins } => artifacts
+            .iter()
             .filter(|p| bins.iter().any(|b| b == &stem(p)))
-            .map(|p| (stem(p), p.clone())).collect(),
-        BuildStrategy::Rename { renames } => artifacts.iter().map(|p| {
-            let s = stem(p);
-            let name = renames.iter().find(|r| r.from == s).map(|r| r.to.clone()).unwrap_or(s);
-            (name, p.clone())
-        }).collect(),
+            .map(|p| (stem(p), p.clone()))
+            .collect(),
+        BuildStrategy::Rename { renames } => artifacts
+            .iter()
+            .map(|p| {
+                let s = stem(p);
+                let name = renames
+                    .iter()
+                    .find(|r| r.from == s)
+                    .map(|r| r.to.clone())
+                    .unwrap_or(s);
+                (name, p.clone())
+            })
+            .collect(),
     }
 }
 
 // ── streamed command (process-group-isolated, timeout-killed) ────────────────
-fn stream_command(mut cmd: Command, comp: &str, timeout: Duration, sink: &EventSink) -> anyhow::Result<i32> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+fn stream_command(
+    mut cmd: Command,
+    comp: &str,
+    timeout: Duration,
+    sink: &EventSink,
+) -> anyhow::Result<i32> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     // Own process group so a wedged child tree (bash -> cargo/agent) is reaped wholesale.
     unsafe {
         cmd.pre_exec(|| {
@@ -472,15 +719,32 @@ fn stream_command(mut cmd: Command, comp: &str, timeout: Duration, sink: &EventS
             Ok(())
         });
     }
-    let mut child: Child = cmd.spawn().map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
+    let mut child: Child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawn failed: {e}"))?;
     let pid = child.id();
     let tail = Arc::new(Mutex::new(Vec::<String>::new()));
-    let h_out = child.stdout.take().map(|r| pump(r, comp.to_string(), Stream::Stdout, sink.clone(), None));
-    let h_err = child.stderr.take().map(|r| pump(r, comp.to_string(), Stream::Stderr, sink.clone(), Some(tail.clone())));
+    let h_out = child
+        .stdout
+        .take()
+        .map(|r| pump(r, comp.to_string(), Stream::Stdout, sink.clone(), None));
+    let h_err = child.stderr.take().map(|r| {
+        pump(
+            r,
+            comp.to_string(),
+            Stream::Stderr,
+            sink.clone(),
+            Some(tail.clone()),
+        )
+    });
 
     let (code, success, timed_out) = wait_timeout(&mut child, timeout, pid);
-    if let Some(h) = h_out { let _ = h.join(); }
-    if let Some(h) = h_err { let _ = h.join(); }
+    if let Some(h) = h_out {
+        let _ = h.join();
+    }
+    if let Some(h) = h_err {
+        let _ = h.join();
+    }
 
     if timed_out {
         anyhow::bail!("timed out after {}s", timeout.as_secs());
@@ -494,7 +758,11 @@ fn stream_command(mut cmd: Command, comp: &str, timeout: Duration, sink: &EventS
 }
 
 fn pump<R: std::io::Read + Send + 'static>(
-    reader: R, comp: String, stream: Stream, sink: EventSink, tail: Option<Arc<Mutex<Vec<String>>>>,
+    reader: R,
+    comp: String,
+    stream: Stream,
+    sink: EventSink,
+    tail: Option<Arc<Mutex<Vec<String>>>>,
 ) -> std::thread::JoinHandle<()> {
     use std::io::{BufRead, BufReader};
     std::thread::spawn(move || {
@@ -506,12 +774,20 @@ fn pump<R: std::io::Read + Send + 'static>(
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }
-            let line = String::from_utf8_lossy(&buf).trim_end_matches(['\n', '\r']).to_string();
-            sink.emit(Event::Log { component: comp.clone(), stream, line: line.clone() });
+            let line = String::from_utf8_lossy(&buf)
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
+            sink.emit(Event::Log {
+                component: comp.clone(),
+                stream,
+                line: line.clone(),
+            });
             if let Some(t) = &tail {
                 if let Ok(mut v) = t.lock() {
                     v.push(line);
-                    if v.len() > 40 { v.remove(0); }
+                    if v.len() > 40 {
+                        v.remove(0);
+                    }
                 }
             }
         }
@@ -564,15 +840,31 @@ fn shell_in(dir: &Path, script: &str) -> Command {
     c
 }
 fn plainlog(comp: &str, line: String) -> Event {
-    Event::Log { component: comp.into(), stream: Stream::Stdout, line }
+    Event::Log {
+        component: comp.into(),
+        stream: Stream::Stdout,
+        line,
+    }
 }
 fn shellish(argv: &[String]) -> String {
-    argv.iter().map(|a| if a.contains(' ') || a.contains('\n') { format!("'{}'", a.replace('\'', "'\\''")) } else { a.clone() }).collect::<Vec<_>>().join(" ")
+    argv.iter()
+        .map(|a| {
+            if a.contains(' ') || a.contains('\n') {
+                format!("'{}'", a.replace('\'', "'\\''"))
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 fn ensure_private_dir(p: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     if !p.exists() {
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p)?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(p)?;
     }
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700))?;
@@ -581,15 +873,27 @@ fn ensure_private_dir(p: &Path) -> std::io::Result<()> {
 #[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 /// A build-system source/helper file that a catch-all glob would wrongly install.
 fn is_source_helper(p: &Path) -> bool {
     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
     const DENY: &[&str] = &[
-        "configure", "config.guess", "config.sub", "config.status", "install-sh",
-        "compile", "missing", "depcomp", "libtool", "bootstrap", "autogen.sh", "ltmain.sh",
+        "configure",
+        "config.guess",
+        "config.sub",
+        "config.status",
+        "install-sh",
+        "compile",
+        "missing",
+        "depcomp",
+        "libtool",
+        "bootstrap",
+        "autogen.sh",
+        "ltmain.sh",
     ];
     if DENY.contains(&name) {
         return true;
@@ -614,7 +918,9 @@ mod tests {
         let v = AiAgent::Claude.argv("do the thing", "/tmp/clone");
         assert!(v.iter().any(|s| s == "--add-dir") && v.iter().any(|s| s == "/tmp/clone"));
         assert!(v.iter().any(|s| s == "--permission-mode"));
-        assert!(!v.iter().any(|s| s.contains("dangerously") || s == "--yolo" || s == "-y"));
+        assert!(!v
+            .iter()
+            .any(|s| s.contains("dangerously") || s == "--yolo" || s == "-y"));
         let c = AiAgent::Codex.argv("x", "/tmp/clone");
         assert!(c.iter().any(|s| s == "--cd"));
     }

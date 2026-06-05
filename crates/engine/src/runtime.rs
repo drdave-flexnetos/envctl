@@ -51,7 +51,10 @@ fn state_path(manifest_dir: &Path) -> PathBuf {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
-    cache_base().join("envctl").join(format!("{h:016x}")).join("state.json")
+    cache_base()
+        .join("envctl")
+        .join(format!("{h:016x}"))
+        .join("state.json")
 }
 
 pub fn load(manifest_dir: &Path) -> RuntimeState {

@@ -182,8 +182,8 @@ pub fn bind_keyslot(slot: &Keyslot) -> Result<Vec<Value>> {
 /// Cols: 0 id, 1 factor, 2 label, 3 kdf_json, 4 salt, 5 usb_partition_uuid, 6 wrap_nonce,
 /// 7 wrapped_dek, 8 dek_generation. `enabled` is implied `true` (the SELECTs filter `enabled = 1`).
 pub fn deserialize_keyslot(row: &Row) -> Result<Keyslot> {
-    let kdf: Kdf =
-        serde_json::from_str(&get_string(row, 3, "keyslot.kdf_json")?).map_err(|e| ser("keyslot.kdf", e))?;
+    let kdf: Kdf = serde_json::from_str(&get_string(row, 3, "keyslot.kdf_json")?)
+        .map_err(|e| ser("keyslot.kdf", e))?;
     Ok(Keyslot {
         id: get_i64(row, 0, "keyslot.id")?,
         factor: factor_from_str(&get_string(row, 1, "keyslot.factor")?)?,
@@ -229,8 +229,8 @@ pub fn bind_audit_record(rec: &AuditRecord) -> Result<Vec<Value>> {
 /// Cols: 0 seq, 1 ts, 2 actor_uid, 3 event_type, 4 subject, 5 detail, 6 outcome, 7 prev_hash,
 /// 8 row_hash.
 pub fn deserialize_audit_record(row: &Row) -> Result<AuditRecord> {
-    let detail: serde_json::Value =
-        serde_json::from_str(&get_string(row, 5, "audit.detail")?).map_err(|e| ser("audit.detail", e))?;
+    let detail: serde_json::Value = serde_json::from_str(&get_string(row, 5, "audit.detail")?)
+        .map_err(|e| ser("audit.detail", e))?;
     Ok(AuditRecord {
         seq: get_i64(row, 0, "audit.seq")?,
         ts: get_string(row, 1, "audit.ts")?,
@@ -261,8 +261,8 @@ pub fn bind_relay_policy(id: i64, row: &RelayPolicyRow) -> Result<Vec<Value>> {
 
 /// Cols: 0 id, 1 policy_json.
 pub fn deserialize_relay_policy(row: &Row) -> Result<RelayPolicyRow> {
-    let policy: RelayPolicy =
-        serde_json::from_str(&get_string(row, 1, "relay.policy_json")?).map_err(|e| ser("relay.policy", e))?;
+    let policy: RelayPolicy = serde_json::from_str(&get_string(row, 1, "relay.policy_json")?)
+        .map_err(|e| ser("relay.policy", e))?;
     Ok(RelayPolicyRow {
         id: get_i64(row, 0, "relay.id")?,
         policy,
@@ -348,7 +348,10 @@ pub fn bind_remote_client(row: &RemoteClient) -> Vec<Value> {
 pub fn deserialize_remote_client(row: &Row) -> Result<RemoteClient> {
     Ok(RemoteClient {
         client_id: get_string(row, 0, "remote_client.client_id")?,
-        dpop_jkt: jkt_from_vec(get_blob(row, 1, "remote_client.dpop_jkt")?, "remote_client.dpop_jkt")?,
+        dpop_jkt: jkt_from_vec(
+            get_blob(row, 1, "remote_client.dpop_jkt")?,
+            "remote_client.dpop_jkt",
+        )?,
         enabled: get_i64(row, 2, "remote_client.enabled")? != 0,
         hardware_bound: get_i64(row, 3, "remote_client.hardware_bound")? != 0,
         created_at_ms: get_i64(row, 4, "remote_client.created_at_ms")?,

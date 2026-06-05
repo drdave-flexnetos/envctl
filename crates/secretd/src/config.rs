@@ -125,8 +125,8 @@ fn load_token() -> anyhow::Result<Option<Zeroizing<String>>> {
 /// Refuse a token file that is group/other-readable (mode & 0o077 != 0).
 fn check_token_file_mode(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(path)
-        .with_context(|| format!("stat token file {}", path.display()))?;
+    let meta =
+        std::fs::metadata(path).with_context(|| format!("stat token file {}", path.display()))?;
     let mode = meta.permissions().mode();
     if mode & 0o077 != 0 {
         bail!(
@@ -153,9 +153,9 @@ fn resolve(
             auth_token: Zeroizing::new(String::new()),
         }),
         Backend::LibSql => {
-            let url = url
-                .filter(|u| !u.trim().is_empty())
-                .ok_or_else(|| anyhow!("store backend = \"libsql\" requires a URL ({ENV_URL} or [store].url)"))?;
+            let url = url.filter(|u| !u.trim().is_empty()).ok_or_else(|| {
+                anyhow!("store backend = \"libsql\" requires a URL ({ENV_URL} or [store].url)")
+            })?;
             url_is_acceptable(&url)?;
             let auth_token = token.unwrap_or_else(|| Zeroizing::new(String::new()));
             if auth_token.is_empty() && !url_host_is_loopback(&url) {
@@ -194,7 +194,10 @@ fn split_scheme_host(url: &str) -> Option<(String, String)> {
         // [ipv6]:port
         after.split(']').next().unwrap_or("")
     } else {
-        authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority)
+        authority
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(authority)
     };
     Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
 }
@@ -299,7 +302,11 @@ mod tests {
         assert!(url_is_acceptable("http://db.turso.io:8080").is_err());
         assert!(url_is_acceptable("ws://10.0.0.1:8080").is_err());
         // Direct TLS: REFUSED (would add a 2nd rustls; use a loopback terminator).
-        for u in ["https://db.turso.io", "wss://db.turso.io", "libsql://db.turso.io"] {
+        for u in [
+            "https://db.turso.io",
+            "wss://db.turso.io",
+            "libsql://db.turso.io",
+        ] {
             let e = url_is_acceptable(u).unwrap_err().to_string();
             assert!(
                 e.contains("terminator") || e.contains("second rustls"),
@@ -368,7 +375,12 @@ mod tests {
 
     #[test]
     fn resolve_libsql_loopback_allows_empty_token() {
-        let c = resolve(Some("libsql".into()), Some("http://127.0.0.1:8080".into()), None).unwrap();
+        let c = resolve(
+            Some("libsql".into()),
+            Some("http://127.0.0.1:8080".into()),
+            None,
+        )
+        .unwrap();
         assert_eq!(c.backend, Backend::LibSql);
         assert!(c.auth_token.is_empty());
     }

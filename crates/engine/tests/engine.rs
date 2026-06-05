@@ -20,12 +20,27 @@ struct Wrap {
 fn manifest_loads_and_topo_sorts() {
     let reg = Registry::load(&manifest_dir()).expect("manifest dir loads");
     let ids: Vec<String> = reg.ids().cloned().collect();
-    for want in ["rustup", "bun", "cuda-toolkit", "yazelix-shell", "boot-repair-dev"] {
-        assert!(ids.contains(&want.to_string()), "missing component {want}: {ids:?}");
+    for want in [
+        "rustup",
+        "bun",
+        "cuda-toolkit",
+        "yazelix-shell",
+        "boot-repair-dev",
+    ] {
+        assert!(
+            ids.contains(&want.to_string()),
+            "missing component {want}: {ids:?}"
+        );
     }
     let pos = |id: &str| ids.iter().position(|x| x == id).unwrap();
-    assert!(pos("rustup") < pos("cuda-toolkit"), "rustup must precede cuda-toolkit");
-    assert!(pos("bun") < pos("yazelix-shell"), "bun must precede yazelix-shell");
+    assert!(
+        pos("rustup") < pos("cuda-toolkit"),
+        "rustup must precede cuda-toolkit"
+    );
+    assert!(
+        pos("bun") < pos("yazelix-shell"),
+        "bun must precede yazelix-shell"
+    );
 }
 
 #[test]
@@ -137,7 +152,10 @@ fn drift_flags_missing_and_unhealthy() {
     assert_eq!(kind_for("bun"), Some(DriftKind::Missing));
     assert_eq!(kind_for("rustup"), Some(DriftKind::Unhealthy));
     assert!(drift.iter().any(|d| d.kind == DriftKind::DriverInactive));
-    assert!(!drift.iter().any(|d| d.component == "uv"), "healthy uv must not drift");
+    assert!(
+        !drift.iter().any(|d| d.component == "uv"),
+        "healthy uv must not drift"
+    );
     // suggested verb points at the right command
     let bun = drift.iter().find(|d| d.component == "bun").unwrap();
     assert!(bun.suggested_verb.contains("install bun"));
@@ -150,36 +168,67 @@ fn runsummary_ok_counts_incomplete() {
     let mut s = envctl_engine::RunSummary::default();
     assert!(s.ok());
     s.incomplete.push("x".into());
-    assert!(!s.ok(), "an incomplete (acted-but-post-state-wrong) run is NOT ok");
+    assert!(
+        !s.ok(),
+        "an incomplete (acted-but-post-state-wrong) run is NOT ok"
+    );
 }
 
 #[test]
 fn untargeted_reset_refused_without_all_confirm() {
-    let eng = envctl_engine::Engine::with_runner(manifest_dir(), Box::new(envctl_engine::DryRunRunner))
-        .expect("engine loads");
+    let eng =
+        envctl_engine::Engine::with_runner(manifest_dir(), Box::new(envctl_engine::DryRunRunner))
+            .expect("engine loads");
     let sink = envctl_engine::EventSink::null();
     // Whole-roster reset (no targets) with no gates -> one synthetic Refused, early return.
     let s = eng
-        .run(envctl_engine::RunPlan::new(envctl_engine::Phase::Remove, vec![], false), &sink)
+        .run(
+            envctl_engine::RunPlan::new(envctl_engine::Phase::Remove, vec![], false),
+            &sink,
+        )
         .expect("run ok");
-    assert!(s.refused.iter().any(|x| x == "<reset>"), "must refuse: {:?}", s.refused);
+    assert!(
+        s.refused.iter().any(|x| x == "<reset>"),
+        "must refuse: {:?}",
+        s.refused
+    );
     assert!(!s.ok());
 }
 
 #[test]
 fn reverse_dependents_transitive() {
     let reg = Registry::load(&manifest_dir()).expect("manifest loads");
-    let rdeps: Vec<String> = reg.reverse_dependents("bun").iter().map(|c| c.id.clone()).collect();
-    assert!(rdeps.contains(&"node-via-bun".to_string()), "direct: {rdeps:?}");
-    assert!(rdeps.contains(&"group-ai-clis".to_string()), "transitive (via node-via-bun): {rdeps:?}");
+    let rdeps: Vec<String> = reg
+        .reverse_dependents("bun")
+        .iter()
+        .map(|c| c.id.clone())
+        .collect();
+    assert!(
+        rdeps.contains(&"node-via-bun".to_string()),
+        "direct: {rdeps:?}"
+    );
+    assert!(
+        rdeps.contains(&"group-ai-clis".to_string()),
+        "transitive (via node-via-bun): {rdeps:?}"
+    );
 }
 
 #[test]
 fn manifest_phase3_wiring_loads() {
     let reg = Registry::load(&manifest_dir()).expect("manifest loads");
     assert!(!reg.get("gh").unwrap().wiring.apt_repos.is_empty());
-    assert!(!reg.get("nix-yazelix-cache").unwrap().wiring.nix_conf_lines.is_empty());
-    assert!(!reg.get("ghostty-default-terminal").unwrap().wiring.alternatives.is_empty());
+    assert!(!reg
+        .get("nix-yazelix-cache")
+        .unwrap()
+        .wiring
+        .nix_conf_lines
+        .is_empty());
+    assert!(!reg
+        .get("ghostty-default-terminal")
+        .unwrap()
+        .wiring
+        .alternatives
+        .is_empty());
     let nct = reg.get("nvidia-container-toolkit").unwrap();
     assert!(!nct.wiring.apt_repos.is_empty() && !nct.wiring.cdi_specs.is_empty());
 }
@@ -198,20 +247,38 @@ fn reset_refusal_does_not_orphan_remove_prereqs() {
         live: HashSet<String>,
     }
     impl HookRunner for LiveRunner {
-        fn run(&self, comp: &str, phase: Phase, _h: &envctl_engine::Hook, _d: bool, _s: &EventSink) -> OpResult {
+        fn run(
+            &self,
+            comp: &str,
+            phase: Phase,
+            _h: &envctl_engine::Hook,
+            _d: bool,
+            _s: &EventSink,
+        ) -> OpResult {
             let status = if phase == Phase::Detect && self.live.contains(comp) {
                 OpStatus::Ok
             } else {
                 OpStatus::DryRun
             };
-            OpResult { component: comp.into(), phase, status, exit_code: None, duration_ms: 0, message: String::new(), dry_run: false }
+            OpResult {
+                component: comp.into(),
+                phase,
+                status,
+                exit_code: None,
+                duration_ms: 0,
+                message: String::new(),
+                dry_run: false,
+            }
         }
     }
 
     // temp manifest with the 3-component chain.
     let dir = std::env::temp_dir().join(format!(
         "envctl-reset-test-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -249,21 +316,34 @@ command = "true"
     )
     .unwrap();
 
-    let runner = LiveRunner { live: HashSet::from(["capp".to_string()]) };
+    let runner = LiveRunner {
+        live: HashSet::from(["capp".to_string()]),
+    };
     let eng = Engine::with_runner(dir.clone(), Box::new(runner)).unwrap();
     let sink = EventSink::null();
     let summary = eng
-        .run(RunPlan::new(Phase::Remove, vec!["cweb".to_string()], false), &sink)
+        .run(
+            RunPlan::new(Phase::Remove, vec!["cweb".to_string()], false),
+            &sink,
+        )
         .unwrap();
 
     // cweb refused (live capp depends on it)…
-    assert!(summary.refused.iter().any(|x| x == "cweb"), "cweb must be refused: {:?}", summary.refused);
+    assert!(
+        summary.refused.iter().any(|x| x == "cweb"),
+        "cweb must be refused: {:?}",
+        summary.refused
+    );
     // …and clib (cweb's orphaned prereq) must NOT have been processed for removal.
     let clib_removed = summary
         .results
         .iter()
         .any(|r| r.component == "clib" && r.phase == Phase::Remove && r.status != OpStatus::NoHook);
-    assert!(!clib_removed, "BLOCKER REGRESSION: clib (orphaned prereq) was removed: {:?}", summary.results);
+    assert!(
+        !clib_removed,
+        "BLOCKER REGRESSION: clib (orphaned prereq) was removed: {:?}",
+        summary.results
+    );
     assert!(!summary.ok());
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -294,9 +374,18 @@ fn dropin_filters_injection_in_relinks() {
         installed_targets: vec![],
     };
     let toml = synth_dropin(&spec);
-    assert!(!toml.contains("touch /tmp/pwn"), "unsafe relink NAME must be filtered");
-    assert!(!toml.contains("bad\"$(x)"), "unsafe relink REL must be filtered");
-    assert!(toml.contains("ln -sfn \"$SRC/target/release/good\" \"$HOME/.local/bin/good\""), "safe relink kept");
+    assert!(
+        !toml.contains("touch /tmp/pwn"),
+        "unsafe relink NAME must be filtered"
+    );
+    assert!(
+        !toml.contains("bad\"$(x)"),
+        "unsafe relink REL must be filtered"
+    );
+    assert!(
+        toml.contains("ln -sfn \"$SRC/target/release/good\" \"$HOME/.local/bin/good\""),
+        "safe relink kept"
+    );
     // and the generated TOML still parses (one component with the expected hooks)
     let reg_ok = toml.contains("[[component]]") && toml.contains("[component.install]");
     assert!(reg_ok);
@@ -325,9 +414,28 @@ fn refused_target_that_is_a_survivors_prereq_is_not_removed() {
         live: HashSet<String>,
     }
     impl HookRunner for LiveRunner {
-        fn run(&self, comp: &str, phase: Phase, _h: &envctl_engine::Hook, _d: bool, _s: &EventSink) -> OpResult {
-            let status = if phase == Phase::Detect && self.live.contains(comp) { OpStatus::Ok } else { OpStatus::DryRun };
-            OpResult { component: comp.into(), phase, status, exit_code: None, duration_ms: 0, message: String::new(), dry_run: false }
+        fn run(
+            &self,
+            comp: &str,
+            phase: Phase,
+            _h: &envctl_engine::Hook,
+            _d: bool,
+            _s: &EventSink,
+        ) -> OpResult {
+            let status = if phase == Phase::Detect && self.live.contains(comp) {
+                OpStatus::Ok
+            } else {
+                OpStatus::DryRun
+            };
+            OpResult {
+                component: comp.into(),
+                phase,
+                status,
+                exit_code: None,
+                duration_ms: 0,
+                message: String::new(),
+                dry_run: false,
+            }
         }
     }
 
@@ -373,25 +481,49 @@ command = "true"
     .unwrap();
 
     // cdep is the live external reverse-dependent of clib.
-    let runner = LiveRunner { live: HashSet::from(["cdep".to_string()]) };
+    let runner = LiveRunner {
+        live: HashSet::from(["cdep".to_string()]),
+    };
     let eng = Engine::with_runner(dir.clone(), Box::new(runner)).unwrap();
     let sink = EventSink::null();
     let summary = eng
-        .run(RunPlan::new(Phase::Remove, vec!["clib".to_string(), "capp".to_string()], false), &sink)
+        .run(
+            RunPlan::new(
+                Phase::Remove,
+                vec!["clib".to_string(), "capp".to_string()],
+                false,
+            ),
+            &sink,
+        )
         .unwrap();
 
-    assert!(summary.refused.iter().any(|x| x == "clib"), "clib must be refused: {:?}", summary.refused);
+    assert!(
+        summary.refused.iter().any(|x| x == "clib"),
+        "clib must be refused: {:?}",
+        summary.refused
+    );
     // a component is "removed" iff its Remove hook actually ran (DryRun/Ok/etc.);
     // a Refused marker is NOT a removal.
     let was_removed = |id: &str| {
         summary.results.iter().any(|r| {
             r.component == id
                 && r.phase == Phase::Remove
-                && matches!(r.status, OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed)
+                && matches!(
+                    r.status,
+                    OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed
+                )
         })
     };
-    assert!(!was_removed("clib"), "BLOCKER REGRESSION: refused clib removed via capp's closure: {:?}", summary.results);
-    assert!(was_removed("capp"), "capp (a surviving target) should still be removed: {:?}", summary.results);
+    assert!(
+        !was_removed("clib"),
+        "BLOCKER REGRESSION: refused clib removed via capp's closure: {:?}",
+        summary.results
+    );
+    assert!(
+        was_removed("capp"),
+        "capp (a surviving target) should still be removed: {:?}",
+        summary.results
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -449,19 +581,37 @@ command = "true"
     let eng = Engine::with_runner(dir.clone(), Box::new(envctl_engine::DryRunRunner)).unwrap();
     let sink = EventSink::null();
     let summary = eng
-        .run(RunPlan::new(Phase::Remove, vec!["capp".to_string()], false), &sink)
+        .run(
+            RunPlan::new(Phase::Remove, vec!["capp".to_string()], false),
+            &sink,
+        )
         .unwrap();
 
     let removed = |id: &str| {
         summary.results.iter().any(|r| {
             r.component == id
                 && r.phase == Phase::Remove
-                && matches!(r.status, OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed)
+                && matches!(
+                    r.status,
+                    OpStatus::DryRun | OpStatus::Ok | OpStatus::Incomplete | OpStatus::Failed
+                )
         })
     };
-    assert!(removed("capp"), "capp (the target) must be removed: {:?}", summary.results);
-    assert!(!removed("cweb"), "BLOCKER REGRESSION: cweb (a prerequisite) was removed: {:?}", summary.results);
-    assert!(!removed("clib"), "BLOCKER REGRESSION: clib (a prerequisite) was removed: {:?}", summary.results);
+    assert!(
+        removed("capp"),
+        "capp (the target) must be removed: {:?}",
+        summary.results
+    );
+    assert!(
+        !removed("cweb"),
+        "BLOCKER REGRESSION: cweb (a prerequisite) was removed: {:?}",
+        summary.results
+    );
+    assert!(
+        !removed("clib"),
+        "BLOCKER REGRESSION: clib (a prerequisite) was removed: {:?}",
+        summary.results
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -476,13 +626,26 @@ fn add_repo_paths_reject_traversal_and_option_injection() {
     let sink = EventSink::null();
 
     // 1. id path-traversal is rejected on the build path.
-    let bad_id = AddRepoSpec { id: "../../etc/evil".into(), git_url: "https://example.com/x".into(), ..Default::default() };
-    let e = eng.add_repo(bad_id.clone(), true, &sink).unwrap_err().to_string();
-    assert!(e.contains("invalid component id"), "build path must reject traversal id: {e}");
+    let bad_id = AddRepoSpec {
+        id: "../../etc/evil".into(),
+        git_url: "https://example.com/x".into(),
+        ..Default::default()
+    };
+    let e = eng
+        .add_repo(bad_id.clone(), true, &sink)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("invalid component id"),
+        "build path must reject traversal id: {e}"
+    );
 
     // 2. …and on the interactive connect path (the bug: it used to skip this).
     let e = eng.connect_repo(&bad_id).unwrap_err().to_string();
-    assert!(e.contains("invalid component id"), "connect path must reject traversal id: {e}");
+    assert!(
+        e.contains("invalid component id"),
+        "connect path must reject traversal id: {e}"
+    );
 
     // 3. leading-dash git_ref (git option-injection) is rejected.
     let bad_ref = AddRepoSpec {
@@ -492,7 +655,10 @@ fn add_repo_paths_reject_traversal_and_option_injection() {
         ..Default::default()
     };
     let e = eng.connect_repo(&bad_ref).unwrap_err().to_string();
-    assert!(e.contains("--git-ref") || e.contains("git-ref"), "connect path must reject dash ref: {e}");
+    assert!(
+        e.contains("--git-ref") || e.contains("git-ref"),
+        "connect path must reject dash ref: {e}"
+    );
 }
 
 // --- graph intelligence over the real manifest DAG ---------------------------
@@ -501,22 +667,39 @@ fn graph_analyze_real_manifest() {
     use envctl_engine::graph;
     let reg = Registry::load(&manifest_dir()).expect("manifest loads");
     let g = graph::analyze(&reg);
-    assert!(g.nodes > 0 && g.edges > 0, "non-empty DAG: {}n/{}e", g.nodes, g.edges);
+    assert!(
+        g.nodes > 0 && g.edges > 0,
+        "non-empty DAG: {}n/{}e",
+        g.nodes,
+        g.edges
+    );
     // rustup has no prerequisites -> it is a root.
-    assert!(g.roots.contains(&"rustup".to_string()), "rustup is a root: {:?}", g.roots);
+    assert!(
+        g.roots.contains(&"rustup".to_string()),
+        "rustup is a root: {:?}",
+        g.roots
+    );
     assert!(!g.critical_path.is_empty(), "a longest chain exists");
 
     // impact("bun"): its install pulls bun in, and a --cascade reset folds node-via-bun.
     let imp = graph::impact(&reg, "bun").expect("bun exists");
     assert!(imp.install_closure.contains(&"bun".to_string()));
-    assert!(imp.cascade_removes.contains(&"node-via-bun".to_string()), "cascade: {:?}", imp.cascade_removes);
+    assert!(
+        imp.cascade_removes.contains(&"node-via-bun".to_string()),
+        "cascade: {:?}",
+        imp.cascade_removes
+    );
     assert!(graph::impact(&reg, "no-such-component").is_none());
 
     // every root->bun path starts at a root and ends at bun.
     let paths = graph::dependency_paths(&reg, "bun");
     assert!(!paths.is_empty());
     for p in &paths {
-        assert_eq!(p.last().map(String::as_str), Some("bun"), "path ends at target: {p:?}");
+        assert_eq!(
+            p.last().map(String::as_str),
+            Some("bun"),
+            "path ends at target: {p:?}"
+        );
     }
     // DOT + JSON renderers produce something well-formed.
     assert!(graph::to_dot(&reg, None).contains("digraph"));
@@ -536,7 +719,10 @@ fn lock_roundtrip_no_drift_against_self() {
     lf.save(&tmp).expect("save lock");
     let loaded = lock::LockFile::load(&tmp).expect("load lock");
     // a lock generated from a registry has zero drift against that same registry.
-    assert!(lock::diff(&reg, &loaded).is_empty(), "freshly-generated lock must not drift");
+    assert!(
+        lock::diff(&reg, &loaded).is_empty(),
+        "freshly-generated lock must not drift"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -557,7 +743,9 @@ fn runtime_record_and_load_roundtrip() {
     s.failed.push("bun".into());
     runtime::record_run(&manifest, Phase::Install, &s);
 
-    let st = runtime::load(&manifest).last_run.expect("a run was recorded");
+    let st = runtime::load(&manifest)
+        .last_run
+        .expect("a run was recorded");
     assert_eq!(st.verb, "install");
     assert_eq!(st.failed, 1);
     assert!(!st.ok, "a run with a failure is not ok");

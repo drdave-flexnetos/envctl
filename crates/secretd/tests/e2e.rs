@@ -118,7 +118,9 @@ async fn drain(mut s: Streaming<v1::Event>, buf: &Arc<Mutex<Vec<u8>>>) -> Vec<v1
     let mut out = Vec::new();
     while let Some(ev) = s.message().await.expect("stream message") {
         // Capture every byte the client receives from the event stream (wire-secrecy assertion).
-        buf.lock().unwrap().extend_from_slice(format!("{ev:?}").as_bytes());
+        buf.lock()
+            .unwrap()
+            .extend_from_slice(format!("{ev:?}").as_bytes());
         out.push(ev);
     }
     out
@@ -244,7 +246,10 @@ async fn e2e_control_plane_roundtrip_and_wire_secrecy() {
             .into_inner();
         wire.lock().unwrap().extend_from_slice(&r.value);
         assert!(!r.revealed, "metadata-only get must not reveal");
-        assert!(r.value.is_empty(), "metadata-only get must have empty value");
+        assert!(
+            r.value.is_empty(),
+            "metadata-only get must have empty value"
+        );
         // Phase 6 honesty: the real grpc.rs reports meta:None (no fabricated all-false fields).
         assert!(r.meta.is_none(), "Phase 6 get must report meta:None");
     }
@@ -285,7 +290,9 @@ async fn e2e_control_plane_roundtrip_and_wire_secrecy() {
             "broker_only reveal must be permission_denied, got {err:?}"
         );
         // The refusal carries no key material, but capture the status text into the wire buffer too.
-        wire.lock().unwrap().extend_from_slice(err.message().as_bytes());
+        wire.lock()
+            .unwrap()
+            .extend_from_slice(err.message().as_bytes());
     }
 
     // 4f. Dry-run reveal (reveal=true, apply=false): the engine refuses, daemon maps to PermissionDenied.
@@ -301,7 +308,9 @@ async fn e2e_control_plane_roundtrip_and_wire_secrecy() {
             .await
             .expect_err("dry-run reveal MUST be refused by the engine");
         assert_eq!(err.code(), tonic::Code::PermissionDenied);
-        wire.lock().unwrap().extend_from_slice(err.message().as_bytes());
+        wire.lock()
+            .unwrap()
+            .extend_from_slice(err.message().as_bytes());
     }
 
     // 4g. Mint a bearer (USB gate passes via the present-USB seam). Drives the real grpc::Relay::mint
@@ -321,7 +330,9 @@ async fn e2e_control_plane_roundtrip_and_wire_secrecy() {
             .expect("mint")
             .into_inner();
         wire.lock().unwrap().extend_from_slice(r.bearer.as_bytes());
-        wire.lock().unwrap().extend_from_slice(r.token_id.as_bytes());
+        wire.lock()
+            .unwrap()
+            .extend_from_slice(r.token_id.as_bytes());
         assert!(!r.bearer.is_empty(), "minted bearer must be non-empty");
         assert!(
             r.bearer.starts_with("evrelay_"),
@@ -402,7 +413,10 @@ async fn e2e_authz_deny_non_owner() {
 
     {
         let mut lock = v1::lock_client::LockClient::new(connect(sock.clone()).await);
-        let e = lock.status(v1::StatusReq {}).await.expect_err("lock.status");
+        let e = lock
+            .status(v1::StatusReq {})
+            .await
+            .expect_err("lock.status");
         denied("Lock.Status", e.code());
         let e = lock
             .unlock(v1::UnlockReq { passphrase: None })
@@ -489,11 +503,11 @@ async fn e2e_authz_deny_non_owner() {
 
 #[test]
 fn conv_event_to_proto_drift() {
+    use envctl_secretd::conv;
     use envctl_secrets::broker::RelayKind;
     use envctl_secrets::event::{AuditOutcome, RunSummary};
     use envctl_secrets::keyslot::Factor;
     use envctl_secrets::{AuditRecord, SecretEvent, Stream};
-    use envctl_secretd::conv;
     use v1::event::Kind;
 
     // The 11 arms WITH a proto twin map to a Some(Event { kind: Some(_) }) with the expected variant.

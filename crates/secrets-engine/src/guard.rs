@@ -13,11 +13,17 @@ pub enum Destructiveness {
 #[derive(Clone, Debug)]
 pub enum SecGuard {
     /// PARTUUID pre-filter + keyfile-possession proof (CF-4).
-    UsbPresent { partition_uuid: String },
+    UsbPresent {
+        partition_uuid: String,
+    },
     /// enabled && !revoked(policy & bearer) && expiry>now && usb-gated.
-    RelayValid { relay_id: String },
+    RelayValid {
+        relay_id: String,
+    },
     /// an active USB-gated relay's allowlist covers the host (per SAN).
-    LeafBackedByRelay { host: String },
+    LeafBackedByRelay {
+        host: String,
+    },
     PeerIsOwner,
     VaultEncryptedAtRest,
     /// `apply == false` => REFUSE (dry-run default, CF-8). Root-of-trust also needs `confirm`.

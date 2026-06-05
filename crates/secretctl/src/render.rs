@@ -35,7 +35,10 @@ pub fn render_event(ev: &v1::Event, json: bool) {
         )),
         Kind::RelaySwapped(e) => {
             let verb = if e.allowed { "allowed" } else { "refused" };
-            c_step(&format!("relay swap {}: {} {} {}", verb, e.method, e.host, e.relay))
+            c_step(&format!(
+                "relay swap {}: {} {} {}",
+                verb, e.method, e.host, e.relay
+            ))
         }
         Kind::GuardRefused(e) => c_warn(&format!("refused: {} ({})", e.subject, e.reason)),
         Kind::CaIssued(e) => c_ok(&format!("ca issued: {} ({})", e.cn, e.serial)),
@@ -114,7 +117,11 @@ pub fn render_status(r: &v1::StatusResp, json: bool) {
             })
         );
     } else {
-        let lock = if r.unlocked { c_ok("unlocked") } else { c_warn("locked") };
+        let lock = if r.unlocked {
+            c_ok("unlocked")
+        } else {
+            c_warn("locked")
+        };
         println!(
             "{lock}  usb_possessed={}  active_relays={}  secret_count={}",
             r.usb_possessed, r.active_relays, r.secret_count
@@ -168,7 +175,10 @@ pub fn render_revoke(r: &v1::RevokeResp, json: bool) {
     } else if r.dry_run {
         println!(
             "{}",
-            c_warn(&format!("dry-run: would revoke {} (use --apply)", r.count_revoked))
+            c_warn(&format!(
+                "dry-run: would revoke {} (use --apply)",
+                r.count_revoked
+            ))
         );
     } else {
         println!("{}", c_ok(&format!("revoked {}", r.count_revoked)));

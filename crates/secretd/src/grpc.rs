@@ -116,7 +116,9 @@ impl v1::vault_server::Vault for VaultSvc {
     ) -> Result<Response<v1::ListSecretResp>, Status> {
         // The engine exposes no public secret-list path (the store is private); UNIMPLEMENTED in
         // Phase 6 (a thin public `Engine` list lands later).
-        Err(Status::unimplemented("Vault.List is not available in Phase 6"))
+        Err(Status::unimplemented(
+            "Vault.List is not available in Phase 6",
+        ))
     }
 
     async fn rm(
@@ -124,7 +126,9 @@ impl v1::vault_server::Vault for VaultSvc {
         _request: Request<v1::RmSecretReq>,
     ) -> Result<Response<Self::RmStream>, Status> {
         // No public `secret_rm` on the engine (engine UNTOUCHED).
-        Err(Status::unimplemented("Vault.Rm is not available in Phase 6"))
+        Err(Status::unimplemented(
+            "Vault.Rm is not available in Phase 6",
+        ))
     }
 
     async fn rotate(
@@ -132,7 +136,9 @@ impl v1::vault_server::Vault for VaultSvc {
         _request: Request<v1::RotateReq>,
     ) -> Result<Response<Self::RotateStream>, Status> {
         // No public `secret_rotate` on the engine (engine UNTOUCHED).
-        Err(Status::unimplemented("Vault.Rotate is not available in Phase 6"))
+        Err(Status::unimplemented(
+            "Vault.Rotate is not available in Phase 6",
+        ))
     }
 }
 
@@ -208,13 +214,12 @@ impl v1::relay_server::Relay for RelaySvc {
         _request: Request<v1::ListRelayReq>,
     ) -> Result<Response<v1::ListRelayResp>, Status> {
         // No public relay-list path on the engine; UNIMPLEMENTED in Phase 6.
-        Err(Status::unimplemented("Relay.List is not available in Phase 6"))
+        Err(Status::unimplemented(
+            "Relay.List is not available in Phase 6",
+        ))
     }
 
-    async fn mint(
-        &self,
-        request: Request<v1::MintReq>,
-    ) -> Result<Response<v1::MintResp>, Status> {
+    async fn mint(&self, request: Request<v1::MintReq>) -> Result<Response<v1::MintResp>, Status> {
         // The peer uid is the connect-time-frozen owner uid (peercred-gated channel); the peer pid
         // is the client-supplied target pid (advisory peer binding for `env-ctl run` ephemerals).
         let peer_uid = request
@@ -340,7 +345,9 @@ impl v1::audit_server::Audit for AuditSvc {
         // The engine's hash-chained audit log lives behind the private `store`; there is no public
         // `Engine::query_audit` (engine UNTOUCHED). UNIMPLEMENTED in Phase 6 — audit outcomes are
         // observed via the Event stream and unary RPC results until a public read path is added.
-        Err(Status::unimplemented("Audit.Query is not available in Phase 6"))
+        Err(Status::unimplemented(
+            "Audit.Query is not available in Phase 6",
+        ))
     }
 }
 

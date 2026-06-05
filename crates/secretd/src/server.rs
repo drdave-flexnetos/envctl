@@ -54,10 +54,7 @@ pub async fn serve(
             },
             guard.clone(),
         ))
-        .add_service(CertsServer::with_interceptor(
-            CertsSvc { engine },
-            guard,
-        ))
+        .add_service(CertsServer::with_interceptor(CertsSvc { engine }, guard))
         .serve_with_incoming_shutdown(incoming, shutdown)
         .await
 }

@@ -135,8 +135,14 @@ fn bind_bearer_row_null_peer_fields() {
     assert!(matches!(v[6], Value::Null), "absent client_uid -> NULL");
     assert!(matches!(v[7], Value::Integer(4242)));
     assert!(matches!(v[8], Value::Integer(0)), "revoked false -> 0");
-    assert!(matches!(v[10], Value::Null), "local bearer client_id -> NULL");
-    assert!(matches!(v[11], Value::Null), "local bearer dpop_jkt -> NULL");
+    assert!(
+        matches!(v[10], Value::Null),
+        "local bearer client_id -> NULL"
+    );
+    assert!(
+        matches!(v[11], Value::Null),
+        "local bearer dpop_jkt -> NULL"
+    );
 }
 
 #[test]
@@ -155,7 +161,10 @@ fn bind_remote_client_shape() {
     assert!(matches!(&v[0], Value::Text(s) if s == "phone"));
     assert!(matches!(&v[1], Value::Blob(b) if b.len() == 32));
     assert!(matches!(v[2], Value::Integer(1)), "enabled true -> 1");
-    assert!(matches!(v[3], Value::Integer(0)), "hardware_bound false -> 0");
+    assert!(
+        matches!(v[3], Value::Integer(0)),
+        "hardware_bound false -> 0"
+    );
     assert!(matches!(v[4], Value::Integer(1234)));
     assert!(matches!(v[5], Value::Null), "no revoked_at_ms -> NULL");
 }
@@ -177,13 +186,18 @@ fn bind_cert_row_shape() {
 #[test]
 fn error_display_is_descriptive() {
     assert!(Error::AuditChainBroken(42).to_string().contains("42"));
-    assert!(Error::QueryFailed("boom".into()).to_string().contains("boom"));
+    assert!(Error::QueryFailed("boom".into())
+        .to_string()
+        .contains("boom"));
     assert!(Error::Contract("bad".into()).to_string().contains("bad"));
 }
 
 #[test]
 fn error_converts_into_anyhow() {
-    let f = || -> anyhow::Result<()> { Err(Error::Connect("x".into()))?; Ok(()) };
+    let f = || -> anyhow::Result<()> {
+        Err(Error::Connect("x".into()))?;
+        Ok(())
+    };
     let e = f().unwrap_err();
     assert!(e.to_string().contains("connect"));
 }
@@ -194,7 +208,10 @@ fn wiring_flags_default_to_remote() {
     // constants into a const assertion (clippy::assertions_on_constants). The default build must
     // enable exactly `remote` and not `embedded`.
     assert_eq!(
-        (std::hint::black_box(crate::FEATURE_REMOTE), std::hint::black_box(crate::FEATURE_EMBEDDED)),
+        (
+            std::hint::black_box(crate::FEATURE_REMOTE),
+            std::hint::black_box(crate::FEATURE_EMBEDDED)
+        ),
         (true, false),
     );
 }

@@ -98,7 +98,8 @@ fn engine_over_libsql_put_get_and_durability() {
             .secret_get("DURABLE_KEY", true, true, &sink)
             .expect("secret_get from the persisted store");
         assert_eq!(
-            &got[..], SECRET_VALUE,
+            &got[..],
+            SECRET_VALUE,
             "the secret MUST survive across engine instances via libSQL (durability)"
         );
     }

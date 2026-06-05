@@ -22,6 +22,9 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+// clap parses one subcommand per invocation, so the inter-variant size delta is
+// irrelevant here; boxing would complicate the derive for no real gain. Keep value-typed.
+#[allow(clippy::large_enum_variant)]
 enum Cmd {
     /// Read-only inventory: host, GPU (works pre-driver), tools, components.
     // audit fix (minor): dropped unimplemented `--only` flag (engine.detect takes
@@ -167,7 +170,12 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Cmd::Graph { impact, why, dot, live } => {
+        Cmd::Graph {
+            impact,
+            why,
+            dot,
+            live,
+        } => {
             use envctl_engine::graph;
             let live_report = if live {
                 let (sink, _rx) = EventSink::channel();
@@ -179,7 +187,10 @@ fn main() -> anyhow::Result<()> {
             if dot {
                 print!("{}", graph::to_dot(reg, live_report.as_ref()));
             } else if json {
-                println!("{}", serde_json::to_string_pretty(&graph::to_json(reg, live_report.as_ref()))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&graph::to_json(reg, live_report.as_ref()))?
+                );
             } else if let Some(id) = impact {
                 // audit fix (minor): reflect unknown-component failure in exit code.
                 if !print_impact(reg, &id) {
@@ -205,12 +216,26 @@ fn main() -> anyhow::Result<()> {
                 let locked = lock::LockFile::load(dir)?;
                 let drift = lock::diff(reg, &locked);
                 if json {
-                    let items: Vec<_> = drift.iter().map(|(id, k)| serde_json::json!({"component": id, "drift": k})).collect();
-                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({"locked": !drift.is_empty(), "drift": items}))?);
+                    let items: Vec<_> = drift
+                        .iter()
+                        .map(|(id, k)| serde_json::json!({"component": id, "drift": k}))
+                        .collect();
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({"locked": !drift.is_empty(), "drift": items})
+                        )?
+                    );
                 } else if drift.is_empty() {
-                    println!("\x1b[1;32m✓ envctl.lock matches the manifest ({} components)\x1b[0m", reg.len());
+                    println!(
+                        "\x1b[1;32m✓ envctl.lock matches the manifest ({} components)\x1b[0m",
+                        reg.len()
+                    );
                 } else {
-                    println!("\x1b[1;33m✗ lock drift ({}): manifest changed without re-locking\x1b[0m", drift.len());
+                    println!(
+                        "\x1b[1;33m✗ lock drift ({}): manifest changed without re-locking\x1b[0m",
+                        drift.len()
+                    );
                     for (id, k) in &drift {
                         println!("  {:?}  {id}", k);
                     }
@@ -222,18 +247,31 @@ fn main() -> anyhow::Result<()> {
             } else {
                 let mut lf = lock::generate(reg);
                 lf.save(dir)?;
-                println!("wrote {} ({} components)", lock::lock_path(dir).display(), reg.len());
+                println!(
+                    "wrote {} ({} components)",
+                    lock::lock_path(dir).display(),
+                    reg.len()
+                );
             }
             Ok(())
         }
         Cmd::Doctor => print_doctor(&engine, json),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
-        other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => handle_connect(engine, other, json),
+        other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => {
+            handle_connect(engine, other, json)
+        }
         other => {
             // Usage fail-fast (exit 2) before spawning the worker. The executor
             // also enforces these authoritatively (the GUI hits that path).
-            if let Cmd::Reset { targets, all, confirm, purge, .. } = &other {
+            if let Cmd::Reset {
+                targets,
+                all,
+                confirm,
+                purge,
+                ..
+            } = &other
+            {
                 if targets.is_empty() && !(*all && *confirm) {
                     eprintln!("envctl: refusing whole-roster reset — pass --all --confirm");
                     std::process::exit(2);
@@ -258,29 +296,82 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
             Cmd::Install { targets, dry_run } => eng
                 .run(RunPlan::new(Phase::Install, targets, dry_run), &sink)?
                 .ok(),
-            Cmd::Reset { targets, apply, all, confirm, cascade, keep_config, purge } => eng
+            Cmd::Reset {
+                targets,
+                apply,
+                all,
+                confirm,
+                cascade,
+                keep_config,
+                purge,
+            } => eng
                 .run(
-                    RunPlan::new(Phase::Remove, targets, !apply)
-                        .with_gates(ResetGates { all, confirm, cascade, keep_config, purge }),
+                    RunPlan::new(Phase::Remove, targets, !apply).with_gates(ResetGates {
+                        all,
+                        confirm,
+                        cascade,
+                        keep_config,
+                        purge,
+                    }),
                     &sink,
                 )?
                 .ok(),
-            Cmd::AutoFix { targets, apply, confirm } => eng
+            Cmd::AutoFix {
+                targets,
+                apply,
+                confirm,
+            } => eng
                 .run(
-                    RunPlan::new(Phase::Fix, targets, !apply)
-                        .with_gates(ResetGates { confirm, ..Default::default() }),
+                    RunPlan::new(Phase::Fix, targets, !apply).with_gates(ResetGates {
+                        confirm,
+                        ..Default::default()
+                    }),
                     &sink,
                 )?
                 .ok(),
             Cmd::AddRepo {
-                git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
-                renames, patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build,
-                force, recurse_submodules, connect: _, dry_run,
+                git_url,
+                id,
+                local,
+                git_ref,
+                build_system,
+                build_cmd,
+                artifacts,
+                strategy,
+                bins,
+                renames,
+                patch_cmd,
+                ai_goal,
+                ai_agent,
+                ai_instruction,
+                daemon,
+                verify_cmd,
+                build,
+                force,
+                recurse_submodules,
+                connect: _,
+                dry_run,
             } => {
                 let spec = build_spec(AddRepoArgs {
-                    git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins,
-                    renames, patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build,
-                    force, recurse_submodules,
+                    git_url,
+                    id,
+                    local,
+                    git_ref,
+                    build_system,
+                    build_cmd,
+                    artifacts,
+                    strategy,
+                    bins,
+                    renames,
+                    patch_cmd,
+                    ai_goal,
+                    ai_agent,
+                    ai_instruction,
+                    daemon,
+                    verify_cmd,
+                    build,
+                    force,
+                    recurse_submodules,
                 })
                 .map_err(|e| anyhow::anyhow!(e))?;
                 eng.add_repo(spec, dry_run, &sink)?.ok()
@@ -300,7 +391,9 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
         }
     }
 
-    let ok = handle.join().map_err(|_| anyhow::anyhow!("worker panicked"))??;
+    let ok = handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("worker panicked"))??;
     if !ok {
         std::process::exit(1);
     }
@@ -309,22 +402,46 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
 
 fn print_event(ev: &Event) {
     match ev {
-        Event::StepStarted { component, phase, index, total } => {
-            println!("\x1b[1;36m==> [{}/{}] {component} :: {phase:?}\x1b[0m", index + 1, total)
+        Event::StepStarted {
+            component,
+            phase,
+            index,
+            total,
+        } => {
+            println!(
+                "\x1b[1;36m==> [{}/{}] {component} :: {phase:?}\x1b[0m",
+                index + 1,
+                total
+            )
         }
         Event::Log { line, .. } => println!("    {line}"),
         Event::StepFinished { result } => match result.status {
-            OpStatus::Ok => println!("\x1b[1;32m  ✓ {} {:?}\x1b[0m", result.component, result.phase),
+            OpStatus::Ok => println!(
+                "\x1b[1;32m  ✓ {} {:?}\x1b[0m",
+                result.component, result.phase
+            ),
             OpStatus::Failed => println!(
                 "\x1b[1;33m  ! FAILED {} (exit {:?})\x1b[0m",
                 result.component, result.exit_code
             ),
-            OpStatus::Refused => println!("\x1b[1;31m  ⛔ REFUSED {}: {}\x1b[0m", result.component, result.message),
+            OpStatus::Refused => println!(
+                "\x1b[1;31m  ⛔ REFUSED {}: {}\x1b[0m",
+                result.component, result.message
+            ),
             OpStatus::Skipped => println!("  — skip {} ({})", result.component, result.message),
-            OpStatus::SkippedBlocked => println!("\x1b[1;33m  — blocked {} ({})\x1b[0m", result.component, result.message),
+            OpStatus::SkippedBlocked => println!(
+                "\x1b[1;33m  — blocked {} ({})\x1b[0m",
+                result.component, result.message
+            ),
             OpStatus::DryRun => println!("  · would {:?} {}", result.phase, result.component),
-            OpStatus::RebootRequired => println!("\x1b[1;33m  ⟳ {} needs a REBOOT to take effect\x1b[0m", result.component),
-            OpStatus::Incomplete => println!("\x1b[1;31m  ✗ {} acted but post-state wrong: {}\x1b[0m", result.component, result.message),
+            OpStatus::RebootRequired => println!(
+                "\x1b[1;33m  ⟳ {} needs a REBOOT to take effect\x1b[0m",
+                result.component
+            ),
+            OpStatus::Incomplete => println!(
+                "\x1b[1;31m  ✗ {} acted but post-state wrong: {}\x1b[0m",
+                result.component, result.message
+            ),
             OpStatus::NoHook => {}
         },
         Event::GuardRefused { component, reason } => {
@@ -351,16 +468,50 @@ fn print_event(ev: &Event) {
 /// the clone, then (if --build) build the now-transformed tree as-is.
 fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
     let Cmd::AddRepo {
-        git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins, renames,
-        patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build, force,
-        recurse_submodules, connect: _, dry_run: _,
+        git_url,
+        id,
+        local,
+        git_ref,
+        build_system,
+        build_cmd,
+        artifacts,
+        strategy,
+        bins,
+        renames,
+        patch_cmd,
+        ai_goal,
+        ai_agent,
+        ai_instruction,
+        daemon,
+        verify_cmd,
+        build,
+        force,
+        recurse_submodules,
+        connect: _,
+        dry_run: _,
     } = cmd
     else {
         unreachable!("handle_connect only called for AddRepo");
     };
     let spec = build_spec(AddRepoArgs {
-        git_url, id, local, git_ref, build_system, build_cmd, artifacts, strategy, bins, renames,
-        patch_cmd, ai_goal, ai_agent, ai_instruction, daemon, verify_cmd, build, force,
+        git_url,
+        id,
+        local,
+        git_ref,
+        build_system,
+        build_cmd,
+        artifacts,
+        strategy,
+        bins,
+        renames,
+        patch_cmd,
+        ai_goal,
+        ai_agent,
+        ai_instruction,
+        daemon,
+        verify_cmd,
+        build,
+        force,
         recurse_submodules,
     })
     .map_err(|e| anyhow::anyhow!(e))?;
@@ -369,7 +520,11 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
 
     if spec.allow_build {
         // Build the transformed clone AS-IS (don't re-run the agent).
-        let bspec = AddRepoSpec { strategy: BuildStrategy::AsIs, allow_build: true, ..spec };
+        let bspec = AddRepoSpec {
+            strategy: BuildStrategy::AsIs,
+            allow_build: true,
+            ..spec
+        };
         let (sink, rx) = EventSink::channel();
         // Audit fix: capture the summary instead of discarding it so a failed
         // post-connect build exits 1, matching run_action's contract.
@@ -387,7 +542,10 @@ fn handle_connect(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
         }
     } else {
         println!("\nenvctl: clone is ready. Build what you made with:");
-        println!("  envctl add-repo {} --id {} --strategy as-is --build", spec.git_url, spec.id);
+        println!(
+            "  envctl add-repo {} --id {} --strategy as-is --build",
+            spec.git_url, spec.id
+        );
     }
     Ok(())
 }
@@ -409,12 +567,20 @@ fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
     };
     let has = |bin: &str| -> Option<String> {
         let out = std::process::Command::new("bash")
-            .args(["-lc", &format!("command -v {bin} && {bin} --version 2>/dev/null | head -1")])
+            .args([
+                "-lc",
+                &format!("command -v {bin} && {bin} --version 2>/dev/null | head -1"),
+            ])
             .output()
             .ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).lines().last().unwrap_or("present").trim().to_string())
+        out.status.success().then(|| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .unwrap_or("present")
+                .trim()
+                .to_string()
+        })
     };
     let dirs = [
         format!("{home}/.local/bin"),
@@ -422,7 +588,18 @@ fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
         format!("{home}/.local/share/envctl/repos"),
         "/etc".to_string(),
     ];
-    let tools = ["git", "cargo", "rustc", "claude", "nix", "podman", "nvidia-smi", "gh", "uv", "bun"];
+    let tools = [
+        "git",
+        "cargo",
+        "rustc",
+        "claude",
+        "nix",
+        "podman",
+        "nvidia-smi",
+        "gh",
+        "uv",
+        "bun",
+    ];
     let sudo_cached = std::process::Command::new("sudo")
         .args(["-n", "true"])
         .stdout(std::process::Stdio::null())
@@ -442,8 +619,14 @@ fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
     let log_exists = run_log.exists();
 
     if json {
-        let dirj: Vec<_> = dirs.iter().map(|d| serde_json::json!({"path": d, "writable": write_ok(d)})).collect();
-        let toolj: Vec<_> = tools.iter().map(|t| serde_json::json!({"tool": t, "version": has(t)})).collect();
+        let dirj: Vec<_> = dirs
+            .iter()
+            .map(|d| serde_json::json!({"path": d, "writable": write_ok(d)}))
+            .collect();
+        let toolj: Vec<_> = tools
+            .iter()
+            .map(|t| serde_json::json!({"tool": t, "version": has(t)}))
+            .collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
@@ -456,7 +639,13 @@ fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let yn = |b: bool| if b { "\x1b[1;32m✓\x1b[0m" } else { "\x1b[1;31m✗\x1b[0m" };
+    let yn = |b: bool| {
+        if b {
+            "\x1b[1;32m✓\x1b[0m"
+        } else {
+            "\x1b[1;31m✗\x1b[0m"
+        }
+    };
     println!("\x1b[1;36m── writability ──\x1b[0m");
     for d in &dirs {
         println!("  {}  {d}", yn(write_ok(d)));
@@ -471,15 +660,40 @@ fn print_doctor(engine: &Engine, json: bool) -> anyhow::Result<()> {
     println!("\x1b[1;36m── system ──\x1b[0m");
     println!("  sudo (cached)      {}", yn(sudo_cached));
     println!("  UEFI               {}", yn(uefi));
-    println!("  Secure Boot        {}", match secure_boot.as_deref() { Some("1") => "\x1b[1;33mON\x1b[0m (nvidia-open needs it OFF)", Some("0") => "\x1b[1;32mOFF\x1b[0m", _ => "unknown" });
-    println!("  nvidia driver      {}", if driver_loaded { "\x1b[1;32mloaded\x1b[0m" } else { "\x1b[1;33mnot loaded\x1b[0m" });
-    println!("  run log            {} {}", yn(log_exists), run_log.display());
+    println!(
+        "  Secure Boot        {}",
+        match secure_boot.as_deref() {
+            Some("1") => "\x1b[1;33mON\x1b[0m (nvidia-open needs it OFF)",
+            Some("0") => "\x1b[1;32mOFF\x1b[0m",
+            _ => "unknown",
+        }
+    );
+    println!(
+        "  nvidia driver      {}",
+        if driver_loaded {
+            "\x1b[1;32mloaded\x1b[0m"
+        } else {
+            "\x1b[1;33mnot loaded\x1b[0m"
+        }
+    );
+    println!(
+        "  run log            {} {}",
+        yn(log_exists),
+        run_log.display()
+    );
     match &last_run {
         Some(lr) => println!(
             "  last op            {} {} ({}f/{}r/{}i) at {}",
             lr.verb,
-            if lr.ok { "\x1b[1;32mok\x1b[0m" } else { "\x1b[1;31mFAILED\x1b[0m" },
-            lr.failed, lr.refused, lr.incomplete, lr.at
+            if lr.ok {
+                "\x1b[1;32mok\x1b[0m"
+            } else {
+                "\x1b[1;31mFAILED\x1b[0m"
+            },
+            lr.failed,
+            lr.refused,
+            lr.incomplete,
+            lr.at
         ),
         None => println!("  last op            (none recorded)"),
     }
@@ -494,7 +708,12 @@ fn print_graph_summary(reg: &envctl_engine::Registry) {
     let c = "\x1b[1;36m";
     let z = "\x1b[0m";
     println!("{c}── dependency graph ──{z}");
-    println!("  {} components · {} edges · {} groups", g.nodes, g.edges, g.groups.len());
+    println!(
+        "  {} components · {} edges · {} groups",
+        g.nodes,
+        g.edges,
+        g.groups.len()
+    );
     println!("  roots (no deps):     {}", g.roots.len());
     println!("  leaves (top-level):  {}", g.leaves.len());
     if !g.orphans.is_empty() {
@@ -523,9 +742,15 @@ fn print_impact(reg: &envctl_engine::Registry, id: &str) -> bool {
             println!("\x1b[1;36m── impact of '{id}' ──\x1b[0m");
             println!("  direct requires:     {}", join_or_none(&im.requires));
             println!("  direct dependents:   {}", join_or_none(&im.required_by));
-            println!("\x1b[1;32m  install {id}\x1b[0m pulls in ({}):", im.install_closure.len());
+            println!(
+                "\x1b[1;32m  install {id}\x1b[0m pulls in ({}):",
+                im.install_closure.len()
+            );
             println!("    {}", im.install_closure.join("  →  "));
-            println!("\x1b[1;33m  reset {id} --cascade\x1b[0m also removes ({}):", im.cascade_removes.len());
+            println!(
+                "\x1b[1;33m  reset {id} --cascade\x1b[0m also removes ({}):",
+                im.cascade_removes.len()
+            );
             println!("    {}", join_or_none(&im.cascade_removes));
             true
         }
@@ -589,7 +814,11 @@ fn build_spec(a: AddRepoArgs) -> Result<AddRepoSpec, String> {
         "as-is" => BuildStrategy::AsIs,
         "cherry-pick" => BuildStrategy::CherryPick { bins: a.bins },
         "rename" => BuildStrategy::Rename {
-            renames: a.renames.into_iter().map(|(from, to)| RenameRule { from, to }).collect(),
+            renames: a
+                .renames
+                .into_iter()
+                .map(|(from, to)| RenameRule { from, to })
+                .collect(),
         },
         "refactor" => BuildStrategy::Refactor {
             refactor: if let Some(cmd) = a.patch_cmd {
@@ -602,7 +831,11 @@ fn build_spec(a: AddRepoArgs) -> Result<AddRepoSpec, String> {
                 }
             },
         },
-        other => return Err(format!("unknown --strategy `{other}` (as-is|cherry-pick|rename|refactor)")),
+        other => {
+            return Err(format!(
+                "unknown --strategy `{other}` (as-is|cherry-pick|rename|refactor)"
+            ))
+        }
     };
     Ok(AddRepoSpec {
         id: a.id,
@@ -610,7 +843,11 @@ fn build_spec(a: AddRepoArgs) -> Result<AddRepoSpec, String> {
         local_path: a.local,
         git_ref: a.git_ref,
         build_cmd: a.build_cmd.unwrap_or_default(),
-        build_system: a.build_system.as_deref().map(parse_build_system).transpose()?,
+        build_system: a
+            .build_system
+            .as_deref()
+            .map(parse_build_system)
+            .transpose()?,
         artifacts: a.artifacts,
         strategy,
         bin_dir: None,
@@ -689,21 +926,36 @@ fn print_report(r: &EnvReport) {
     if !r.tools.is_empty() {
         println!("\x1b[1;36m── tools ──\x1b[0m");
         for t in &r.tools {
-            println!("  {:<12} {}", t.name, t.version.as_deref().unwrap_or("present"));
+            println!(
+                "  {:<12} {}",
+                t.name,
+                t.version.as_deref().unwrap_or("present")
+            );
         }
     }
 
     println!("\x1b[1;36m── components ──\x1b[0m");
     for c in &r.components {
-        let mark = if c.detected { "\x1b[1;32m✓\x1b[0m" } else { "\x1b[1;90m·\x1b[0m" };
+        let mark = if c.detected {
+            "\x1b[1;32m✓\x1b[0m"
+        } else {
+            "\x1b[1;90m·\x1b[0m"
+        };
         let health = match c.healthy {
             Some(true) => " [healthy]",
             Some(false) => " \x1b[1;33m[unhealthy]\x1b[0m",
             None => "",
         };
-        let note = if c.note.is_empty() { String::new() } else { format!("  ({})", c.note) };
+        let note = if c.note.is_empty() {
+            String::new()
+        } else {
+            format!("  ({})", c.note)
+        };
         let wired = if c.wiring_present { " wired" } else { "" };
-        println!("  {mark} {:<16} {}{}{}{}", c.id, c.name, health, wired, note);
+        println!(
+            "  {mark} {:<16} {}{}{}{}",
+            c.id, c.name, health, wired, note
+        );
     }
 
     if r.drift.is_empty() {

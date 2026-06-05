@@ -16,8 +16,8 @@
 //! so the executor can surface what happened without aborting the run.
 use crate::error::RunContext;
 use crate::model::{
-    Alternative, AptRepo, CdiSpec, DesktopEntry, NixConfLine, ResetGates, ShellRcBlock, SystemdUnit,
-    Wiring,
+    Alternative, AptRepo, CdiSpec, DesktopEntry, NixConfLine, ResetGates, ShellRcBlock,
+    SystemdUnit, Wiring,
 };
 use std::path::Path;
 use std::process::Command;
@@ -176,22 +176,37 @@ pub fn revert(w: &Wiring, gates: &ResetGates, ctx: &RunContext) -> WiringReport 
     // re-verify, then rename-to-trash (recoverable), never rm -rf.
     for dp in &w.data_paths {
         if !gates.purge {
-            rep.note(format!("left user data intact (would purge with --purge): {}", dp.path));
+            rep.note(format!(
+                "left user data intact (would purge with --purge): {}",
+                dp.path
+            ));
             continue;
         }
         let Some(uuid) = dp.uuid.as_deref() else {
-            rep.fail("data_path", format!("cannot purge {}: no uuid declared", dp.path));
+            rep.fail(
+                "data_path",
+                format!("cannot purge {}: no uuid declared", dp.path),
+            );
             continue;
         };
         if let Some(reason) = crate::guard::verify_path_uuid(&dp.path, uuid, ctx) {
-            rep.fail("data_path", format!("refused purge of {}: {reason}", dp.path));
+            rep.fail(
+                "data_path",
+                format!("refused purge of {}: {reason}", dp.path),
+            );
             continue;
         }
         let p = expand_tilde(&dp.path);
         // AUDIT-FIX: the UUID check resolves symlinks, but rename operates on the
         // link itself — refuse a symlink so we never purge via a redirected path.
-        if std::fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-            rep.fail("data_path", format!("refusing to purge {}: it is a symlink", dp.path));
+        if std::fs::symlink_metadata(&p)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            rep.fail(
+                "data_path",
+                format!("refusing to purge {}: it is a symlink", dp.path),
+            );
             continue;
         }
         let trash = format!("{p}.envctl-trash.{}", now_epoch());
@@ -233,7 +248,11 @@ fn path_export_block(w: &Wiring) -> Option<ShellRcBlock> {
             "case \":$PATH:\" in *\":{dir}:\"*) ;; *) export PATH=\"{dir}:$PATH\";; esac\n"
         ));
     }
-    Some(ShellRcBlock { file: "~/.bashrc".into(), marker: "envctl PATH".into(), content })
+    Some(ShellRcBlock {
+        file: "~/.bashrc".into(),
+        marker: "envctl PATH".into(),
+        content,
+    })
 }
 
 fn apply_shell_rc(blk: &ShellRcBlock) -> std::io::Result<()> {
@@ -248,7 +267,10 @@ fn apply_shell_rc(blk: &ShellRcBlock) -> std::io::Result<()> {
     }
     let block = format!("\n{begin}\n{}\n{end}\n", blk.content.trim_end());
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&file)?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)?;
     f.write_all(block.as_bytes())
 }
 
@@ -275,7 +297,10 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
     if !text[bi..].contains(&end) {
         rep.fail(
             "shell_rc",
-            format!("unterminated envctl block '{}' in {file} — left untouched (excise it by hand)", blk.marker),
+            format!(
+                "unterminated envctl block '{}' in {file} — left untouched (excise it by hand)",
+                blk.marker
+            ),
         );
         return Ok(());
     }
@@ -293,7 +318,10 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
     if text[span_end..].contains(&begin) {
         rep.fail(
             "shell_rc",
-            format!("multiple envctl blocks '{}' in {file} — left untouched (excise by hand)", blk.marker),
+            format!(
+                "multiple envctl blocks '{}' in {file} — left untouched (excise by hand)",
+                blk.marker
+            ),
         );
         return Ok(());
     }
@@ -302,7 +330,10 @@ fn revert_shell_rc(blk: &ShellRcBlock, rep: &mut WiringReport) -> std::io::Resul
     out.push_str(&text[..bi]);
     out.push_str(&text[span_end..]);
     std::fs::write(&file, out)?;
-    rep.note(format!("excised envctl-owned block '{}' from {file}", blk.marker));
+    rep.note(format!(
+        "excised envctl-owned block '{}' from {file}",
+        blk.marker
+    ));
     Ok(())
 }
 
@@ -374,21 +405,29 @@ fn apply_systemd(u: &SystemdUnit) -> std::io::Result<()> {
         }
         std::fs::write(&path, &u.content)?;
     }
-    let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    let _ = Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
     if u.enable {
-        let _ = Command::new("systemctl").args(["--user", "enable", "--now", &u.name]).status();
+        let _ = Command::new("systemctl")
+            .args(["--user", "enable", "--now", &u.name])
+            .status();
     }
     Ok(())
 }
 
 fn revert_systemd(u: &SystemdUnit) -> std::io::Result<()> {
-    let _ = Command::new("systemctl").args(["--user", "disable", "--now", &u.name]).status();
+    let _ = Command::new("systemctl")
+        .args(["--user", "disable", "--now", &u.name])
+        .status();
     let path = format!("{}/{}", systemd_user_dir(), u.name);
     if Path::new(&path).exists() {
         let _ = std::fs::copy(&path, format!("{path}.bak.{}", now_epoch()));
         std::fs::remove_file(&path)?;
     }
-    let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    let _ = Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
     Ok(())
 }
 
@@ -399,11 +438,7 @@ fn revert_systemd(u: &SystemdUnit) -> std::io::Result<()> {
 /// single, plain path component so a `../` or absolute value can't escape
 /// /etc/apt/sources.list.d.
 fn check_list_file(list_file: &str) -> anyhow::Result<()> {
-    if list_file.is_empty()
-        || list_file.contains('/')
-        || list_file == "."
-        || list_file == ".."
-    {
+    if list_file.is_empty() || list_file.contains('/') || list_file == "." || list_file == ".." {
         anyhow::bail!("invalid apt list_file '{list_file}': must be a single path component");
     }
     Ok(())
@@ -447,7 +482,11 @@ fn apply_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> {
     let want = format!("{}\n", r.list_line.trim_end());
     if std::fs::read_to_string(&list_path).unwrap_or_default() != want {
         if Path::new(&list_path).exists() {
-            sudo(&["cp", &list_path, &format!("{list_path}.bak.{}", now_epoch())])?;
+            sudo(&[
+                "cp",
+                &list_path,
+                &format!("{list_path}.bak.{}", now_epoch()),
+            ])?;
         }
         run_bash(&format!(
             "printf '%s\\n' {} | sudo tee {} >/dev/null",
@@ -467,13 +506,21 @@ fn revert_apt_repo(r: &AptRepo, rep: &mut WiringReport) -> anyhow::Result<bool> 
     let mut changed = false;
     let list_path = format!("{SOURCES_D}/{}", r.list_file);
     if Path::new(&list_path).exists() {
-        sudo(&["cp", &list_path, &format!("{list_path}.bak.{}", now_epoch())])?;
+        sudo(&[
+            "cp",
+            &list_path,
+            &format!("{list_path}.bak.{}", now_epoch()),
+        ])?;
         sudo(&["rm", "-f", &list_path])?;
         rep.note(format!("removed apt source {list_path}"));
         changed = true;
     }
     if Path::new(&r.keyring_path).exists() {
-        sudo(&["cp", &r.keyring_path, &format!("{}.bak.{}", r.keyring_path, now_epoch())])?;
+        sudo(&[
+            "cp",
+            &r.keyring_path,
+            &format!("{}.bak.{}", r.keyring_path, now_epoch()),
+        ])?;
         sudo(&["rm", "-f", &r.keyring_path])?;
         rep.note(format!("removed keyring {}", r.keyring_path));
         changed = true;
@@ -520,7 +567,9 @@ fn revert_nix_line(l: &NixConfLine, rep: &mut WiringReport) -> anyhow::Result<bo
 }
 
 fn restart_nix_daemon(rep: &mut WiringReport) {
-    let _ = Command::new("sudo").args(["systemctl", "restart", "nix-daemon"]).status();
+    let _ = Command::new("sudo")
+        .args(["systemctl", "restart", "nix-daemon"])
+        .status();
     rep.note("restarted nix-daemon (nix.custom.conf changed)");
 }
 
@@ -544,7 +593,11 @@ fn apply_cdi(c: &CdiSpec) -> anyhow::Result<()> {
 
 fn revert_cdi(c: &CdiSpec, rep: &mut WiringReport) -> anyhow::Result<()> {
     if Path::new(&c.output).exists() {
-        sudo(&["cp", &c.output, &format!("{}.bak.{}", c.output, now_epoch())])?;
+        sudo(&[
+            "cp",
+            &c.output,
+            &format!("{}.bak.{}", c.output, now_epoch()),
+        ])?;
         sudo(&["rm", "-f", &c.output])?;
         rep.note(format!("removed CDI spec {}", c.output));
     }
@@ -555,12 +608,22 @@ fn revert_cdi(c: &CdiSpec, rep: &mut WiringReport) -> anyhow::Result<()> {
 
 fn apply_alternative(a: &Alternative, rep: &mut WiringReport) -> anyhow::Result<()> {
     let Some(target) = resolve_target(&a.target) else {
-        rep.note(format!("alternative '{}': target '{}' not found; skipped", a.name, a.target));
+        rep.note(format!(
+            "alternative '{}': target '{}' not found; skipped",
+            a.name, a.target
+        ));
         return Ok(());
     };
     let prio = a.priority.to_string();
     // AUDIT-FIX: surface sudo failures instead of asserting success.
-    if let Err(e) = sudo(&["update-alternatives", "--install", &a.link, &a.name, &target, &prio]) {
+    if let Err(e) = sudo(&[
+        "update-alternatives",
+        "--install",
+        &a.link,
+        &a.name,
+        &target,
+        &prio,
+    ]) {
         rep.fail("alternative", e);
         return Ok(());
     }
@@ -599,7 +662,9 @@ fn resolve_target(t: &str) -> Option<String> {
     if t.starts_with('/') && Path::new(t).exists() {
         return Some(t.to_string());
     }
-    which::which(t).ok().map(|p| p.to_string_lossy().into_owned())
+    which::which(t)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 // ================================ helpers ===================================
@@ -627,7 +692,10 @@ fn run_bash(script: &str) -> anyhow::Result<()> {
 }
 
 fn read_sudo(path: &str) -> Option<String> {
-    let out = Command::new("sudo").args(["-n", "cat", path]).output().ok()?;
+    let out = Command::new("sudo")
+        .args(["-n", "cat", path])
+        .output()
+        .ok()?;
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {

@@ -7,13 +7,20 @@
 //! arrive. Telemetry (Phase 5): a DEDICATED sampler thread emits `Event::Telemetry`
 //! on a cadence the GUI controls via `TelemetryControl` (backoff when off-Dashboard
 //! / unfocused), so a long `engine.run` never starves telemetry.
-use crate::{component::Phase, model::{AddRepoSpec, RunPlan}, Engine, Event, EventSink};
+use crate::{
+    component::Phase,
+    model::{AddRepoSpec, RunPlan},
+    Engine, Event, EventSink,
+};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
+// One command is sent across the worker channel per user action, so the inter-variant
+// size delta is irrelevant; boxing would add indirection for no real gain. Keep value-typed.
+#[allow(clippy::large_enum_variant)]
 pub enum EngineCommand {
     Detect,
     Install { targets: Vec<String>, dry_run: bool },

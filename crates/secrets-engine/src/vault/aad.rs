@@ -64,7 +64,11 @@ pub fn record_aad(tag: TableTag, row_id: i64, version: i64, dek_generation: i64)
     out.extend_from_slice(&row_id.to_be_bytes());
     out.extend_from_slice(&version.to_be_bytes());
     out.extend_from_slice(&dek_generation.to_be_bytes());
-    debug_assert_eq!(out.len(), AAD_LEN, "AAD must be fixed-width ({AAD_LEN} bytes)");
+    debug_assert_eq!(
+        out.len(),
+        AAD_LEN,
+        "AAD must be fixed-width ({AAD_LEN} bytes)"
+    );
     out
 }
 
@@ -91,7 +95,10 @@ mod tests {
             v
         };
 
-        assert_eq!(aad, expected, "AAD byte layout drifted from the canonical spec");
+        assert_eq!(
+            aad, expected,
+            "AAD byte layout drifted from the canonical spec"
+        );
         assert_eq!(aad.len(), 39, "AAD must be exactly 39 bytes wide");
         assert_eq!(aad.len(), AAD_LEN);
     }
@@ -107,8 +114,16 @@ mod tests {
             (TableTag::HmacKey, 4),
         ] {
             let aad = record_aad(tag, 0, 0, 0);
-            assert_eq!(&aad[..AAD_DOMAIN.len()], AAD_DOMAIN, "domain prefix missing");
-            assert_eq!(aad[AAD_DOMAIN.len()], disc, "tag discriminant misplaced/wrong");
+            assert_eq!(
+                &aad[..AAD_DOMAIN.len()],
+                AAD_DOMAIN,
+                "domain prefix missing"
+            );
+            assert_eq!(
+                aad[AAD_DOMAIN.len()],
+                disc,
+                "tag discriminant misplaced/wrong"
+            );
             assert_eq!(aad.len(), AAD_LEN);
         }
     }

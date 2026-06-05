@@ -2,38 +2,38 @@
 //!
 //! Both the CLI (`envctl`) and the GUI (`envctl-gui`) drive the box through the
 //! *identical* `Engine` API below, so the two front-ends can never diverge.
+pub mod addrepo; // Phase 4: the staged build-from-source pipeline + confined AI agent
+pub mod command;
 pub mod component; // Component, Hook, Guard, Phase, HookRunner
-pub mod model; // Registry, OpResult, OpStatus, EnvReport, Wiring, RunPlan, RunSummary, AddRepoSpec
-pub mod event; // Event, EventSink, Stream, Telemetry, GpuSample
-pub mod error; // EngineError, RunContext, run_phase
-pub mod guard; // fail-closed UuidResolves/NotLiveDevice/NotMounted/PathExists/HookSucceeds
-pub mod wiring; // apply()/revert() for Wiring (shell_rc backup-then-excise)
-pub mod runner; // ProcessRunner (real) + DryRunRunner impls of HookRunner
 pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which probes
+pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
+pub mod error; // EngineError, RunContext, run_phase
+pub mod event; // Event, EventSink, Stream, Telemetry, GpuSample
+pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
 pub mod graph; // graph intelligence over the component dependency DAG
+pub mod guard; // fail-closed UuidResolves/NotLiveDevice/NotMounted/PathExists/HookSucceeds
+pub mod install; // Phase 4: symlink artifacts into ~/.local/bin (refuse-unmanaged) + wire-in
 pub mod lock; // envctl.lock — content-hashed manifest-of-record + CI gate
+pub mod model; // Registry, OpResult, OpStatus, EnvReport, Wiring, RunPlan, RunSummary, AddRepoSpec
+pub mod register; // Phase 4: synthesize the components.d drop-in (provenance + rebuild)
+pub mod runner; // ProcessRunner (real) + DryRunRunner impls of HookRunner
 pub mod runtime; // machine-local last-run state (XDG cache), out of the lock
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
-pub mod executor; // Engine::run(plan) best-effort loop + RunContext resolve + add_repo
-pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
-pub mod addrepo; // Phase 4: the staged build-from-source pipeline + confined AI agent
-pub mod install; // Phase 4: symlink artifacts into ~/.local/bin (refuse-unmanaged) + wire-in
-pub mod register; // Phase 4: synthesize the components.d drop-in (provenance + rebuild)
-pub mod command; // EngineCommand / EngineEvent + run_event_loop (GUI worker API)
+pub mod wiring; // apply()/revert() for Wiring (shell_rc backup-then-excise) // EngineCommand / EngineEvent + run_event_loop (GUI worker API)
 
+pub use command::{run_event_loop, EngineCommand, EngineEvent, TelemetryControl};
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
 pub use drift::DriftSummary;
+pub use error::{EngineError, RunContext};
+pub use event::{Event, EventSink, GpuSample, Stream, Telemetry};
 pub use model::{
     AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, ComponentState, DataPath, DesktopEntry,
     DriftItem, DriftKind, EnvReport, OpResult, OpStatus, Refactor, RefactorGoal, Registry,
     RenameRule, ResetGates, RunPlan, RunSummary, Severity, ShellRcBlock, SystemdUnit, ToolState,
     Wiring,
 };
-pub use event::{Event, EventSink, GpuSample, Stream, Telemetry};
-pub use error::{EngineError, RunContext};
 pub use runner::{DryRunRunner, ProcessRunner};
-pub use command::{run_event_loop, EngineCommand, EngineEvent, TelemetryControl};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -76,7 +76,10 @@ impl Engine {
     }
 
     /// Construct an Engine with a custom HookRunner (used by tests: DryRunRunner).
-    pub fn with_runner(manifest_dir: PathBuf, runner: Box<dyn HookRunner>) -> anyhow::Result<Engine> {
+    pub fn with_runner(
+        manifest_dir: PathBuf,
+        runner: Box<dyn HookRunner>,
+    ) -> anyhow::Result<Engine> {
         let registry = Registry::load(&manifest_dir)?;
         Ok(Engine {
             inner: Arc::new(EngineInner {

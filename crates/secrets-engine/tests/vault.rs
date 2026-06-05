@@ -77,10 +77,7 @@ fn pp(s: &str) -> Zeroizing<String> {
 
 /// Build an engine over a SHARED store + a USB probe of the caller's choice (so a "second engine
 /// over the same store" can present a different probe).
-fn engine_with(
-    store: Box<dyn Store>,
-    usb: Box<dyn UsbProbe>,
-) -> Engine {
+fn engine_with(store: Box<dyn Store>, usb: Box<dyn UsbProbe>) -> Engine {
     Engine::with_seams(
         paths(),
         store,
@@ -118,10 +115,20 @@ fn init_passphrase_unlock_put_get_roundtrip() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
 
     // init
-    eng.init_vault(pp("super-secret-pass"), None, None, at_floor_params(), &sink)
-        .expect("init_vault must succeed");
+    eng.init_vault(
+        pp("super-secret-pass"),
+        None,
+        None,
+        at_floor_params(),
+        &sink,
+    )
+    .expect("init_vault must succeed");
     let ev = drain(&rx);
-    assert_eq!(audit_count(&ev, "vault_init"), 1, "a vault_init audit row must land");
+    assert_eq!(
+        audit_count(&ev, "vault_init"),
+        1,
+        "a vault_init audit row must land"
+    );
 
     // unlock
     let st = eng
@@ -132,7 +139,9 @@ fn init_passphrase_unlock_put_get_roundtrip() {
     assert!(
         has_event(&ev, |e| matches!(
             e,
-            SecretEvent::VaultUnlocked { factor: Factor::Passphrase }
+            SecretEvent::VaultUnlocked {
+                factor: Factor::Passphrase
+            }
         )),
         "VaultUnlocked{{Passphrase}} must be emitted"
     );
@@ -165,7 +174,10 @@ fn init_passphrase_unlock_put_get_roundtrip() {
     assert_eq!(got.as_slice(), b"sk-live-xyz");
     let ev = drain(&rx);
     assert!(
-        has_event(&ev, |e| matches!(e, SecretEvent::SecretRead { name, .. } if name == "claude")),
+        has_event(
+            &ev,
+            |e| matches!(e, SecretEvent::SecretRead { name, .. } if name == "claude")
+        ),
         "SecretRead must be emitted"
     );
 
@@ -193,7 +205,11 @@ fn init_passphrase_unlock_put_get_roundtrip() {
     let got2 = eng
         .secret_get("claude", true, true, &sink)
         .expect("secret_get v2 must succeed");
-    assert_eq!(got2.as_slice(), b"sk-live-v2", "latest-wins returns v2 bytes");
+    assert_eq!(
+        got2.as_slice(),
+        b"sk-live-v2",
+        "latest-wins returns v2 bytes"
+    );
 }
 
 // ---- 2. USB keyslot unlock via fake probe ----------------------------------------------------
@@ -236,13 +252,17 @@ fn usb_keyslot_unlock_via_fake_probe() {
             keyfile: keyfile.clone(),
         }),
     );
-    let st = eng_usb.unlock(Unlock::Usb, &sink).expect("USB unlock must succeed");
+    let st = eng_usb
+        .unlock(Unlock::Usb, &sink)
+        .expect("USB unlock must succeed");
     assert_eq!(st, VaultState::Unlocked);
     let ev = drain(&rx);
     assert!(
         has_event(&ev, |e| matches!(
             e,
-            SecretEvent::VaultUnlocked { factor: Factor::Usb }
+            SecretEvent::VaultUnlocked {
+                factor: Factor::Usb
+            }
         )),
         "VaultUnlocked{{Usb}} must be emitted"
     );
@@ -279,7 +299,10 @@ fn usb_keyslot_unlock_via_fake_probe() {
         .unlock(Unlock::Usb, &sink)
         .expect_err("wrong-UUID USB unlock must fail");
     assert!(
-        matches!(err.downcast_ref::<EngineError>(), Some(EngineError::UnlockFailed)),
+        matches!(
+            err.downcast_ref::<EngineError>(),
+            Some(EngineError::UnlockFailed)
+        ),
         "expected UnlockFailed, got {err:?}"
     );
     let ev = drain(&rx);
@@ -313,7 +336,10 @@ fn wrong_passphrase_fails() {
         .unlock(Unlock::Passphrase(pp("nope")), &sink)
         .expect_err("wrong passphrase must fail");
     assert!(
-        matches!(err.downcast_ref::<EngineError>(), Some(EngineError::UnlockFailed)),
+        matches!(
+            err.downcast_ref::<EngineError>(),
+            Some(EngineError::UnlockFailed)
+        ),
         "expected the single generic UnlockFailed (OI-17), got {err:?}"
     );
     // Single generic message.
@@ -343,7 +369,8 @@ fn lock_zeroizes_then_get_refused() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
     eng.init_vault(pp("lock-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("lock-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("lock-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "claude".to_string(),
@@ -413,7 +440,8 @@ fn reveal_gate_broker_only_and_apply() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
     eng.init_vault(pp("gate-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("gate-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("gate-pass")), &sink)
+        .unwrap();
 
     // broker_only secret
     eng.secret_put(
@@ -448,7 +476,10 @@ fn reveal_gate_broker_only_and_apply() {
     assert!(err.to_string().contains("broker-only"));
     let ev = drain(&rx);
     assert!(
-        has_event(&ev, |e| matches!(e, SecretEvent::GuardRefused { subject, .. } if subject == "bonly")),
+        has_event(
+            &ev,
+            |e| matches!(e, SecretEvent::GuardRefused { subject, .. } if subject == "bonly")
+        ),
         "GuardRefused must be emitted for the broker-only reveal"
     );
     assert!(
@@ -468,7 +499,10 @@ fn reveal_gate_broker_only_and_apply() {
     assert!(err.to_string().contains("apply"));
     let ev = drain(&rx);
     assert!(
-        has_event(&ev, |e| matches!(e, SecretEvent::GuardRefused { subject, .. } if subject == "normal")),
+        has_event(
+            &ev,
+            |e| matches!(e, SecretEvent::GuardRefused { subject, .. } if subject == "normal")
+        ),
         "GuardRefused must be emitted for the apply gate"
     );
 
@@ -486,7 +520,10 @@ fn reveal_gate_broker_only_and_apply() {
         "no GuardRefused for a non-revealing read"
     );
     assert!(
-        has_event(&ev, |e| matches!(e, SecretEvent::SecretRead { name, .. } if name == "normal")),
+        has_event(
+            &ev,
+            |e| matches!(e, SecretEvent::SecretRead { name, .. } if name == "normal")
+        ),
         "a SecretRead is still emitted for the non-revealing read"
     );
 }
@@ -503,7 +540,8 @@ fn audit_chain_verifies_and_detects_tamper() {
 
     eng.init_vault(pp("chain-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("chain-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("chain-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "a".to_string(),
@@ -529,7 +567,9 @@ fn audit_chain_verifies_and_detects_tamper() {
     let _ = drain(&rx);
 
     // The chain verifies, and the rows are contiguous + linked.
-    inmem.verify_audit_chain().expect("a clean chain must verify");
+    inmem
+        .verify_audit_chain()
+        .expect("a clean chain must verify");
     let rows = inmem.audit_rows();
     assert!(rows.len() >= 4, "init + unlock + 2 puts => >= 4 audit rows");
     assert_eq!(
@@ -569,7 +609,8 @@ fn audit_tail_truncation_is_detected() {
 
     eng.init_vault(pp("trunc-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("trunc-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("trunc-pass")), &sink)
+        .unwrap();
     for _ in 0..3 {
         eng.secret_put(
             SecretMeta {
@@ -655,7 +696,8 @@ fn reunlock_with_wrong_passphrase_leaves_vault_unlocked() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
     eng.init_vault(pp("live-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("live-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("live-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "k".to_string(),
@@ -692,7 +734,8 @@ fn many_puts_all_round_trip() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
     eng.init_vault(pp("multi-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("multi-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("multi-pass")), &sink)
+        .unwrap();
 
     // Distinct names interleaved so row_id and version advance independently — the store is the
     // sole row_id authority and the engine seals the AAD against exactly the reserved id, so every
@@ -828,7 +871,10 @@ fn truncate_and_replay_stale_anchor() {
         // The seq carried in AuditChainBroken is the SHORT live max-seq (= rows_at_k), confirming the
         // rejection observed the truncated chain (the floor's signature), not a stale snapshot.
         let cur_seq = inmem.audit_rows().last().map_or(0, |r| r.seq);
-        assert_eq!(cur_seq as usize, rows_at_k, "post-truncation live max-seq == k");
+        assert_eq!(
+            cur_seq as usize, rows_at_k,
+            "post-truncation live max-seq == k"
+        );
         let err = eng
             .verify_audit_anchor(&sink)
             .expect_err("the high-water floor must reject the truncated-but-stale-anchored chain");
@@ -952,9 +998,15 @@ fn stale_anchor_replay_caught_at_mac_not_floor() {
         .parse()
         .unwrap();
     assert!(cur_seq > seq_at_k, "chain must have grown past k");
-    assert_eq!(stored_hw, cur_seq, "honest steady state: high_water == live max-seq");
+    assert_eq!(
+        stored_hw, cur_seq,
+        "honest steady state: high_water == live max-seq"
+    );
     let live_head = inmem.get_meta("vault.audit_head").unwrap().unwrap();
-    assert_ne!(stale_head_at_k, live_head, "the seq-k MAC must differ from the seq-N MAC");
+    assert_ne!(
+        stale_head_at_k, live_head,
+        "the seq-k MAC must differ from the seq-N MAC"
+    );
 
     // THE ATTACK: replay ONLY the stale seq-k MAC. Do NOT truncate the chain and do NOT rewind the
     // high-water — so `cur_seq (N) == stored_hw (N)` and the floor (`cur_seq < stored_hw`) PASSES.
@@ -984,7 +1036,8 @@ fn honest_append_then_verify_passes() {
     let (sink, rx) = envctl_secrets::EventSink::channel();
     eng.init_vault(pp("honest-pass"), None, None, at_floor_params(), &sink)
         .unwrap();
-    eng.unlock(Unlock::Passphrase(pp("honest-pass")), &sink).unwrap();
+    eng.unlock(Unlock::Passphrase(pp("honest-pass")), &sink)
+        .unwrap();
 
     let read_hw = |s: &std::sync::Arc<InMemStore>| -> i64 {
         s.get_meta("vault.audit_high_water")
@@ -1012,7 +1065,10 @@ fn honest_append_then_verify_passes() {
             )
             .unwrap();
             let hw = read_hw(&inmem);
-            assert!(hw >= last_hw, "high-water must be monotonic (was {last_hw}, now {hw})");
+            assert!(
+                hw >= last_hw,
+                "high-water must be monotonic (was {last_hw}, now {hw})"
+            );
             last_hw = hw;
         }
         eng.lock(&sink).unwrap();
@@ -1027,7 +1083,10 @@ fn honest_append_then_verify_passes() {
         eng.verify_audit_anchor(&sink)
             .expect("the anchor must verify on an honest, growing chain");
         let hw_unlocked = read_hw(&inmem);
-        assert!(hw_unlocked >= last_hw, "unlock must only raise the high-water");
+        assert!(
+            hw_unlocked >= last_hw,
+            "unlock must only raise the high-water"
+        );
         last_hw = hw_unlocked;
     }
     let _ = drain(&rx);
@@ -1057,7 +1116,8 @@ fn put_secret_rejects_non_monotonic_version() {
     let s = InMemStore::new();
 
     // First version for a new name MUST be 1.
-    s.put_secret(row(&s, "a", 1)).expect("v1 for a new name is accepted");
+    s.put_secret(row(&s, "a", 1))
+        .expect("v1 for a new name is accepted");
 
     // A duplicate version (1 again) is rejected.
     s.put_secret(row(&s, "a", 1))
@@ -1066,13 +1126,15 @@ fn put_secret_rejects_non_monotonic_version() {
     s.put_secret(row(&s, "a", 3))
         .expect_err("a version gap violates monotonicity");
     // The exact next version (2) is accepted.
-    s.put_secret(row(&s, "a", 2)).expect("the next version (2) is accepted");
+    s.put_secret(row(&s, "a", 2))
+        .expect("the next version (2) is accepted");
 
     // The FIRST version for a brand-new name must be 1, not 2 — the contract fires at write time,
     // not as a later AEAD-open DoS.
     s.put_secret(row(&s, "b", 2))
         .expect_err("a new name must start at version 1");
-    s.put_secret(row(&s, "b", 1)).expect("version 1 for a new name is accepted");
+    s.put_secret(row(&s, "b", 1))
+        .expect("version 1 for a new name is accepted");
 }
 
 // ---- shared-store adapter --------------------------------------------------------------------
@@ -1123,10 +1185,7 @@ impl Store for SharedStore {
     fn load_keyslots(&self) -> anyhow::Result<Vec<envctl_secrets::keyslot::Keyslot>> {
         self.0.load_keyslots()
     }
-    fn load_keyslot(
-        &self,
-        id: i64,
-    ) -> anyhow::Result<Option<envctl_secrets::keyslot::Keyslot>> {
+    fn load_keyslot(&self, id: i64) -> anyhow::Result<Option<envctl_secrets::keyslot::Keyslot>> {
         self.0.load_keyslot(id)
     }
     fn append_audit(&self, rec: &envctl_secrets::AuditRecord) -> anyhow::Result<i64> {

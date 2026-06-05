@@ -53,7 +53,12 @@ const WELL_KNOWN: &[&str] = &[
     "rustc", "nix", "ssh", "gpg", "apt", "apt-get", "dpkg",
 ];
 
-pub fn install_and_wire(plan: &InstallPlan, force: bool, dry_run: bool, sink: &EventSink) -> InstallReport {
+pub fn install_and_wire(
+    plan: &InstallPlan,
+    force: bool,
+    dry_run: bool,
+    sink: &EventSink,
+) -> InstallReport {
     let mut rep = InstallReport::default();
 
     for a in &plan.artifacts {
@@ -85,7 +90,10 @@ pub fn install_and_wire(plan: &InstallPlan, force: bool, dry_run: bool, sink: &E
     let wiring = synth_wiring(plan);
     if dry_run {
         if !wiring.path_entries.is_empty() {
-            rep.note(format!("[preview] would own PATH entries: {}", wiring.path_entries.join(", ")));
+            rep.note(format!(
+                "[preview] would own PATH entries: {}",
+                wiring.path_entries.join(", ")
+            ));
         }
     } else if !wiring.path_entries.is_empty() {
         let wrep = crate::wiring::apply(&wiring);
@@ -98,10 +106,18 @@ pub fn install_and_wire(plan: &InstallPlan, force: bool, dry_run: bool, sink: &E
     }
 
     for n in &rep.notes {
-        sink.emit(Event::Log { component: plan.id.clone(), stream: Stream::Stdout, line: n.clone() });
+        sink.emit(Event::Log {
+            component: plan.id.clone(),
+            stream: Stream::Stdout,
+            line: n.clone(),
+        });
     }
     for (k, e) in &rep.failures {
-        sink.emit(Event::Log { component: plan.id.clone(), stream: Stream::Stderr, line: format!("install ({k}) failed: {e}") });
+        sink.emit(Event::Log {
+            component: plan.id.clone(),
+            stream: Stream::Stderr,
+            line: format!("install ({k}) failed: {e}"),
+        });
     }
     rep
 }
@@ -127,10 +143,18 @@ fn is_safe_install_name(name: &str) -> bool {
         return false;
     }
     let mut comps = std::path::Path::new(name).components();
-    matches!((comps.next(), comps.next()), (Some(Component::Normal(_)), None))
+    matches!(
+        (comps.next(), comps.next()),
+        (Some(Component::Normal(_)), None)
+    )
 }
 
-fn install_artifact(plan: &InstallPlan, a: &ArtifactPlan, force: bool, dry_run: bool) -> Result<Option<String>, InstallErr> {
+fn install_artifact(
+    plan: &InstallPlan,
+    a: &ArtifactPlan,
+    force: bool,
+    dry_run: bool,
+) -> Result<Option<String>, InstallErr> {
     // AUDIT-FIX (blocker): the install name lands in `local_bin().join(name)`. A
     // rename/cherry-pick name like `../../.config/evil` would plant (or, with
     // --force, overwrite) a managed symlink OUTSIDE ~/.local/bin. Refuse anything
@@ -169,7 +193,9 @@ fn install_artifact(plan: &InstallPlan, a: &ArtifactPlan, force: bool, dry_run: 
                 return Err(InstallErr::Foreign(target_s));
             }
             if dry_run {
-                return Ok(Some(format!("{target_s} (would back up the existing file first)")));
+                return Ok(Some(format!(
+                    "{target_s} (would back up the existing file first)"
+                )));
             }
             // AUDIT-FIX: never overwrite an existing backup — bump a suffix until the
             // `.bak` path is unique so a same-instant second backup can't clobber the
@@ -264,7 +290,10 @@ fn synth_wiring(plan: &InstallPlan) -> Wiring {
     // duplicate PATH entry would otherwise survive into the owned export block.
     let mut seen = HashSet::new();
     path_entries.retain(|e| seen.insert(e.clone()));
-    Wiring { path_entries, ..Default::default() }
+    Wiring {
+        path_entries,
+        ..Default::default()
+    }
 }
 
 fn home() -> PathBuf {
@@ -283,7 +312,10 @@ fn ensure_private_bin(dir: &Path) -> std::io::Result<()> {
 // same second don't produce the same `.bak.<n>` suffix and clobber each other
 // (matches wiring.rs, which already uses as_nanos()).
 fn now_epoch() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -299,17 +331,39 @@ mod tests {
     #[test]
     fn managed_symlink_needs_canonical_containment() {
         // a path that doesn't exist is never ours
-        assert!(!is_managed_symlink(Path::new("/no/such/envctl/link"), "slug"));
+        assert!(!is_managed_symlink(
+            Path::new("/no/such/envctl/link"),
+            "slug"
+        ));
     }
     #[test]
     fn rename_cannot_shadow_a_well_known_command() {
         // even with renamed=true (an explicit --rename), installing AS `git` is a
         // hard refusal — the source need not even exist, the name is rejected first.
-        let plan = InstallPlan { id: "x".into(), slug: "x".into(), artifacts: vec![], extra_path_entries: vec![] };
-        let a = ArtifactPlan { source: Path::new("/no/such/built/foo-cli").to_path_buf(), install_name: "git".into(), renamed: true };
+        let plan = InstallPlan {
+            id: "x".into(),
+            slug: "x".into(),
+            artifacts: vec![],
+            extra_path_entries: vec![],
+        };
+        let a = ArtifactPlan {
+            source: Path::new("/no/such/built/foo-cli").to_path_buf(),
+            install_name: "git".into(),
+            renamed: true,
+        };
         match install_artifact(&plan, &a, false, true) {
             Err(InstallErr::Shadow(n)) => assert_eq!(n, "git"),
-            other => panic!("expected Shadow(git), got {:?}", match other { Ok(_) => "Ok".to_string(), Err(InstallErr::Unsafe(s)) => format!("Unsafe({s})"), Err(InstallErr::Missing(s)) => format!("Missing({s})"), Err(InstallErr::Foreign(s)) => format!("Foreign({s})"), Err(InstallErr::Io(e)) => format!("Io({e})"), Err(InstallErr::Shadow(s)) => format!("Shadow({s})") }),
+            other => panic!(
+                "expected Shadow(git), got {:?}",
+                match other {
+                    Ok(_) => "Ok".to_string(),
+                    Err(InstallErr::Unsafe(s)) => format!("Unsafe({s})"),
+                    Err(InstallErr::Missing(s)) => format!("Missing({s})"),
+                    Err(InstallErr::Foreign(s)) => format!("Foreign({s})"),
+                    Err(InstallErr::Io(e)) => format!("Io({e})"),
+                    Err(InstallErr::Shadow(s)) => format!("Shadow({s})"),
+                }
+            ),
         }
     }
     #[test]

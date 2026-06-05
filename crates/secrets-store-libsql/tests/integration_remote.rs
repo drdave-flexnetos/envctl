@@ -30,7 +30,9 @@ use serde_json::json;
 fn store() -> envctl_secrets_store_libsql::LibSqlStore {
     let url = std::env::var("LIBSQL_TEST_URL").expect("set LIBSQL_TEST_URL to a running sqld");
     let auth = std::env::var("LIBSQL_TEST_AUTH").unwrap_or_default();
-    LibSqlStoreBuilder::new(url, auth).build().expect("open store")
+    LibSqlStoreBuilder::new(url, auth)
+        .build()
+        .expect("open store")
 }
 
 #[test]
@@ -122,8 +124,13 @@ fn audit_append_is_durable_and_chain_verifies() {
     };
     let s1 = s.append_audit(&mk("unlock")).unwrap();
     let s2 = s.append_audit(&mk("secret_read")).unwrap();
-    assert_eq!((s1, s2), (1, 2), "seq is dense, 1-based (HF-14 durable append)");
-    s.verify_audit_chain().expect("freshly appended chain verifies");
+    assert_eq!(
+        (s1, s2),
+        (1, 2),
+        "seq is dense, 1-based (HF-14 durable append)"
+    );
+    s.verify_audit_chain()
+        .expect("freshly appended chain verifies");
 
     let tail = s.last_audit().unwrap().unwrap();
     assert_eq!(tail.seq, 2);
@@ -180,17 +187,33 @@ fn remote_bearer_and_client_roundtrip() {
         revoked_at_ms: None,
     };
     s.save_remote_client(rc).unwrap();
-    let loaded = s.load_remote_client("phone").unwrap().expect("remote client");
+    let loaded = s
+        .load_remote_client("phone")
+        .unwrap()
+        .expect("remote client");
     assert_eq!(loaded.dpop_jkt, jkt);
     assert!(loaded.enabled);
     assert!(!loaded.hardware_bound);
-    assert!(s.list_remote_clients().unwrap().iter().any(|c| c.client_id == "phone"));
+    assert!(s
+        .list_remote_clients()
+        .unwrap()
+        .iter()
+        .any(|c| c.client_id == "phone"));
 
-    assert!(s.revoke_remote_client("phone", 99999).unwrap(), "revoke existing => true");
-    let after = s.load_remote_client("phone").unwrap().expect("still present after revoke");
+    assert!(
+        s.revoke_remote_client("phone", 99999).unwrap(),
+        "revoke existing => true"
+    );
+    let after = s
+        .load_remote_client("phone")
+        .unwrap()
+        .expect("still present after revoke");
     assert!(!after.enabled);
     assert_eq!(after.revoked_at_ms, Some(99999));
-    assert!(!s.revoke_remote_client("nope", 1).unwrap(), "revoke missing => false");
+    assert!(
+        !s.revoke_remote_client("nope", 1).unwrap(),
+        "revoke missing => false"
+    );
 }
 
 #[test]
@@ -214,7 +237,8 @@ fn local_bearer_insert_satisfies_check() {
         revoked: false,
         row_mac: vec![6; 32],
     };
-    s.save_bearer(row).expect("local bearer insert must satisfy the CHECK");
+    s.save_bearer(row)
+        .expect("local bearer insert must satisfy the CHECK");
     let got = s.load_bearer("loctok").unwrap().expect("local bearer row");
     assert_eq!(got.client_uid, Some(1000));
     assert_eq!(got.client_id, None);
