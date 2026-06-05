@@ -73,6 +73,31 @@ command = "bash"
 args = ["-lc", "qemu-system-x86_64 --version"]
 
 
+# OpenSSL dev headers — build dependency for EXTERNAL tools whose deps link system OpenSSL
+# (e.g. grit's aws/azure SDKs pull openssl-sys). This is a *system* package, NOT linked into any
+# envctl crate, so it does not affect the no-C trust-boundary invariant (ci/gates/no-c.sh reads
+# the envctl workspace's cargo graph only; grit is excluded from that workspace).
+[[component]]
+id = "libssl-dev"
+name = "OpenSSL dev headers (libssl-dev)"
+description = "OpenSSL development headers + pkg-config metadata, so external tools that link system OpenSSL (grit's aws/azure SDKs → openssl-sys) can build. System package; not in the envctl trust boundary."
+# DETECT: the functional predicate grit's build needs — pkg-config can resolve openssl.pc
+# (provided by libssl-dev). Requires pkg-config itself, which we also install.
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v pkg-config >/dev/null && pkg-config --exists openssl"]
+[component.install]
+kind = "command"
+needs_sudo = true
+command = "apt-get"
+args = ["install", "-y", "libssl-dev", "pkg-config"]
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "pkg-config --modversion openssl >/dev/null"]
+
+
 # Precondition meta: the tools the wizard assumes from the apt base.
 [[component]]
 id = "meta-base-sanity"

@@ -1,21 +1,26 @@
-# Loop state — yazelix mission-control dashboard (post-feature handoff)
-session_started: 2026-06-05T19:xxZ
-loop: forge-loop (dashboard follow-ups + wire-live)
-branch: yazelix-dashboard
-worktree: /home/drdave/Desktop/meta/.worktrees/yazelix-dashboard/envctl
+# Loop state — env-install-loop (resume / re-discover)
+session_started: 2026-06-05T22:03:23Z
+loop: env-install-loop
+branch: env-install-resume-0605
+worktree: /home/drdave/Desktop/meta/.worktrees/env-install-resume/envctl
+base: origin/master @ fcf3d0c (49 declared components)
 cycle_budget: 3
-cycles_this_session: 0
-cycles_total: 2
-last_item: Pass 1 + Pass 2 delivered (engine generator + envctl dashboard CLI/GUI + meta_dashboard_cli plugin + manifest component); both PRs open
+cycles_this_session: 1
+cycles_total: 19
+last_item: grit installed+verified+codified (meta Cargo.toml exclude fix; libssl-dev component
+  + grit requires edge; envctl.lock 49→50). Box DONE — only node-via-bun remains (tabled).
 status: |
-  FEATURE COMPLETE, NOT YET LIVE. Mission-control dashboard built across 3 repos and
-  guardian-verified (all gates green, lock --check clean @ 47 components). Shipping is
-  gated on PR review/merge (auto-merge intentionally NOT enabled).
-  - envctl PR #23 -> develop (OPEN): https://github.com/FlexNetOS/envctl/pull/23
-  - meta   PR #7  -> main    (OPEN): https://github.com/FlexNetOS/meta/pull/7
-  - FlexNetOS/meta_dashboard_cli: created (private) + pushed to master (genesis).
-last_update: 2026-06-05T21:22Z
+  DONE. 49 of 50 declared components detected+healthy; zero actionable drift (only node-via-bun
+  missing — TABLED by design, reset refused by fail-closed group-ai-clis reverse-dep guard).
+  This session re-discovered state on a fresh worktree off origin/master (fcf3d0c) and closed
+  the one NEW real gap, grit, the declared way:
+  - meta/Cargo.toml: added grit to workspace `exclude` (was absorbing grit, breaking cargo install).
+  - apt-base.toml: new `libssl-dev` component (OpenSSL dev headers for grit's aws/azure SDKs);
+    grit `requires` += libssl-dev. User-authorized the one-time `sudo apt install libssl-dev`.
+  - grit built+installed to ~/.cargo/bin (grit 0.3.0), on PATH in fresh shell, detect healthy.
+  GATES: doctor green; lock --check clean (50); kasetto sync --locked clean; build +
+  no-c/shape/enable all PASS (no-c confirms zero aws-lc/openssl/C-SQLite in the envctl boundary).
+last_update: 2026-06-05T22:1xZ
 needs_human_followups: |
-  - MERGE PRs #23 (develop) and #7 (main) after review — this is the gate before wiring live.
-  - broker unification: DROPPED from this backlog. weave is already upgrading to merge
-    weave+repowire+broker into one bus (handled elsewhere).
+  - node-via-bun: manifest design follow-up (mark not-applicable when real node in n8n range
+    present, or add node-real + drop group-ai-clis edge). Cosmetic detect-drift only.

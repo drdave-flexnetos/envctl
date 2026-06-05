@@ -19,7 +19,8 @@
 id = "grit"
 name = "grit — parallel-agent AST git-lock coordinator"
 description = "Function-level (tree-sitter) git locking so N AI agents edit the same files without merge conflicts. External tool binary on ~/.cargo/bin; NOT linked into any envctl crate."
-requires = ["rustup"]      # cargo + stable >= 1.80 (id "rustup" defined in manifest/base.toml)
+requires = ["rustup", "libssl-dev"]   # cargo+stable>=1.80 (base.toml) + OpenSSL dev headers
+                                       # (apt-base.toml) for grit's aws/azure SDKs (openssl-sys)
 destructive = false
 
 # DETECT == "already present" predicate (read-only; feeds auto-detect + drives install/doctor).
