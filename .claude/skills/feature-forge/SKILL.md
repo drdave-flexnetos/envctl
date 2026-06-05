@@ -1,6 +1,6 @@
 ---
 name: feature-forge
-description: "The envctl Feature Forge orchestrator — the construction crew that designs, implements, and invariant-verifies a feature/upgrade end-to-end. ALWAYS use for any request to add/build/implement/design/upgrade/extend/refactor an envctl feature, Engine method, CLI/GUI surface, secrets-stack capability, or manifest component — and for FOLLOW-UPS: 're-run', 'run it again', 'revise the design', 'redo just the implementation', 'the guardian found X, fix it', 'improve the result', 'based on the previous plan'. Drives the feature-architect → rust-implementer → invariant-guardian pipeline. Do NOT use for pure environment/toolchain install (use env-toolchain-install), drift/lock/doctor checks (use env-stabilize), or naming/convention questions (use agent-env-config)."
+description: "The envctl Feature Forge orchestrator — the construction crew that designs, implements, and invariant-verifies a feature/upgrade end-to-end. ALWAYS use for any request to add/build/implement/design/upgrade/extend/refactor an envctl feature, Engine method, CLI/GUI surface, secrets-stack capability, or manifest component — and for FOLLOW-UPS: 're-run', 'run it again', 'revise the design', 'redo just the implementation', 'the guardian found X, fix it', 'improve the result', 'based on the previous plan'. Drives the feature-architect → rust-implementer → invariant-guardian pipeline. For CONTINUOUS/autonomous runs over a backlog ('keep building', 'loop on the roadmap', 'run until done', 'unattended') use the `forge-loop` skill; for cross-session handoff/'transfer'/'resume from handoff' use `session-relay`. Do NOT use for pure environment/toolchain install (use env-toolchain-install), drift/lock/doctor checks (use env-stabilize), or naming/convention questions (use agent-env-config)."
 ---
 
 # envctl Feature Forge — orchestrator
@@ -26,9 +26,21 @@ without changing the agent definitions.
 | Design | `feature-architect` | Plan | no | `_workspace/01_architect_plan.md` |
 | Build | `rust-implementer` | general-purpose | **yes** | code + `_workspace/02_implementer_log.md` |
 | Verify | `invariant-guardian` | general-purpose | no | `_workspace/03_guardian_report.md` |
+| Continuity | `continuity-steward` | general-purpose | no (writes checkpoint) | `_workspace/HANDOFF.md` |
 
 The implementer follows the **`rust-feature-impl`** skill; the guardian runs that skill's
-`references/verification.md` recipe. Conventions come from **`agent-env-config`**.
+`references/verification.md` recipe. Conventions come from **`agent-env-config`**. The
+`continuity-steward` is used only in **continuous mode** at a session handoff (see below).
+
+## Single feature vs. continuous loop
+- **One feature** (default): run Phases 0–4 below once and stop.
+- **Continuous / autonomous over a backlog:** drive this same pipeline in a loop via the
+  **`forge-loop`** skill (the Ralph loop) — each iteration runs one full cycle on the next backlog
+  item, checkpoints, and self-paces. At a per-session **cycle budget**, `forge-loop` invokes
+  **`session-relay`**, which spawns `continuity-steward` to write `_workspace/HANDOFF.md`, announces
+  the transfer over **weave**, and schedules a **durable-cron** successor session to continue —
+  keeping every session short and cheap (the defense against context rot + token burn). When asked
+  to "keep building"/"loop"/"run unattended", start with `forge-loop`, not this skill directly.
 
 ## Phase 0: Pre-flight (always run first)
 
@@ -37,6 +49,10 @@ The implementer follows the **`rust-feature-impl`** skill; the guardian runs tha
    (`meta git worktree create <slug> --all`, or `git worktree add ../envctl-<slug> -b <slug>`)
    before any mutation.
 2. **Context check** — decide the run mode from `_workspace/`:
+   - **`_workspace/HANDOFF.md` exists, or the request says "resume"/came from a relay cron/weave
+     nudge → Resume:** hand control to the `session-relay` skill's RESUME protocol (read the
+     checkpoint + weave inbox, verify baseline, ack, reset the per-session cycle counter), then
+     continue the loop via `forge-loop`. Do not start a fresh pipeline.
    - No `_workspace/` → **Initial run** (full pipeline).
    - `_workspace/` exists + user asks for a *partial* change ("redo just the implementation",
      "fix the guardian's findings") → **Partial re-run**: re-invoke only the relevant agent(s),
