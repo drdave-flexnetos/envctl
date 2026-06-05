@@ -1,28 +1,21 @@
-# Loop state — env-install-loop
-session_started: 2026-06-05T02:52:37Z
-loop: env-install-loop
-branch: env-install-loop
-worktree: /home/drdave/Desktop/meta/.worktrees/env-install-loop/envctl
+# Loop state — yazelix mission-control dashboard (post-feature handoff)
+session_started: 2026-06-05T19:xxZ
+loop: forge-loop (dashboard follow-ups + wire-live)
+branch: yazelix-dashboard
+worktree: /home/drdave/Desktop/meta/.worktrees/yazelix-dashboard/envctl
 cycle_budget: 3
-cycles_this_session: 2
-cycles_total: 18
-last_item: gpu-verify-scripts (SIGPIPE gate fix) + group-gpu-stack (detect-by-path) + re-lock
+cycles_this_session: 0
+cycles_total: 2
+last_item: Pass 1 + Pass 2 delivered (engine generator + envctl dashboard CLI/GUI + meta_dashboard_cli plugin + manifest component); both PRs open
 status: |
-  DONE. 45/46 declared components detected + healthy; zero drift. Only node-via-bun remains
-  undetected — TABLED by design (n8n needs real node; bun can't be n8n's node; reset refused
-  by fail-closed group-ai-clis reverse-dep guard).
-  This session (resumed fresh): merged origin/master (gpu-verify port #17 + auto-provision #15),
-  then closed the two previously by-design GPU gaps as REAL loop work:
-  (1) gpu-verify-scripts — fixed a SIGPIPE/pipefail bug in the shipped NVIDIA gate
-      (lspci | grep -q under pipefail → false "no GPU"); redeployed; install+verify GREEN.
-  (2) group-gpu-stack — detect now resolves nvcc by installed path (cuda-toolkit's verify
-      pattern), independent of the non-interactive-shell PATH accident.
-  doctor green; lock --check clean (46); kasetto sync --locked clean; build + no-c/shape/enable
-  PASS; gpu smoke test green (2x RTX 5090, torch sm_120, cargo-oxide, Podman CDI).
+  FEATURE COMPLETE, NOT YET LIVE. Mission-control dashboard built across 3 repos and
+  guardian-verified (all gates green, lock --check clean @ 47 components). Shipping is
+  gated on PR review/merge (auto-merge intentionally NOT enabled).
+  - envctl PR #23 -> develop (OPEN): https://github.com/FlexNetOS/envctl/pull/23
+  - meta   PR #7  -> main    (OPEN): https://github.com/FlexNetOS/meta/pull/7
+  - FlexNetOS/meta_dashboard_cli: created (private) + pushed to master (genesis).
+last_update: 2026-06-05T21:22Z
 needs_human_followups: |
-  - node-via-bun: manifest design — mark not-applicable when real Node in n8n range present
-    (or add node-real component + drop the group-ai-clis -> node-via-bun edge).
-  - CUDA non-interactive PATH: envctl wires cuda env into ~/.bashrc after the interactivity
-    guard, so nvcc isn't on PATH for non-interactive shells/systemd. Feature-Forge could wire
-    it system-wide (/etc/profile.d/cuda.sh). Detect is now truthful regardless.
-last_update: 2026-06-05T (resumed session)
+  - MERGE PRs #23 (develop) and #7 (main) after review — this is the gate before wiring live.
+  - broker unification: DROPPED from this backlog. weave is already upgrading to merge
+    weave+repowire+broker into one bus (handled elsewhere).
