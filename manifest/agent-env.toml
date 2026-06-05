@@ -1,0 +1,45 @@
+# agent-env.toml — the AI-agent environment layer.
+#
+# kasetto is the agent-env twin of envctl: same declarative + idempotent + content-locked
+# discipline, one layer up — it manages the agent's own toolkit (skills + MCP baseline) instead
+# of the OS toolchain. This component wires it INTO envctl's component system so a green box also
+# has its agent environment provisioned and locked, surfaced under the same `doctor`/`auto-detect`.
+#
+#   detect : kasetto binary present (cargo-installed, like rtk).
+#   verify : `kasetto sync --locked` clean — the agent toolkit matches kasetto.yaml -> kasetto.lock.
+#   install/fix : `kasetto sync` (provision/refresh .claude + .codex from the locked config).
+#   remove : `kasetto clean --project` (unprovision the installed skills/MCPs).
+#
+# NOTE: verify/install run from the repo root so kasetto resolves ./kasetto.yaml (scope: project),
+# exactly as the env-install-loop's `kasetto sync --locked` gate already does.
+
+[[component]]
+id = "kasetto"
+name = "kasetto (agent-env manager) + synced agent toolkit"
+description = "Declarative AI-agent environment manager; provisions the locked skills + MCP baseline (kasetto.yaml -> kasetto.lock) into .claude/.codex. detect = binary present; verify = `kasetto sync --locked` clean."
+requires = ["rustup"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v kasetto || [ -x \"$HOME/.local/bin/kasetto\" ] || [ -x \"$HOME/.cargo/bin/kasetto\" ]"]
+[component.install]
+kind = "script"
+script = '''
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+command -v kasetto >/dev/null || cargo install kasetto
+kasetto sync
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; kasetto --version && kasetto sync --locked"]
+[component.fix]
+kind = "script"
+script = '''
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+kasetto sync
+'''
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$PATH\"; kasetto clean --project"]
