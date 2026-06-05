@@ -49,10 +49,14 @@ Before looping, in the worktree:
 2. **Stop checks (in order):** backlog has no `- [ ]` → **DONE** (see criteria); 
    `cycles_this_session >= cycle_budget` → **HAND OFF** (invoke `session-relay`, then stop).
 3. **Pick** the top unchecked item (respect dependency order — install prerequisites first).
-4. **Install / repair it the declared, idempotent way:**
-   - Prefer `cargo run -p envctl -- install <id>` or `auto-fix <id>` — **dry-run first** to preview,
-     then `--apply`/`--build` to act. Or the component's lifecycle hooks per `env-toolchain-install`.
-   - Destructive ops are **fail-closed + dry-run by default**; never force past a refusing guard.
+4. **Install / repair it the declared, idempotent way** — walk this remediation ladder, fail-closed
+   at every rung, dry-run before any `--apply`:
+   - **install** — `cargo run -p envctl -- install <id>` (idempotent; a healthy component is a no-op).
+   - **auto-fix** — `auto-fix <id>` for a detected-but-unhealthy component.
+   - **reset → reinstall** — if it's wedged and auto-fix won't clear it, `reset <id> --apply` (remove
+     + unwire; destructive, so preview first and respect the `UuidResolves`/`NotLiveDevice`/
+     `NotMounted` guards) then `install <id> --apply`. This is the "cycle install and reset" path.
+   - Or the component's lifecycle hooks per `env-toolchain-install`. Never force past a refusing guard.
 5. **VERIFY (cross-boundary, not existence-only):** re-run the component's `verify` / `envctl doctor`;
    confirm the binary is actually **on PATH** and its **env vars/paths are set in a fresh shell**
    (source the rc or open a new shell — a tool installed but not wired is not done). Re-run
@@ -68,6 +72,16 @@ the same `/env-install-loop …` prompt verbatim. Choose the delay by what you'r
 apt/CUDA install → a longer poll; back-to-back light steps → a short warm-cache delay ≤270s). When
 you HAND OFF or finish, **omit** the ScheduleWakeup to end the loop. A cycle counts only when an
 install/repair attempt **completes** (healthy or blocked).
+
+### External-runner (auto-provision) mode — write a sentinel, don't self-pace
+When launched by the **`auto-provision`** runner (a fresh `claude -p` process per cycle — the
+prompt will say so), do **not** ScheduleWakeup. Run up to one cycle-budget of work, commit each
+cycle, then write **exactly one** sentinel under `_workspace/` and exit so the runner decides
+whether to respawn a fresh-context process:
+- everything verified DONE → `_workspace/DONE` (with the DONE-criteria evidence);
+- privilege/reboot/hardware wall → `_workspace/NEEDS-HUMAN` (with the reason);
+- more work remains → write `_workspace/HANDOFF.md` (via `session-relay`/`continuity-steward`) and exit.
+Also honor `_workspace/STOP` as a kill switch: if present, stop immediately.
 
 ## Cycle budget (handoff trigger)
 Per-session budget is **cycles-only** (no token-meter guessing — there is no live meter): default

@@ -86,7 +86,7 @@ requires = ["ghostty"]
 resolved = ""
 
 [components.gpu-verify-scripts]
-content_hash = "6856640c3772d786"
+content_hash = "1dff8765c57e6bcd"
 requires = [
     "cuda-oxide",
     "nvidia-container-toolkit",

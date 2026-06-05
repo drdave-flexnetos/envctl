@@ -261,13 +261,21 @@ args = ["-lc", "rm -rf \"$HOME/.venvs/torch\""]
 [[component]]
 id = "gpu-verify-scripts"
 name = "GPU smoke-test scripts"
-description = "Provisioning-only: ~/.local/bin/yazelix-gpu-verify.sh + post-reboot one-shot autostart are created by the wizard. envctl detects/removes them; it does not regenerate them (port of yazelix-setup.sh 3f is a later phase)."
+description = "~/.local/bin/yazelix-gpu-verify.sh + launcher + post-reboot one-shot autostart. install/fix REGENERATE them from the shipped yazelix-gpu-verify-install.sh (declarative port of yazelix-setup.sh 3f); detect/verify/remove unchanged. GPU-gated (no-op on a non-NVIDIA box)."
 requires = ["nvidia-open", "pytorch-venv", "cuda-oxide", "nvidia-container-toolkit"]
 gpu_required = true
 [component.detect]
 kind = "command"
 command = "bash"
 args = ["-lc", "[ -x \"$HOME/.local/bin/yazelix-gpu-verify.sh\" ]"]
+# install/fix regenerate the smoke-test + launcher + autostart from the shipped
+# installer (port of yazelix-setup.sh 3f). The installer self-gates on lspci nvidia.
+[component.install]
+kind = "shipped_script"
+path = "/usr/local/bin/yazelix-gpu-verify-install.sh"
+[component.fix]
+kind = "shipped_script"
+path = "/usr/local/bin/yazelix-gpu-verify-install.sh"
 # verify runs the shipped smoke test with $HOME expanded (ShippedScript paths are
 # NOT shell-expanded, so this is a Command hook); </dev/null answers its final read.
 [component.verify]
