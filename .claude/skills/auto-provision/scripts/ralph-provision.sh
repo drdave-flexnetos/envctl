@@ -24,6 +24,7 @@ BUDGET="${RALPH_BUDGET:-3}"                      # install cycles per fresh proc
 MAX_ITERS="${RALPH_MAX_ITERS:-50}"              # hard backstop on process restarts
 SLEEP_BETWEEN="${RALPH_SLEEP:-5}"               # seconds between iterations
 MODEL="${RALPH_MODEL:-opus}"
+RESEARCH="${RALPH_RESEARCH:-1}"                 # run the component-research/audit pass (1=on)
 WS="$WORKTREE/_workspace"
 
 log() { printf '[ralph %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
@@ -41,14 +42,26 @@ if [ "${RALPH_APPLY:-0}" = "1" ]; then
 else
   log "SAFE mode (default): destructive --apply/reset will be refused. Set RALPH_APPLY=1 to act."
 fi
+[ "$RESEARCH" = "1" ] && log "RESEARCH on: each agent audits components + appends upgrades to backlog (RALPH_RESEARCH=0 to skip)." \
+                      || log "RESEARCH off: install/repair only."
 
 # The per-iteration prompt. Resume from the committed checkpoint; do one budget of work; then write
 # exactly one sentinel and exit so this script decides whether to respawn.
+if [ "$RESEARCH" = "1" ]; then
+  RESEARCH_LINE="1b. Run the env-install-loop RESEARCH pass: deep-probe each declared component past
+   detect/verify (real end-to-end exercise, gate quality, version currency + advisories, cross-
+   component skew, hook hygiene, wiring reach) and auto-append classified items to backlog.md
+   (harden:/fix:/upgrade: = loop-fixable; feature: = route to feature-forge, surface only). Findings
+   must be evidence-based/sourced; offload probing to subagents. Read-only."
+else
+  RESEARCH_LINE="1b. (research pass disabled: RALPH_RESEARCH=0 — install/repair only.)"
+fi
 read -r -d '' PROMPT <<EOF || true
 /env-install-loop resume (external Ralph runner, fresh context).
 Branch/worktree: $WORKTREE.
 1. If _workspace/HANDOFF.md exists, follow session-relay RESUME from it (it is the authoritative
    signal); else DISCOVER gaps via envctl doctor + auto-detect and build _workspace/backlog.md.
+$RESEARCH_LINE
 2. Run up to $BUDGET install/repair cycles. Remediation ladder per item: install (dry-run -> apply)
    -> if detected-but-unhealthy and auto-fix won't resolve, reset --apply then install --apply ->
    verify on PATH + env vars in a FRESH shell -> commit per cycle. Destructive ops are fail-closed.
