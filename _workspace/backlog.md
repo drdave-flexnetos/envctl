@@ -41,24 +41,47 @@ apt base (direct `needs_sudo = true`, `apt-get`) — DONE (user authorized sudo)
 - [x] keepassxc — installed (/usr/bin/keepassxc), detected (no verify hook)
 - [x] virt-stack — installed (libvirt/qemu, virt-host-validate present), detect healthy
 
-CUDA repo chain (sudo dpkg / apt) — INSTALLING (background, multi-GB):
-- [ ] nvidia-cuda-repo — [INSTALLING] `sudo dpkg -i cuda-keyring` + `sudo apt-get update`
-- [ ] cuda-toolkit — [INSTALLING] apt, requires nvidia-cuda-repo
-- [ ] llvm-clang — [INSTALLING] apt, requires nvidia-cuda-repo
+CUDA repo chain (sudo dpkg / apt) — DONE:
+- [x] nvidia-cuda-repo — installed (cuda-keyring; ubuntu2604 sources)
+- [x] cuda-toolkit — installed (nvcc release 13.3 V13.3.33)
+- [x] llvm-clang — installed (clang-21 / LLVM 21; verify clang-21 --version OK)
 
 nix system config (writes /etc/nix) — DONE:
 - [x] nix-yazelix-cache — installed (yazelix.cachix.org substituter in /etc/nix/nix.custom.conf)
 
-transitively unblocked (sudo authorized):
+transitively unblocked (sudo authorized) — DONE:
 - [x] ghostty-default-terminal — installed (ghostty set as x-terminal-emulator alternative)
-- [ ] cuda-oxide — [INSTALLING in CUDA closure] requires cuda-toolkit + llvm-clang
-- [ ] nvidia-container-toolkit — [INSTALLING in CUDA closure] requires podman (OK now)
-- [ ] yazelix — [INSTALLING, heavy nix build] requires nix-yazelix-cache + home-manager + ghostty
-- [ ] yazelix-config — [INSTALLING] requires yazelix
-- [ ] yazelix-desktop — [INSTALLING] requires yazelix
+- [x] nvidia-container-toolkit — installed (/usr/bin/nvidia-ctk), detect healthy
+- [x] cuda-oxide — installed (cargo-oxide 0.1.0). Required a manifest fix: the install hook
+      didn't pin a toolchain, so it built on STABLE (RUSTUP_TOOLCHAIN leaked from `cargo run`)
+      and failed E0554 (cuda-core uses `#![feature(f16)]`, nightly-only). Fixed gpu.toml to
+      `cargo +nightly-2026-04-03 install` (overrides env + stable default). Re-locked.
+- [x] yazelix — installed (heavy nix build; detect healthy)
+- [x] yazelix-config — installed. Required deploying the shipped helper: the component runs
+      `/usr/local/bin/yazelix-config.sh` (placed there by autoinstall.yaml at OS-install time),
+      absent on this box. Deployed all 3 manifest-referenced shipped scripts from assets/scripts/
+      to /usr/local/bin (install -D -m755), mirroring autoinstall.yaml lines 160-161.
+- [x] yazelix-desktop — installed (detect healthy)
 
-## Notes
-- `podman` shows `(absent)` in doctor toolchains; everything else in doctor's toolchain
-  list is green. The 14 blocked items are the real gap to a fully-green box and require
-  one privileged human session (apt + cuda-keyring + /etc/nix), after which yazelix /
-  cuda-oxide / nvidia-container-toolkit unblock and the loop can finish them.
+## Final state (2026-06-05) — 16 of 17 declared components healthy
+DONE for everything the loop+sudo can reach. Drift: only `node-via-bun` (tabled by design).
+- doctor: all toolchains green; sudo cached; podman 5.7.0; nvidia driver loaded.
+- auto-detect: zero non-missing drift; only node-via-bun missing.
+- lock --check clean (46 comps); kasetto sync --locked clean; build + no-c/shape/enable PASS.
+- PATH/env verified in a fresh **interactive** shell: nvcc 13.3, CUDA_HOME, CUDA_OXIDE_LLC,
+  cargo-oxide, secretd/secretctl, torch+CUDA (2x RTX 5090).
+
+## By-design non-loop items (NOT failures — surfaced for the human)
+- node-via-bun — TABLED (see above): inapplicable on an n8n box; real node v22 is correct.
+- gpu-verify-scripts — envctl detects/removes but does NOT regenerate it (wizard-created;
+  port of yazelix-setup.sh step 3f is an explicitly later phase). detected=False is expected.
+- group-gpu-stack — meta-aggregator; detect=False ONLY because envctl runs detect via a
+  non-interactive `bash -lc` that hits ~/.bashrc's line-10 early-return, so the cuda PATH
+  isn't loaded for detect. The wiring IS correct (verified in an interactive shell). This is
+  an envctl detect-method limitation, not a provisioning gap — Feature-Forge follow-up.
+
+## Manifest fixes made by this loop (rust-native, committed, re-locked)
+1. env-ctl.toml — reversed MSRV `sort -V -C` gate (rejected every cargo >= 1.80).
+2. gpu.toml cuda-oxide — pinned `cargo +nightly-2026-04-03` (was building on stable -> E0554).
+3. Deployed shipped scripts assets/scripts/{yazelix-config,yazelix-setup,ubuntu-boot-repair}.sh
+   -> /usr/local/bin (mirrors autoinstall.yaml; were missing on this non-autoinstalled box).

@@ -1,0 +1,94 @@
+sudo: A terminal is required to authenticate
+    could not pre-authorize sudo (no TTY / not a sudoer?) — privileged steps will fail fast. Run from a real terminal.
+[1;36m==> [1/7] nvidia-cuda-repo :: Install[0m
+  — skip nvidia-cuda-repo (already present)
+[1;36m==> [2/7] rustup :: Install[0m
+  — skip rustup (already present)
+[1;36m==> [3/7] cuda-toolkit :: Install[0m
+    wiring applied
+  — skip cuda-toolkit (already present)
+[1;36m==> [4/7] llvm-clang :: Install[0m
+  — skip llvm-clang (already present)
+[1;36m==> [5/7] nvidia-open :: Install[0m
+  — skip nvidia-open (already present)
+[1;36m==> [6/7] rust-nightly-cuda-oxide :: Install[0m
+  — skip rust-nightly-cuda-oxide (already present)
+[1;36m==> [7/7] cuda-oxide :: Install[0m
+        Updating git repository `https://github.com/NVlabs/cuda-oxide.git`
+      Installing cargo-oxide v0.1.0 (https://github.com/NVlabs/cuda-oxide.git#1327ee55)
+        Updating crates.io index
+         Locking 64 packages to latest Rust 1.96.0-nightly compatible versions
+          Adding bindgen v0.71.1 (available: v0.72.1)
+          Adding libloading v0.8.9 (available: v0.9.0)
+          Adding object v0.36.7 (available: v0.39.1)
+       Compiling proc-macro2 v1.0.106
+       Compiling quote v1.0.45
+       Compiling unicode-ident v1.0.24
+       Compiling glob v0.3.3
+       Compiling cfg-if v1.0.4
+       Compiling prettyplease v0.2.37
+       Compiling libc v0.2.186
+       Compiling memchr v2.8.1
+       Compiling minimal-lexical v0.2.1
+       Compiling regex-syntax v0.8.10
+       Compiling either v1.16.0
+       Compiling bindgen v0.71.1
+       Compiling log v0.4.32
+       Compiling rustc-hash v2.1.2
+       Compiling bitflags v2.12.1
+       Compiling crc32fast v1.5.0
+       Compiling shlex v1.3.0
+       Compiling foldhash v0.1.5
+       Compiling hashbrown v0.17.1
+       Compiling zerocopy v0.8.50
+       Compiling thiserror v2.0.18
+       Compiling serde_core v1.0.228
+       Compiling object v0.36.7
+       Compiling equivalent v1.0.2
+       Compiling utf8parse v0.2.2
+       Compiling anyhow v1.0.102
+       Compiling is_terminal_polyfill v1.70.2
+       Compiling colorchoice v1.0.5
+       Compiling anstyle v1.0.14
+       Compiling anstyle-query v1.1.5
+       Compiling winnow v1.0.3
+       Compiling heck v0.5.0
+       Compiling reserved-oxide-symbols v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/reserved-oxide-symbols)
+       Compiling strsim v0.11.1
+       Compiling clap_lex v1.1.0
+       Compiling toml_writer v1.1.1+spec-1.1.0
+       Compiling libloading v0.8.9
+       Compiling itertools v0.13.0
+       Compiling hashbrown v0.15.5
+       Compiling anstyle-parse v1.0.0
+       Compiling clang-sys v1.8.1
+       Compiling anstream v1.0.0
+       Compiling nom v7.1.3
+       Compiling toml_parser v1.1.2+spec-1.1.0
+       Compiling clap_builder v4.6.0
+       Compiling indexmap v2.14.0
+       Compiling syn v2.0.117
+       Compiling regex-automata v0.4.14
+       Compiling cexpr v0.6.0
+       Compiling regex v1.12.3
+       Compiling serde_spanned v1.1.1
+       Compiling toml_datetime v1.1.1+spec-1.1.0
+       Compiling toml v1.1.2+spec-1.1.0
+       Compiling zerocopy-derive v0.8.50
+       Compiling thiserror-impl v2.0.18
+       Compiling clap_derive v4.6.1
+       Compiling cuda-macros v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/cuda-macros)
+       Compiling libnvvm-sys v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/libnvvm-sys)
+       Compiling nvjitlink-sys v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/nvjitlink-sys)
+       Compiling clap v4.6.1
+       Compiling oxide-artifacts v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/oxide-artifacts)
+       Compiling cuda-bindings v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/cuda-bindings)
+       Compiling half v2.7.1
+       Compiling cuda-core v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/cuda-core)
+       Compiling cuda-host v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/cuda-host)
+       Compiling cargo-oxide v0.1.0 (/home/drdave/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114/1327ee5/crates/cargo-oxide)
+        Finished `release` profile [optimized] target(s) in 6.47s
+      Installing /home/drdave/.cargo/bin/cargo-oxide
+       Installed package `cargo-oxide v0.1.0 (https://github.com/NVlabs/cuda-oxide.git#1327ee55)` (executable `cargo-oxide`)
+[1;32m  ✓ cuda-oxide Install[0m
+[1;32mdone.[0m
