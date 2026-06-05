@@ -27,6 +27,24 @@ kasetto is the toolkit that *provisions and locks* the agent environment from a 
 - **Reproducibility test:** a second `kasetto sync` is a **no-op** (lock authoritative). If it isn't, something drifted — investigate before proceeding.
 - **CI gate:** `kasetto sync --locked` never fetches and fails if the lock can't satisfy the config — wire it into CI so the committed environment is enforced.
 
+## kasetto ⟷ envctl: two layers — leverage it right
+
+kasetto is **not** a rival to envctl; it is the **agent-layer twin** of envctl — same declarative, idempotent, content-locked, drift-detecting discipline, applied one layer up. Leverage them as composing layers, not duplicates:
+
+| | **envctl** | **kasetto** |
+|---|---|---|
+| Manages | the **workstation / OS** (toolchains, GPU, PATH, env, systemd) | the **agent's toolkit** (skills · MCPs · commands) |
+| Targets | apt · nix · `/usr/local` · `~/.bashrc` · systemd | `.claude/` + `.codex/` (project or global `~/.claude`) |
+| Lock / verbs | `envctl.lock`; `doctor`/`install`/`auto-fix`/`reset`/`lock --check` | `kasetto.lock`; `sync`/`--locked`/`list`/`doctor`/`clean`/`--update` |
+
+**The rules that make it pay off:**
+1. **One source of truth — never hand-edit what kasetto owns.** Change `agent-skills/` + `kasetto.yaml`, then `kasetto sync`; never touch generated `.claude/skills/*`, `.mcp.json`, `.codex/config.toml`. Enforce with `kasetto sync --locked`.
+2. **Multi-agent parity for free.** One config keeps `claude-code` and `codex` byte-identical — add an agent under `agent:`, don't maintain two configs by hand.
+3. **Scope split.** `scope: project` for repo-specific toolkits (envctl conventions); a **global** `~/.config/kasetto/kasetto.yaml` for the personal baseline (general MCPs) that follows you everywhere.
+4. **Shareable sources.** kasetto can source skills from a **git repo / URL with moving-ref → locked-hash pinning** (`--update` re-resolves + relocks). Publish a canonical `agent-skills` upstream and point projects at it instead of copy-pasting; envctl itself may keep a local `./agent-skills` mirror for fetch-free operation.
+5. **Know what stays OUT of kasetto.** The Feature Forge harness (`feature-forge`, `forge-loop`, `env-install-loop`, `auto-provision`, `session-relay`, `rust-feature-impl`) is hand-authored and git-tracked — bespoke, fast-iterating orchestration. kasetto is for the **stable, shared, locked baseline** only.
+6. **One `doctor` over both layers.** A `kasetto` component in the envctl manifest (`manifest/agent-env.toml`) makes "agent env provisioned + locked" just another component of a green box: detect = binary present, verify = `kasetto sync --locked` clean, install/fix = `kasetto sync`.
+
 ## Stabilization Workflow
 
 1. `kasetto doctor` (and `envctl doctor`) → baseline health.
