@@ -1,0 +1,78 @@
+# manifest/grit.toml — grit: parallel-agent AST git-lock coordinator (FlexNetOS/grit)
+#
+# grit locks at the FUNCTION/AST level (tree-sitter), not the file/line level, so N AI agents can
+# edit the same files without merge conflicts (claim -> work in an isolated worktree -> done).
+# envctl, as the box's environment controller, owns the grit *binary* the same way it owns every
+# other toolchain: a declarative component with detect/install/verify/fix/remove lifecycle hooks.
+#
+# TRUST-BOUNDARY NOTE (deliberate): grit links C (rusqlite `bundled` SQLite) + the aws/azure SDKs.
+# That is FINE here because grit is an EXTERNAL TOOL BINARY, never linked into any envctl crate.
+# It is managed as *data* (this TOML), NOT as code — it MUST NOT be added to Cargo.toml
+# [workspace.members] nor to any crate's [dependencies], or `ci/gates/no-c.sh` would (correctly)
+# fail. The workspace stays pure-Rust + no-C in the trust boundary; grit lives beside it on PATH.
+#
+# Installed box-wide to ~/.cargo/bin from the meta-cloned checkout (offline, reproducible via the
+# committed grit/Cargo.lock). grit is per-repo at use time (`grit init` builds a repo's .grit/
+# symbol index) — that is a usage step, not an install step, so it is out of scope for this comp.
+
+[[component]]
+id = "grit"
+name = "grit — parallel-agent AST git-lock coordinator"
+description = "Function-level (tree-sitter) git locking so N AI agents edit the same files without merge conflicts. External tool binary on ~/.cargo/bin; NOT linked into any envctl crate."
+requires = ["rustup"]      # cargo + stable >= 1.80 (id "rustup" defined in manifest/base.toml)
+destructive = false
+
+# DETECT == "already present" predicate (read-only; feeds auto-detect + drives install/doctor).
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "command -v grit >/dev/null || [ -x \"$HOME/.cargo/bin/grit\" ]"]
+
+# INSTALL: MSRV-gate (fail-closed, never silently upgrade), then build+place the binary from the
+# meta-cloned checkout. `--locked` honours grit's committed Cargo.lock for a reproducible build.
+[component.install]
+kind = "script"
+script = '''
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# MSRV gate: pass iff cargo >= 1.80.0. With the MSRV line FIRST, `sort -V -C` succeeds only when
+# the pair is ascending (1.80.0 <= $ver). (Same ordering fix as env-ctl.toml — do NOT reverse.)
+ver="$(cargo --version | awk '{print $2}')"
+printf '1.80.0\n%s\n' "$ver" | sort -V -C || { echo "FATAL: cargo $ver < MSRV 1.80"; exit 1; }
+
+# grit lives in the meta workspace (registered in ../.meta.yaml, .gitignore'd, its own repo).
+repo="${GRIT_REPO:-$HOME/Desktop/meta/grit}"
+test -d "$repo" || { echo "FATAL: grit checkout not found at $repo (set GRIT_REPO)"; exit 1; }
+
+cargo install --path "$repo" --locked
+'''
+
+# VERIFY: the installed binary answers. Read-only; a missing/broken grit reports verify=false
+# (drift visible) WITHOUT triggering a destructive fix — detect, not verify, is the install gate.
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; grit --version >/dev/null"]
+
+# FIX: idempotent rebuild+reinstall (force-overwrite). The dev-tools `cargo install --force` idiom.
+[component.fix]
+kind = "script"
+script = '''
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$PATH"
+repo="${GRIT_REPO:-$HOME/Desktop/meta/grit}"
+test -d "$repo" || { echo "FATAL: grit checkout not found at $repo (set GRIT_REPO)"; exit 1; }
+cargo install --path "$repo" --force --locked
+'''
+
+# REMOVE: uninstall the binary. `|| true` keeps reset idempotent if grit was never installed.
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo uninstall grit || true"]
+
+# ---- WIRING: ~/.cargo/bin is already on PATH via other components; declared so reset can
+# ---- reason about it reversibly. No shell_rc / systemd / data_paths — grit is a plain binary.
+[component.wiring]
+path_entries = ["~/.cargo/bin"]
