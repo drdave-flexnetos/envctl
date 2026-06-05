@@ -5,6 +5,20 @@ recipe independently — the implementer running it first means fewer round-trip
 runs from the **worktree root**. Treat an *errored* command (not just a failed assertion) as a
 FAIL, fail-closed — never read an empty/errored result as "clean."
 
+## 0. Two environment realities — handle these first
+- **rtk wraps `cargo`/`git`.** The shell hook rewrites these to `rtk`, which *summarizes* output
+  and can misreport exit codes and fmt/clippy diagnostics. When precise output matters, run
+  `rtk proxy <cmd>` (raw passthrough) **or** redirect to a file and read it; capture the exit code
+  with `; echo "exit=$?"` immediately after the command (not after a pipe).
+- **Floating `stable` toolchain.** `rust-toolchain.toml` pins `channel = "stable"`, which on a
+  given machine may be much newer than the MSRV (1.80) — newer rustfmt/clippy then flag the whole
+  workspace. **Separate feature-introduced issues from pre-existing baseline:** stash only the
+  changed files and re-run the check —
+  `git stash push -q <changed files>; <check>; git stash pop -q`. If the same issue appears with
+  the feature stashed (or in files the change never touched), it is **baseline** — report it as a
+  NOTE, not a blocker. Only issues that appear *because of* the change are findings. (There is no
+  `cargo fmt --check` CI gate in this repo; fmt is a local discipline.)
+
 ## Table of contents
 1. The three CI gates
 2. Cargo checks (fmt / clippy / test)

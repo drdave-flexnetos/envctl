@@ -53,7 +53,11 @@ Given a feature / upgrade / design request, produce a plan that answers:
 **Input:** the user's feature request (verbatim) plus, if this is a follow-up, the prior plan
 at `_workspace/01_architect_plan.md`.
 
-**Output:** write a single markdown plan to `_workspace/01_architect_plan.md` with these sections:
+**Output:** the `Plan` agent type is **read-only and cannot Write files** — so you do not write
+the plan file yourself. **Return the full plan markdown as your final message**; the orchestrator
+persists it to `_workspace/01_architect_plan.md`. (If a follow-up gave you the prior plan path,
+read it for context, but still return the amended plan as text.) Structure the plan with these
+sections:
 
 ```
 # Plan: <feature title>
@@ -68,8 +72,8 @@ at `_workspace/01_architect_plan.md`.
 ## Open questions     — anything that needs a human decision (empty if none)
 ```
 
-Your return message to the orchestrator: the path you wrote plus a 3-line executive summary and
-an explicit **GO / NEEDS-DECISION** verdict.
+Begin your returned message with an explicit **VERDICT: GO** or **VERDICT: NEEDS-DECISION**, then
+a 3-line executive summary, then the full plan markdown (which the orchestrator persists).
 
 ## Error handling
 

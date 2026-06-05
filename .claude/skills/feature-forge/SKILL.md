@@ -49,8 +49,10 @@ The implementer follows the **`rust-feature-impl`** skill; the guardian runs tha
 ## Phase 1: Design (feature-architect)
 
 Spawn `feature-architect` with the verbatim request. It reads the code (code-intelligence, not
-grep), the relevant `docs/`, verifies external APIs against primary sources, and writes
-`_workspace/01_architect_plan.md` with an explicit **GO / NEEDS-DECISION** verdict.
+grep), the relevant `docs/`, and verifies external APIs against primary sources. The `Plan` agent
+type is **read-only and cannot Write**, so the architect **returns** the plan as text and **you
+(the orchestrator) persist it** to `_workspace/01_architect_plan.md`. Read its leading
+**VERDICT: GO / NEEDS-DECISION**.
 
 - **NEEDS-DECISION** → surface the architect's open questions to the user and stop; resume when
   answered. Do not let the implementer guess past a design fork.
@@ -98,7 +100,15 @@ Spawn `invariant-guardian` with the plan + implementer log. It runs the three CI
 (`01_architect_plan.md`, `02_implementer_log.md`, `03_guardian_report.md`). Pass artifact **paths**
 to each agent, not their full contents. The code itself is the implementer's primary output (in
 the worktree); `_workspace/` is the audit trail — preserve it, don't delete it on success.
-**Return-value-based** for each agent's headline verdict (the one-line status it returns to you).
+**Return-value-based** for each agent's headline verdict (the one-line status it returns to you) —
+and note that the **architect (`Plan` type) is read-only**, so it returns its plan as text and you
+persist `01_architect_plan.md` for it; the implementer and guardian (`general-purpose`) write their
+own artifacts.
+
+**Environment gotcha (envctl):** the shell hook rewrites `cargo`/`git` to **rtk**, which
+*summarizes* output and can corrupt exit codes and fmt/clippy diagnostics. For any verification
+where precise output matters, use `rtk proxy <cmd>` (raw passthrough) or redirect to a file and
+read it; capture exit codes with `; echo "exit=$?"` immediately after the command.
 
 ## Error handling
 

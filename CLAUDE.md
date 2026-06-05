@@ -136,3 +136,5 @@ general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-ma
 | Date | Change | Target | Reason |
 |------|--------|--------|--------|
 | 2026-06-04 | Initial harness build | agents/{feature-architect,rust-implementer,invariant-guardian}; skills/{feature-forge,rust-feature-impl} | Build a feature-delivery construction crew (design/implement/verify) that upholds the non-negotiable invariants |
+| 2026-06-04 | Architect uses return-value (not Write) | agents/feature-architect; skills/feature-forge | Smoke test: `Plan` type is read-only and cannot Write its plan file — orchestrator persists the returned text |
+| 2026-06-04 | Add rtk-proxy + baseline-stash guidance | skills/rust-feature-impl/references/verification; skills/feature-forge | Smoke test: rtk summarizes cargo/git output (corrupts fmt/clippy diagnostics); floating `stable`=1.96 causes pre-existing workspace fmt/clippy drift to be mis-attributed to the change |
