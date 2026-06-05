@@ -95,6 +95,11 @@ requires = [
 ]
 resolved = ""
 
+[components.grit]
+content_hash = "30a41c0cf666f216"
+requires = ["rustup"]
+resolved = ""
+
 [components.group-ai-clis]
 content_hash = "120fb5a65c2d2201"
 requires = [
