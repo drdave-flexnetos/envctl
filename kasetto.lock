@@ -10,7 +10,7 @@ skills:
     scope: project
   ./agent-skills::env-stabilize:
     destination: .claude/skills/env-stabilize
-    hash: a8fed861f8b5713e4f387072e2e7daab9508d267d845e8161a421a38ed1333d3
+    hash: 51f1e9fc9cd4e22a6c875498678a9861a42cc7787a6ae1f4d9d7e236ae548885
     skill: env-stabilize
     description: '"How to keep the environment reproducible and drift-free — the detect/drift, doctor-diagnostic, and content-hashed lock discipline envctl uses, plus how kasetto provisions and locks the agent config. Use when checking environment health, diagnosing drift, regenerating or verifying a lock, or making the agent environment reproducible. Triggers: ''is the environment stable'', ''check for drift'', ''run doctor'', ''the lock is stale'', ''make this reproducible'', ''env is inconsistent'', ''sync the agents''."'
     source: ./agent-skills
