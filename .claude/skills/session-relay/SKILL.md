@@ -1,11 +1,11 @@
 ---
 name: session-relay
-description: "Hand off a long-running Feature Forge loop to a FRESH session before context rot / token burn degrade it, and resume from a handoff. ALWAYS use when: the forge-loop cycle budget is reached, the user says 'hand off', 'transfer the session', 'continue in a new session', 'pass the baton', or a session needs to 'resume from handoff'/'pick up the loop'. Coordinates the transfer over weave and schedules the successor with a durable local cron. Do NOT use for one-off features or normal in-session work."
+description: "Hand off a long-running harness loop (the feature loop `forge-loop` OR the environment loop `env-install-loop`) to a FRESH session before context rot / token burn degrade it, and resume from a handoff. ALWAYS use when: a loop's cycle budget is reached, the user says 'hand off', 'transfer the session', 'continue in a new session', 'pass the baton', or a session needs to 'resume from handoff'/'pick up the loop'/'resume the env install'. Coordinates the transfer over weave (cross-identity heartbeat) and schedules a best-effort successor cron — the committed checkpoint is the real resume signal. Do NOT use for one-off features or normal in-session work."
 ---
 
-# Session Relay (weave handoff + durable-cron successor)
+# Session Relay (weave handoff + cron successor)
 
-You carry the Feature Forge loop across session boundaries with **zero loss**. A single session
+You carry a harness loop (feature or environment) across session boundaries with **zero loss**. A single session
 degrades as context grows (rot) and gets expensive (token burn); the loop's defense is to run as a
 chain of short sessions, each handing a durable checkpoint to the next. This skill is that handoff —
 and the resume on the other side. It has two entry points: **HAND OFF** and **RESUME**.
