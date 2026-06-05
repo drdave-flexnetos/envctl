@@ -3,8 +3,9 @@
 //! `--apply` to act. `auto-detect` is read-only and prints a real EnvReport.
 use clap::{Parser, Subcommand};
 use envctl_engine::{
-    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, DriftSummary, Engine, EnvReport, Event,
-    EventSink, OpStatus, Phase, Refactor, RefactorGoal, RenameRule, ResetGates, RunPlan, Severity,
+    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, DashboardSpec, DriftSummary, Engine,
+    EnvReport, Event, EventSink, OpStatus, Phase, Refactor, RefactorGoal, RenameRule, ResetGates,
+    RunPlan, Severity,
 };
 
 #[derive(Parser)]
@@ -151,6 +152,29 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Render the meta mission-control zellij dashboard from `.meta.yaml`.
+    /// Default = print the KDL to stdout (read-only). `--deploy` previews the
+    /// write (dry-run); `--apply` performs it; `--json` emits the DashboardPlan.
+    Dashboard {
+        /// Explicit `.meta.yaml` path (else walk up from CWD / use $META_FILE).
+        #[arg(long)]
+        meta_file: Option<std::path::PathBuf>,
+        /// Max panes per tab before spilling into numbered sub-tabs.
+        #[arg(long, default_value_t = 6)]
+        panes_per_tab: usize,
+        /// Layout name (the `<name>.kdl` file stem + deploy target).
+        #[arg(long, default_value = "mission-control")]
+        name: String,
+        /// Deploy the layout to the yazelix zellij layouts dir (dry-run unless --apply).
+        #[arg(long)]
+        deploy: bool,
+        /// With --deploy: actually write the file (else preview).
+        #[arg(long)]
+        apply: bool,
+        /// With --deploy --apply: back up + clobber a non-envctl file at the target.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -256,6 +280,25 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Cmd::Doctor => print_doctor(&engine, json),
+        Cmd::Dashboard {
+            meta_file,
+            panes_per_tab,
+            name,
+            deploy,
+            apply,
+            force,
+        } => run_dashboard(
+            &engine,
+            DashboardArgs {
+                meta_file,
+                panes_per_tab,
+                name,
+                deploy,
+                apply,
+                force,
+            },
+            json,
+        ),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => {
@@ -376,7 +419,11 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!(e))?;
                 eng.add_repo(spec, dry_run, &sink)?.ok()
             }
-            Cmd::AutoDetect { .. } | Cmd::Graph { .. } | Cmd::Lock { .. } | Cmd::Doctor => {
+            Cmd::AutoDetect { .. }
+            | Cmd::Graph { .. }
+            | Cmd::Lock { .. }
+            | Cmd::Doctor
+            | Cmd::Dashboard { .. } => {
                 unreachable!("handled in main")
             }
         };
@@ -396,6 +443,73 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("worker panicked"))??;
     if !ok {
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+struct DashboardArgs {
+    meta_file: Option<std::path::PathBuf>,
+    panes_per_tab: usize,
+    name: String,
+    deploy: bool,
+    apply: bool,
+    force: bool,
+}
+
+/// `envctl dashboard`. Read-only by default (render the KDL to stdout). `--deploy`
+/// previews the write; `--deploy --apply` performs it (fail-closed in the engine).
+/// `--json` emits the DashboardPlan. Runs on the main thread (render is read-only;
+/// deploy is fail-closed in the engine).
+fn run_dashboard(engine: &Engine, args: DashboardArgs, json: bool) -> anyhow::Result<()> {
+    let (sink, _rx) = EventSink::channel();
+    let start = std::env::current_dir()?;
+    let spec = DashboardSpec {
+        name: args.name,
+        panes_per_tab: args.panes_per_tab,
+        ..DashboardSpec::default()
+    };
+
+    if args.deploy {
+        // dry-run unless --apply (fail-closed default).
+        let dry_run = !args.apply;
+        let plan = engine.dashboard(start.clone(), args.meta_file.clone(), spec.clone(), &sink)?;
+        let outcome =
+            engine.deploy_dashboard(start, args.meta_file, spec, dry_run, args.force, &sink)?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "plan": plan,
+                    "deploy": outcome,
+                }))?
+            );
+        } else {
+            for note in &outcome.notes {
+                println!("  {note}");
+            }
+            if outcome.applied {
+                println!(
+                    "\x1b[1;32m✓ deployed {} ({} tabs)\x1b[0m",
+                    outcome.target.display(),
+                    plan.tabs.len()
+                );
+            } else {
+                println!(
+                    "\x1b[1;33m· dry-run: pass --apply to write {} ({} tabs)\x1b[0m",
+                    outcome.target.display(),
+                    plan.tabs.len()
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Default: render-only.
+    let plan = engine.dashboard(start, args.meta_file, spec, &sink)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        print!("{}", plan.kdl);
     }
     Ok(())
 }

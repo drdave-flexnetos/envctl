@@ -4,6 +4,7 @@
 //! CLI drains the same vocabulary. (`EventSink::channel()`, not `new()`, keeps
 //! clippy's `new_ret_no_self` happy — it returns a channel pair, not `Self`.)
 use crate::component::Phase;
+use crate::dashboard::{DashboardPlan, DeployOutcome};
 use crate::model::{EnvReport, OpResult, RunSummary};
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{Receiver, Sender};
@@ -43,6 +44,15 @@ pub enum Event {
     },
     RunFinished {
         summary: RunSummary,
+    },
+    /// The rendered mission-control dashboard plan (read-only render result).
+    /// Drives the CLI stdout/JSON output + the GUI dashboard preview.
+    Dashboard {
+        plan: DashboardPlan,
+    },
+    /// The outcome of a dashboard deploy (dry-run preview or applied write).
+    DashboardDeployed {
+        outcome: DeployOutcome,
     },
 }
 

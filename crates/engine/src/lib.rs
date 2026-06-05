@@ -5,6 +5,7 @@
 pub mod addrepo; // Phase 4: the staged build-from-source pipeline + confined AI agent
 pub mod command;
 pub mod component; // Component, Hook, Guard, Phase, HookRunner
+pub mod dashboard; // meta mission-control: read .meta.yaml -> render zellij KDL layout
 pub mod detect; // EnvReport assembly: PCI floor / nvidia-smi / sysinfo / which probes
 pub mod detect_build; // Phase 4: build-system detector table -> BuildPlan
 pub mod drift; // pure diff(EnvReport, Registry) -> Vec<DriftItem>
@@ -24,6 +25,10 @@ pub mod wiring; // apply()/revert() for Wiring (shell_rc backup-then-excise) // 
 
 pub use command::{run_event_loop, EngineCommand, EngineEvent, TelemetryControl};
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
+pub use dashboard::{
+    DashboardPane, DashboardPlan, DashboardSpec, DashboardTab, DeployOutcome, MetaRepo,
+    MetaWorkspace,
+};
 pub use drift::DriftSummary;
 pub use error::{EngineError, RunContext};
 pub use event::{Event, EventSink, GpuSample, Stream, Telemetry};
@@ -143,5 +148,47 @@ impl Engine {
             dry_run,
             sink,
         )
+    }
+
+    /// Read-only: locate + read `.meta.yaml` (walking up from `start`, or the
+    /// override) and render the zellij dashboard layout. Never writes. Emits a
+    /// final `Event::Dashboard` with the plan. Used identically by `envctl
+    /// dashboard` and the GUI parity action.
+    pub fn dashboard(
+        &self,
+        start: PathBuf,
+        meta_file: Option<PathBuf>,
+        spec: DashboardSpec,
+        sink: &EventSink,
+    ) -> anyhow::Result<DashboardPlan> {
+        let file = dashboard::locate_meta_file(&start, meta_file.as_deref())?;
+        let workspace = dashboard::read_workspace(&file)?;
+        let plan = dashboard::render(&workspace, &spec);
+        sink.emit(Event::Dashboard { plan: plan.clone() });
+        Ok(plan)
+    }
+
+    /// Fail-closed deploy of the rendered dashboard layout to the yazelix zellij
+    /// layouts dir. DRY-RUN by default; the write only happens with `dry_run =
+    /// false`. Refuses to clobber a non-envctl file without `force`. Emits the
+    /// `Event::Dashboard` plan plus a `DashboardDeployed` outcome.
+    pub fn deploy_dashboard(
+        &self,
+        start: PathBuf,
+        meta_file: Option<PathBuf>,
+        spec: DashboardSpec,
+        dry_run: bool,
+        force: bool,
+        sink: &EventSink,
+    ) -> anyhow::Result<DeployOutcome> {
+        let file = dashboard::locate_meta_file(&start, meta_file.as_deref())?;
+        let workspace = dashboard::read_workspace(&file)?;
+        let plan = dashboard::render(&workspace, &spec);
+        sink.emit(Event::Dashboard { plan: plan.clone() });
+        let outcome = dashboard::deploy(&plan, dry_run, force)?;
+        sink.emit(Event::DashboardDeployed {
+            outcome: outcome.clone(),
+        });
+        Ok(outcome)
     }
 }

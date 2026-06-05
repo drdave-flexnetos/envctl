@@ -9,9 +9,11 @@
 //! / unfocused), so a long `engine.run` never starves telemetry.
 use crate::{
     component::Phase,
+    dashboard::DashboardSpec,
     model::{AddRepoSpec, RunPlan},
     Engine, Event, EventSink,
 };
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -23,10 +25,36 @@ use std::time::Duration;
 #[allow(clippy::large_enum_variant)]
 pub enum EngineCommand {
     Detect,
-    Install { targets: Vec<String>, dry_run: bool },
-    Fix { targets: Vec<String>, dry_run: bool },
-    Remove { targets: Vec<String>, dry_run: bool },
-    AddRepo { spec: AddRepoSpec, dry_run: bool },
+    Install {
+        targets: Vec<String>,
+        dry_run: bool,
+    },
+    Fix {
+        targets: Vec<String>,
+        dry_run: bool,
+    },
+    Remove {
+        targets: Vec<String>,
+        dry_run: bool,
+    },
+    AddRepo {
+        spec: AddRepoSpec,
+        dry_run: bool,
+    },
+    /// Read-only: render the mission-control dashboard from `.meta.yaml`.
+    Dashboard {
+        start: PathBuf,
+        meta_file: Option<PathBuf>,
+        spec: DashboardSpec,
+    },
+    /// Fail-closed deploy of the rendered dashboard (dry-run unless `dry_run=false`).
+    DeployDashboard {
+        start: PathBuf,
+        meta_file: Option<PathBuf>,
+        spec: DashboardSpec,
+        dry_run: bool,
+        force: bool,
+    },
     SampleTelemetry,
     Shutdown,
 }
@@ -161,6 +189,28 @@ pub fn run_event_loop(
             EngineCommand::AddRepo { spec, dry_run } => {
                 if let Err(e) = engine.add_repo(spec, dry_run, &sink) {
                     emit_setup_error(&sink, "add-repo", &e);
+                }
+            }
+            EngineCommand::Dashboard {
+                start,
+                meta_file,
+                spec,
+            } => {
+                if let Err(e) = engine.dashboard(start, meta_file, spec, &sink) {
+                    emit_setup_error(&sink, "dashboard", &e);
+                }
+            }
+            EngineCommand::DeployDashboard {
+                start,
+                meta_file,
+                spec,
+                dry_run,
+                force,
+            } => {
+                if let Err(e) =
+                    engine.deploy_dashboard(start, meta_file, spec, dry_run, force, &sink)
+                {
+                    emit_setup_error(&sink, "dashboard-deploy", &e);
                 }
             }
             EngineCommand::SampleTelemetry => {
