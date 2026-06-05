@@ -123,14 +123,18 @@ envctl feature, Engine method, CLI/GUI surface, secrets-stack capability, or man
 `invariant-guardian`. For **continuous/autonomous** runs over a backlog ("keep building", "loop on
 the roadmap", "run unattended") use **`forge-loop`**; for **cross-session handoff/resume** ("transfer
 the session", "resume from handoff") use **`session-relay`** (checkpoints via `continuity-steward`,
-coordinates over **weave**, schedules a durable-cron successor at a per-session cycle budget). Simple
-questions and trivial edits may be answered/done directly. (Pure env install →
-`env-toolchain-install`; drift/lock/doctor → `env-stabilize`; conventions → `agent-env-config`.)
+coordinates over **weave**, schedules a best-effort successor cron at a per-session cycle budget).
+To **provision the whole box / install all toolchains, PATH, and env vars in a loop until
+`doctor` is green** ("install everything", "set up the box", "loop until installed"), use
+**`env-install-loop`** (the same loop+relay continuity, driving envctl's `doctor`/`install`/
+`auto-fix` verbs + `env-toolchain-install`). Simple questions and trivial edits may be answered/done
+directly. (A SINGLE component install → `env-toolchain-install`; drift/lock/doctor → `env-stabilize`;
+conventions → `agent-env-config`.)
 
 **Placement:** the harness is **hand-authored and git-tracked**, intentionally *outside* the
 kasetto pipeline. Agent definitions live in `.claude/agents/*.md` and the harness skills
-(`feature-forge`, `rust-feature-impl`, `forge-loop`, `session-relay`) live directly in
-`.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
+(`feature-forge`, `rust-feature-impl`, `forge-loop`, `session-relay`, `env-install-loop`) live
+directly in `.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
 `kasetto.lock`, and not produced by `kasetto sync`. (Note: this is a deliberate exception to the
 general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-managed skills remain
 `agent-env-config`, `env-stabilize`, `env-toolchain-install`.)
@@ -143,3 +147,4 @@ general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-ma
 | 2026-06-04 | Add rtk-proxy + baseline-stash guidance | skills/rust-feature-impl/references/verification; skills/feature-forge | Smoke test: rtk summarizes cargo/git output (corrupts fmt/clippy diagnostics); floating `stable`=1.96 causes pre-existing workspace fmt/clippy drift to be mis-attributed to the change |
 | 2026-06-04 | Add continuity layer: Ralph loop + session handoff | agents/continuity-steward; skills/{forge-loop,session-relay}; skills/feature-forge | Run Feature Forge continuously over a backlog and survive context rot / token burn — cycle-budget handoff writes a durable checkpoint, coordinates over weave, and schedules a durable-cron successor session |
 | 2026-06-05 | Correct relay signal model after full smoke | skills/session-relay | Smoke test: `CronCreate{durable}` is session-only here (not persisted), and a self-identity weave message is invisible to the successor's own inbox. Authoritative resume signal = committed `HANDOFF.md` + cron prompt; weave is a cross-identity (`to:all`) observable heartbeat |
+| 2026-06-05 | Add env-install-loop (whole-box provisioning loop) | skills/env-install-loop; agents/continuity-steward; skills/session-relay | First-class loop to drive the workstation to fully-installed/healthy/drift-free via envctl doctor/install/auto-fix + env-toolchain-install, reusing the loop+relay continuity. Generalized continuity-steward + session-relay to serve both the feature and env loops |
