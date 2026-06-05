@@ -63,22 +63,41 @@ transitively unblocked (sudo authorized) — DONE:
       to /usr/local/bin (install -D -m755), mirroring autoinstall.yaml lines 160-161.
 - [x] yazelix-desktop — installed (detect healthy)
 
-## Final state (2026-06-05) — 16 of 17 declared components healthy
-DONE for everything the loop+sudo can reach. Drift: only `node-via-bun` (tabled by design).
+## Final state (2026-06-05, updated) — 45 of 46 components detected+healthy
+DONE for everything the loop+sudo can reach. Only `node-via-bun` remains undetected
+(tabled by design). After merging origin/master (gpu-verify port + auto-provision) two
+previously by-design gaps became REAL, fixable loop work and were closed:
+- [x] gpu-verify-scripts — INSTALLED + verified. Master's PR #17 port shipped
+      `yazelix-gpu-verify-install.sh`, but it had a **real SIGPIPE/pipefail bug**: the NVIDIA
+      gate `lspci | grep -qiE nvidia` under `set -o pipefail` made lspci die SIGPIPE (141) when
+      grep -q closed the pipe early, so pipefail reported failure even though nvidia matched →
+      the `! pipeline` flipped it to "no NVIDIA GPU (N/A)" on EVERY real multi-line-lspci box.
+      Fixed: `grep -iE nvidia >/dev/null` (consumes all input, no SIGPIPE). Redeployed to
+      /usr/local/bin; install regenerates smoke-test + launcher + autostart; verify hook GREEN
+      (2x RTX 5090, torch sm_120 kernel, cargo-oxide, Podman CDI). detect healthy.
+- [x] group-gpu-stack — now detects truthfully. Root cause was envctl running detect via a
+      non-interactive `bash -lc` that hits ~/.bashrc's line-10 interactivity guard and returns
+      BEFORE the "cuda env" PATH block, so bare `command -v nvcc` false-negated. Fixed the
+      aggregator's detect to resolve nvcc by its installed path via the SAME dynamic CUDA_HOME
+      the cuda-toolkit component's own verify uses (`[ -x "$CUDA_HOME/bin/nvcc" ]`). Re-locked.
 - doctor: all toolchains green; sudo cached; podman 5.7.0; nvidia driver loaded.
-- auto-detect: zero non-missing drift; only node-via-bun missing.
+- auto-detect: zero drift; only node-via-bun undetected (by design).
 - lock --check clean (46 comps); kasetto sync --locked clean; build + no-c/shape/enable PASS.
 - PATH/env verified in a fresh **interactive** shell: nvcc 13.3, CUDA_HOME, CUDA_OXIDE_LLC,
   cargo-oxide, secretd/secretctl, torch+CUDA (2x RTX 5090).
 
 ## By-design non-loop items (NOT failures — surfaced for the human)
 - node-via-bun — TABLED (see above): inapplicable on an n8n box; real node v22 is correct.
-- gpu-verify-scripts — envctl detects/removes but does NOT regenerate it (wizard-created;
-  port of yazelix-setup.sh step 3f is an explicitly later phase). detected=False is expected.
-- group-gpu-stack — meta-aggregator; detect=False ONLY because envctl runs detect via a
-  non-interactive `bash -lc` that hits ~/.bashrc's line-10 early-return, so the cuda PATH
-  isn't loaded for detect. The wiring IS correct (verified in an interactive shell). This is
-  an envctl detect-method limitation, not a provisioning gap — Feature-Forge follow-up.
+  Still the only undetected component. Manifest design follow-up remains (mark not-applicable
+  when a real Node in n8n's range is present, or add `node-real` + drop the group-ai-clis edge).
+
+## Resolved since (were "by-design", now fixed — see Final state)
+- gpu-verify-scripts — RESOLVED after merging master's port + fixing its SIGPIPE/pipefail gate.
+- group-gpu-stack — RESOLVED by making its detect resolve nvcc by installed path (interactive-
+  shell-independent). NOTE: the deeper observation stands but is out of loop scope — envctl
+  wires the cuda env into ~/.bashrc AFTER the interactivity guard, so nvcc is not on PATH for
+  non-interactive shells/services. A Feature-Forge follow-up could wire CUDA system-wide
+  (/etc/profile.d/cuda.sh) so scripts/systemd see nvcc too; detect is now truthful regardless.
 
 ## Manifest fixes made by this loop (rust-native, committed, re-locked)
 1. env-ctl.toml — reversed MSRV `sort -V -C` gate (rejected every cargo >= 1.80).

@@ -113,7 +113,7 @@ requires = []
 resolved = ""
 
 [components.group-gpu-stack]
-content_hash = "14a9afbfed4792e3"
+content_hash = "dd28c2ecbe2cef5d"
 requires = [
     "cuda-oxide",
     "cuda-toolkit",
