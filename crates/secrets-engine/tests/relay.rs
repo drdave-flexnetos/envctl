@@ -225,7 +225,10 @@ fn audit_contains(store: &InMemStore, needle: &str) -> bool {
     store.audit_rows().iter().any(|r| {
         let detail = serde_json::to_string(&r.detail).unwrap_or_default();
         detail.contains(needle)
-            || r.subject.as_deref().map(|s| s.contains(needle)).unwrap_or(false)
+            || r.subject
+                .as_deref()
+                .map(|s| s.contains(needle))
+                .unwrap_or(false)
     })
 }
 
@@ -293,10 +296,7 @@ impl Store for SharedStore {
         self.0.query_audit(since_seq, limit)
     }
     // relay/bearer surface forwards too, so the engine's relay path drives the REAL InMemStore.
-    fn save_relay_policy(
-        &self,
-        row: envctl_secrets::vault::RelayPolicyRow,
-    ) -> anyhow::Result<i64> {
+    fn save_relay_policy(&self, row: envctl_secrets::vault::RelayPolicyRow) -> anyhow::Result<i64> {
         self.0.save_relay_policy(row)
     }
     fn load_relay_policy(
@@ -326,10 +326,7 @@ impl Store for SharedStore {
     fn revoke_bearers_for_relay(&self, relay_id: &str) -> anyhow::Result<u32> {
         self.0.revoke_bearers_for_relay(relay_id)
     }
-    fn save_remote_client(
-        &self,
-        row: envctl_secrets::vault::RemoteClient,
-    ) -> anyhow::Result<()> {
+    fn save_remote_client(&self, row: envctl_secrets::vault::RemoteClient) -> anyhow::Result<()> {
         self.0.save_remote_client(row)
     }
     fn load_remote_client(
@@ -362,20 +359,36 @@ fn relay_mint_clamps_one_year_to_24h_and_never_leaks_raw() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("mint-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("mint-pass")), &sink).unwrap();
+    eng.init_vault(pp("mint-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("mint-pass")), &sink)
+        .unwrap();
     let _ = drain(&rx);
 
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 31_536_000, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            31_536_000,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint must succeed");
 
     // The wire bearer is namespaced and clamped to <=24h.
-    assert!(bearer.raw.starts_with("evrelay_"), "bearer must carry the evrelay_ prefix");
-    assert!(bearer.raw.starts_with(&format!("evrelay_{}_", bearer.token_id)));
+    assert!(
+        bearer.raw.starts_with("evrelay_"),
+        "bearer must carry the evrelay_ prefix"
+    );
+    assert!(bearer
+        .raw
+        .starts_with(&format!("evrelay_{}_", bearer.token_id)));
 
     // The stored bearer row's lifetime is clamped to the 24h ceiling.
-    let row = inmem.load_bearer(&bearer.token_id).unwrap().expect("bearer row persisted");
+    let row = inmem
+        .load_bearer(&bearer.token_id)
+        .unwrap()
+        .expect("bearer row persisted");
     assert!(
         row.expires_at_ms - row.issued_at_ms <= MAX_BEARER_TTL_SECS * 1000,
         "a 1-year request must clamp to <=24h: got {} ms",
@@ -392,14 +405,30 @@ fn relay_mint_clamps_one_year_to_24h_and_never_leaks_raw() {
         .expect("raw has the expected shape")
         .to_string();
     let ev = drain(&rx);
-    assert!(!events_contain(&ev, &raw), "raw bearer must not leak into events");
-    assert!(!events_contain(&ev, &secret), "bearer secret must not leak into events");
-    assert!(!audit_contains(&inmem, &raw), "raw bearer must not leak into audit rows");
-    assert!(!audit_contains(&inmem, &secret), "bearer secret must not leak into audit rows");
-    // The public token_id IS present (traceability).
-    assert!(audit_contains(&inmem, &bearer.token_id), "token_id must be audited");
     assert!(
-        ev.iter().any(|e| matches!(e, SecretEvent::RelayMinted { relay, .. } if relay == "claude-main")),
+        !events_contain(&ev, &raw),
+        "raw bearer must not leak into events"
+    );
+    assert!(
+        !events_contain(&ev, &secret),
+        "bearer secret must not leak into events"
+    );
+    assert!(
+        !audit_contains(&inmem, &raw),
+        "raw bearer must not leak into audit rows"
+    );
+    assert!(
+        !audit_contains(&inmem, &secret),
+        "bearer secret must not leak into audit rows"
+    );
+    // The public token_id IS present (traceability).
+    assert!(
+        audit_contains(&inmem, &bearer.token_id),
+        "token_id must be audited"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SecretEvent::RelayMinted { relay, .. } if relay == "claude-main")),
         "a RelayMinted event must be emitted"
     );
 }
@@ -436,7 +465,9 @@ fn relay_mint_refuses_when_usb_absent() {
             &sink,
         )
         .unwrap();
-    eng_init.unlock(Unlock::Passphrase(pp("usb-pass")), &sink).unwrap();
+    eng_init
+        .unlock(Unlock::Passphrase(pp("usb-pass")), &sink)
+        .unwrap();
     let _ = drain(&rx);
 
     // A second engine over the SAME store whose probe NO LONGER possesses the keyfile.
@@ -446,18 +477,29 @@ fn relay_mint_refuses_when_usb_absent() {
         Box::new(AbsentUsb),
         cap.clone(),
     );
-    eng_absent.unlock(Unlock::Passphrase(pp("usb-pass")), &sink).unwrap();
+    eng_absent
+        .unlock(Unlock::Passphrase(pp("usb-pass")), &sink)
+        .unwrap();
     let _ = drain(&rx);
 
     // `Bearer` deliberately does NOT implement Debug (it holds the raw secret), so we cannot
     // `expect_err` it; match on the Result directly.
-    let res = eng_absent.relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink);
+    let res = eng_absent.relay_mint(
+        anthropic_policy("anthropic_key"),
+        3600,
+        Some(1000),
+        None,
+        &sink,
+    );
     let err = match res {
         Ok(_) => panic!("an absent USB gate must refuse the mint"),
         Err(e) => e,
     };
     assert!(
-        matches!(err.downcast_ref::<EngineError>(), Some(EngineError::UsbAbsent)),
+        matches!(
+            err.downcast_ref::<EngineError>(),
+            Some(EngineError::UsbAbsent)
+        ),
         "expected UsbAbsent, got {err:?}"
     );
 
@@ -479,7 +521,10 @@ fn relay_mint_refuses_when_usb_absent() {
     // No bearer row was written.
     assert!(
         inmem.load_bearer("anything").unwrap().is_none()
-            && inmem.list_bearers_for_relay("claude-main").unwrap().is_empty(),
+            && inmem
+                .list_bearers_for_relay("claude-main")
+                .unwrap()
+                .is_empty(),
         "no BearerRow may be written on a refused mint"
     );
 }
@@ -500,8 +545,10 @@ fn relay_swap_allow_delivers_real_key_only_to_upstream() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("swap-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("swap-pass")), &sink).unwrap();
+    eng.init_vault(pp("swap-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("swap-pass")), &sink)
+        .unwrap();
 
     // Put the REAL broker-only secret.
     const REAL: &[u8] = b"sk-REAL-DEADBEEF";
@@ -518,7 +565,13 @@ fn relay_swap_allow_delivers_real_key_only_to_upstream() {
     .unwrap();
 
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -541,8 +594,14 @@ fn relay_swap_allow_delivers_real_key_only_to_upstream() {
     // ...and NEVER leaked into events or audit.
     let ev = drain(&rx);
     let real_str = String::from_utf8(REAL.to_vec()).unwrap();
-    assert!(!events_contain(&ev, &real_str), "real key must not leak into events");
-    assert!(!audit_contains(&inmem, &real_str), "real key must not leak into audit rows");
+    assert!(
+        !events_contain(&ev, &real_str),
+        "real key must not leak into events"
+    );
+    assert!(
+        !audit_contains(&inmem, &real_str),
+        "real key must not leak into audit rows"
+    );
     assert!(
         ev.iter().any(|e| matches!(
             e,
@@ -567,8 +626,10 @@ fn relay_mint_remote_binds_client_and_cross_kind_denied_locally() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("remote-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("remote-pass")), &sink).unwrap();
+    eng.init_vault(pp("remote-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("remote-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -585,8 +646,14 @@ fn relay_mint_remote_binds_client_and_cross_kind_denied_locally() {
 
     // An UNKNOWN remote client cannot be minted against (default-deny).
     assert!(
-        eng.relay_mint_remote(anthropic_policy("anthropic_key"), 3600, "phone".to_string(), jkt, &sink)
-            .is_err(),
+        eng.relay_mint_remote(
+            anthropic_policy("anthropic_key"),
+            3600,
+            "phone".to_string(),
+            jkt,
+            &sink
+        )
+        .is_err(),
         "minting against an unregistered client must refuse"
     );
 
@@ -594,12 +661,21 @@ fn relay_mint_remote_binds_client_and_cross_kind_denied_locally() {
     eng.register_remote_client("phone".to_string(), jkt, false, &sink)
         .expect("register remote client");
     let bearer = eng
-        .relay_mint_remote(anthropic_policy("anthropic_key"), 3600, "phone".to_string(), jkt, &sink)
+        .relay_mint_remote(
+            anthropic_policy("anthropic_key"),
+            3600,
+            "phone".to_string(),
+            jkt,
+            &sink,
+        )
         .expect("remote mint");
     let _ = drain(&rx);
 
     // The persisted row carries the remote binding (F15) and NO local uid/pid.
-    let row = inmem.load_bearer(&bearer.token_id).unwrap().expect("bearer row persisted");
+    let row = inmem
+        .load_bearer(&bearer.token_id)
+        .unwrap()
+        .expect("bearer row persisted");
     assert_eq!(row.client_id.as_deref(), Some("phone"));
     assert_eq!(row.dpop_jkt, Some(jkt));
     assert_eq!(row.client_uid, None);
@@ -607,8 +683,14 @@ fn relay_mint_remote_binds_client_and_cross_kind_denied_locally() {
 
     // A jkt that does not match the registration is refused at mint (proof-of-possession binding).
     assert!(
-        eng.relay_mint_remote(anthropic_policy("anthropic_key"), 3600, "phone".to_string(), [0x99u8; 32], &sink)
-            .is_err(),
+        eng.relay_mint_remote(
+            anthropic_policy("anthropic_key"),
+            3600,
+            "phone".to_string(),
+            [0x99u8; 32],
+            &sink
+        )
+        .is_err(),
         "minting with a jkt != the registered key must refuse"
     );
 
@@ -618,7 +700,10 @@ fn relay_mint_remote_binds_client_and_cross_kind_denied_locally() {
     let outcome = block_on(eng.relay_swap(&bearer.raw, &post_req(Some(1000)), &sink));
     match outcome {
         SwapOutcome::Denied(DenyReason::CrossKindPresentation) => {}
-        other => panic!("expected Denied(CrossKindPresentation), got {:?}", outcome_kind(&other)),
+        other => panic!(
+            "expected Denied(CrossKindPresentation), got {:?}",
+            outcome_kind(&other)
+        ),
     }
     assert!(
         cap.0.lock().unwrap().is_none(),
@@ -640,7 +725,8 @@ fn relay_mint_both_null_principal_refused() {
         cap.clone(),
     );
     let (sink, _rx) = EventSink::channel();
-    eng.init_vault(pp("nul"), None, None, at_floor(), &sink).unwrap();
+    eng.init_vault(pp("nul"), None, None, at_floor(), &sink)
+        .unwrap();
     eng.unlock(Unlock::Passphrase(pp("nul")), &sink).unwrap();
 
     assert!(
@@ -649,7 +735,10 @@ fn relay_mint_both_null_principal_refused() {
         "a both-null-principal mint must be refused"
     );
     assert!(
-        inmem.list_bearers_for_relay("claude-main").unwrap().is_empty(),
+        inmem
+            .list_bearers_for_relay("claude-main")
+            .unwrap()
+            .is_empty(),
         "no bearer is persisted on a refused mint"
     );
 }
@@ -668,8 +757,10 @@ fn relay_swap_deny_never_reaches_upstream() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("deny-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("deny-pass")), &sink).unwrap();
+    eng.init_vault(pp("deny-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("deny-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -682,7 +773,13 @@ fn relay_swap_deny_never_reaches_upstream() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -701,10 +798,8 @@ fn relay_swap_deny_never_reaches_upstream() {
     );
     let ev = drain(&rx);
     assert!(
-        ev.iter().any(|e| matches!(
-            e,
-            SecretEvent::RelaySwapped { allowed: false, .. }
-        )),
+        ev.iter()
+            .any(|e| matches!(e, SecretEvent::RelaySwapped { allowed: false, .. })),
         "a RelaySwapped{{allowed:false}} event must be emitted"
     );
     assert!(
@@ -730,8 +825,10 @@ fn relay_swap_forged_bearer_is_unknown() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("forge-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("forge-pass")), &sink).unwrap();
+    eng.init_vault(pp("forge-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("forge-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -744,23 +841,38 @@ fn relay_swap_forged_bearer_is_unknown() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
     // Forge: real token_id, attacker-chosen secret => MAC verify fails.
-    let forged = format!("evrelay_{}_{}", bearer.token_id, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    let forged = format!(
+        "evrelay_{}_{}",
+        bearer.token_id, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    );
     let outcome = block_on(eng.relay_swap(&forged, &post_req(Some(1000)), &sink));
     assert!(
         matches!(outcome, SwapOutcome::Denied(DenyReason::UnknownBearer)),
         "a forged secret must be UnknownBearer, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "forged bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "forged bearer must not reach the upstream"
+    );
 
     // A totally malformed bearer is also UnknownBearer.
     let outcome2 = block_on(eng.relay_swap("not-our-bearer", &post_req(Some(1000)), &sink));
-    assert!(matches!(outcome2, SwapOutcome::Denied(DenyReason::UnknownBearer)));
+    assert!(matches!(
+        outcome2,
+        SwapOutcome::Denied(DenyReason::UnknownBearer)
+    ));
     assert!(cap.0.lock().unwrap().is_none());
 }
 
@@ -777,8 +889,10 @@ fn relay_swap_expired_bearer_is_denied() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("exp-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("exp-pass")), &sink).unwrap();
+    eng.init_vault(pp("exp-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("exp-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -792,7 +906,13 @@ fn relay_swap_expired_bearer_is_denied() {
     .unwrap();
     // Mint with a 1h TTL, then jump the clock 2h forward.
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -803,7 +923,10 @@ fn relay_swap_expired_bearer_is_denied() {
         "expected BearerExpired, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "expired bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "expired bearer must not reach the upstream"
+    );
 }
 
 /// Revoking a bearer (apply) then swapping yields BearerRevoked; the upstream is never reached.
@@ -819,8 +942,10 @@ fn relay_swap_revoked_bearer_is_denied() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("rev-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("rev-pass")), &sink).unwrap();
+    eng.init_vault(pp("rev-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("rev-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -833,23 +958,35 @@ fn relay_swap_revoked_bearer_is_denied() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
 
     // Dry-run revoke first => count 1, no mutation.
     assert_eq!(
-        eng.relay_revoke_bearer(&bearer.token_id, false, &sink).unwrap(),
+        eng.relay_revoke_bearer(&bearer.token_id, false, &sink)
+            .unwrap(),
         1,
         "dry-run reports the would-flip count"
     );
     // Apply.
     assert_eq!(
-        eng.relay_revoke_bearer(&bearer.token_id, true, &sink).unwrap(),
+        eng.relay_revoke_bearer(&bearer.token_id, true, &sink)
+            .unwrap(),
         1,
         "apply flips exactly one bearer"
     );
     // Re-revoke is a no-op (already revoked => 0).
-    assert_eq!(eng.relay_revoke_bearer(&bearer.token_id, true, &sink).unwrap(), 0);
+    assert_eq!(
+        eng.relay_revoke_bearer(&bearer.token_id, true, &sink)
+            .unwrap(),
+        0
+    );
     let _ = drain(&rx);
 
     let outcome = block_on(eng.relay_swap(&bearer.raw, &post_req(Some(1000)), &sink));
@@ -858,7 +995,10 @@ fn relay_swap_revoked_bearer_is_denied() {
         "expected BearerRevoked, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "revoked bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "revoked bearer must not reach the upstream"
+    );
 }
 
 /// `relay_revoke` (whole relay) fails closed: apply revokes the policy + every live bearer; a
@@ -875,8 +1015,10 @@ fn relay_revoke_whole_relay_fails_closed() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("relayrev-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("relayrev-pass")), &sink).unwrap();
+    eng.init_vault(pp("relayrev-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("relayrev-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -890,10 +1032,22 @@ fn relay_revoke_whole_relay_fails_closed() {
     .unwrap();
     // Two live bearers off the same named relay.
     let b1 = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint b1");
     let _b2 = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint b2");
     let _ = drain(&rx);
 
@@ -911,7 +1065,10 @@ fn relay_revoke_whole_relay_fails_closed() {
         "expected Revoked, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "a revoked relay must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "a revoked relay must not reach the upstream"
+    );
 }
 
 /// A peer-bound bearer presented by a different uid is denied (PeerMismatch); never reaches send.
@@ -927,8 +1084,10 @@ fn relay_swap_peer_mismatch_is_denied() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("peer-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("peer-pass")), &sink).unwrap();
+    eng.init_vault(pp("peer-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("peer-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -941,7 +1100,13 @@ fn relay_swap_peer_mismatch_is_denied() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -969,8 +1134,10 @@ fn relay_swap_locked_vault_is_internal_refused() {
         cap.clone(),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("locked-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("locked-pass")), &sink).unwrap();
+    eng.init_vault(pp("locked-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("locked-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -983,7 +1150,13 @@ fn relay_swap_locked_vault_is_internal_refused() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     eng.lock(&sink).unwrap();
     let _ = drain(&rx);
@@ -994,7 +1167,10 @@ fn relay_swap_locked_vault_is_internal_refused() {
         "a locked vault must be InternalRefused, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "a locked vault must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "a locked vault must not reach the upstream"
+    );
 }
 
 // ---- D. regression tests for the finalize-broker hardening -----------------------------------
@@ -1006,8 +1182,15 @@ fn engine_with_upstream(
     usb: Box<dyn UsbProbe>,
     upstream: Box<dyn Upstream>,
 ) -> Engine {
-    Engine::with_seams(paths(), store, Box::new(clock), usb, Box::new(NoMint), upstream)
-        .expect("with_seams must construct")
+    Engine::with_seams(
+        paths(),
+        store,
+        Box::new(clock),
+        usb,
+        Box::new(NoMint),
+        upstream,
+    )
+    .expect("with_seams must construct")
 }
 
 /// Set up an unlocked, USB-free vault with the REAL secret + a fresh bearer; return (engine, inmem,
@@ -1031,7 +1214,8 @@ fn minted_engine(
         cap,
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp(pass), None, None, at_floor(), &sink).unwrap();
+    eng.init_vault(pp(pass), None, None, at_floor(), &sink)
+        .unwrap();
     eng.unlock(Unlock::Passphrase(pp(pass)), &sink).unwrap();
     eng.secret_put(
         SecretMeta {
@@ -1045,7 +1229,13 @@ fn minted_engine(
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
     (eng, inmem, sink, rx, bearer)
@@ -1060,7 +1250,11 @@ fn relay_swap_tampered_unrevoke_is_unknown_bearer() {
     let (eng, inmem, sink, _rx, bearer) = minted_engine("tamper-rev", cap.clone());
 
     // Legitimately revoke the bearer (engine re-MACs the row over revoked=true).
-    assert_eq!(eng.relay_revoke_bearer(&bearer.token_id, true, &sink).unwrap(), 1);
+    assert_eq!(
+        eng.relay_revoke_bearer(&bearer.token_id, true, &sink)
+            .unwrap(),
+        1
+    );
 
     // Store-level tamper: flip revoked back to false WITHOUT touching the row_mac.
     inmem.tamper_bearer(&bearer.token_id, |b| b.revoked = false);
@@ -1071,7 +1265,10 @@ fn relay_swap_tampered_unrevoke_is_unknown_bearer() {
         "an un-revoke tamper must be UnknownBearer (row MAC mismatch), got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "tampered bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "tampered bearer must not reach the upstream"
+    );
 }
 
 /// CRITICAL: raising `expires_at_ms` on an expired bearer (to resurrect it) does not forge an Allow
@@ -1082,7 +1279,9 @@ fn relay_swap_tampered_expiry_is_unknown_bearer() {
     let (eng, inmem, sink, _rx, bearer) = minted_engine("tamper-exp", cap.clone());
 
     // Push the expiry far into the future WITHOUT re-MACing.
-    inmem.tamper_bearer(&bearer.token_id, |b| b.expires_at_ms += 100 * 24 * 3_600_000);
+    inmem.tamper_bearer(&bearer.token_id, |b| {
+        b.expires_at_ms += 100 * 24 * 3_600_000
+    });
 
     let outcome = block_on(eng.relay_swap(&bearer.raw, &post_req(Some(1000)), &sink));
     assert!(
@@ -1090,7 +1289,10 @@ fn relay_swap_tampered_expiry_is_unknown_bearer() {
         "an expiry tamper must be UnknownBearer (row MAC mismatch), got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "tampered bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "tampered bearer must not reach the upstream"
+    );
 }
 
 /// CRITICAL: rewriting the peer binding (`client_uid`) to match a different caller does not forge an
@@ -1110,7 +1312,10 @@ fn relay_swap_tampered_peer_binding_is_unknown_bearer() {
         "a peer-binding tamper must be UnknownBearer (row MAC mismatch), got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "tampered bearer must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "tampered bearer must not reach the upstream"
+    );
 }
 
 /// HIGH (OI-6): a wall-clock rollback that lands BACK INSIDE the still-valid window cannot resurrect
@@ -1139,8 +1344,10 @@ fn relay_swap_wall_rollback_within_window_is_denied_by_boottime() {
     .expect("with_seams");
 
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("rollback-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("rollback-pass")), &sink).unwrap();
+    eng.init_vault(pp("rollback-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("rollback-pass")), &sink)
+        .unwrap();
     eng.secret_put(
         SecretMeta {
             name: "anthropic_key".to_string(),
@@ -1153,7 +1360,13 @@ fn relay_swap_wall_rollback_within_window_is_denied_by_boottime() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -1166,7 +1379,10 @@ fn relay_swap_wall_rollback_within_window_is_denied_by_boottime() {
         "a wall/monotonic divergence must be ClockRollback, got {:?}",
         outcome_kind(&outcome)
     );
-    assert!(cap.0.lock().unwrap().is_none(), "a rolled-back clock must not reach the upstream");
+    assert!(
+        cap.0.lock().unwrap().is_none(),
+        "a rolled-back clock must not reach the upstream"
+    );
 }
 
 /// MEDIUM: a hostile upstream that echoes the real key into its error string must NOT leak it — the
@@ -1182,8 +1398,10 @@ fn relay_swap_upstream_error_does_not_leak_real_key() {
         Box::new(LeakyUpstream),
     );
     let (sink, rx) = EventSink::channel();
-    eng.init_vault(pp("leak-pass"), None, None, at_floor(), &sink).unwrap();
-    eng.unlock(Unlock::Passphrase(pp("leak-pass")), &sink).unwrap();
+    eng.init_vault(pp("leak-pass"), None, None, at_floor(), &sink)
+        .unwrap();
+    eng.unlock(Unlock::Passphrase(pp("leak-pass")), &sink)
+        .unwrap();
     const REAL: &[u8] = b"sk-REAL-DEADBEEF";
     eng.secret_put(
         SecretMeta {
@@ -1197,7 +1415,13 @@ fn relay_swap_upstream_error_does_not_leak_real_key() {
     )
     .unwrap();
     let bearer = eng
-        .relay_mint(anthropic_policy("anthropic_key"), 3600, Some(1000), None, &sink)
+        .relay_mint(
+            anthropic_policy("anthropic_key"),
+            3600,
+            Some(1000),
+            None,
+            &sink,
+        )
         .expect("mint");
     let _ = drain(&rx);
 
@@ -1206,15 +1430,27 @@ fn relay_swap_upstream_error_does_not_leak_real_key() {
     // The outcome is a refusal whose message is a fixed, key-free label.
     match &outcome {
         SwapOutcome::InternalRefused(m) => {
-            assert!(!m.contains(&real_str), "the real key must not appear in the returned outcome");
-            assert!(m.contains("upstream send failed"), "fixed key-free label expected, got {m}");
+            assert!(
+                !m.contains(&real_str),
+                "the real key must not appear in the returned outcome"
+            );
+            assert!(
+                m.contains("upstream send failed"),
+                "fixed key-free label expected, got {m}"
+            );
         }
         other => panic!("expected InternalRefused, got {:?}", outcome_kind(other)),
     }
     // ...and never in any emitted event or durable audit row.
     let ev = drain(&rx);
-    assert!(!events_contain(&ev, &real_str), "real key must not leak into events");
-    assert!(!audit_contains(&inmem, &real_str), "real key must not leak into audit rows");
+    assert!(
+        !events_contain(&ev, &real_str),
+        "real key must not leak into events"
+    );
+    assert!(
+        !audit_contains(&inmem, &real_str),
+        "real key must not leak into audit rows"
+    );
 }
 
 /// Tiny helper to name an outcome variant in panic messages without printing the response body.

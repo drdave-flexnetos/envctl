@@ -93,7 +93,7 @@ impl Registry {
 
     /// `id` plus its transitive prerequisites, in dependency order.
     pub fn closure(&self, id: &str) -> anyhow::Result<Vec<&Component>> {
-        if self.by_id.get(id).is_none() {
+        if !self.by_id.contains_key(id) {
             return Err(EngineError::UnknownComponent(id.into()).into());
         }
         let mut out = Vec::new();
@@ -395,7 +395,12 @@ pub struct RunPlan {
 
 impl RunPlan {
     pub fn new(phase: Phase, targets: Vec<String>, dry_run: bool) -> Self {
-        RunPlan { phase, targets, dry_run, gates: ResetGates::default() }
+        RunPlan {
+            phase,
+            targets,
+            dry_run,
+            gates: ResetGates::default(),
+        }
     }
     pub fn with_gates(mut self, gates: ResetGates) -> Self {
         self.gates = gates;
@@ -567,7 +572,12 @@ pub enum AiAgent {
 
 impl AiAgent {
     pub fn preference() -> [AiAgent; 4] {
-        [AiAgent::Claude, AiAgent::Codex, AiAgent::Gemini, AiAgent::Kimi]
+        [
+            AiAgent::Claude,
+            AiAgent::Codex,
+            AiAgent::Gemini,
+            AiAgent::Kimi,
+        ]
     }
     pub fn bin(self) -> &'static str {
         match self {

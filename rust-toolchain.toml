@@ -1,3 +1,8 @@
 [toolchain]
-channel = "stable"
+# Pinned (was floating "stable") so rustfmt/clippy are reproducible: a floating
+# stable silently surfaced new lints/format changes as the host stable advanced,
+# producing phantom workspace-wide fmt/clippy drift. 1.96.0 is the resolved stable
+# this was reconciled against. MSRV stays 1.80 (Cargo.toml rust-version); this is
+# the dev toolchain, not the minimum supported. Bump deliberately + reconcile.
+channel = "1.96.0"
 components = ["rustfmt", "clippy"]

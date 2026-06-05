@@ -193,13 +193,7 @@ pub fn wrap_dek(kek: Kek, dek: &Dek, aad: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek.0));
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let wrapped = cipher
-        .encrypt(
-            &nonce,
-            Payload {
-                msg: &dek.0,
-                aad,
-            },
-        )
+        .encrypt(&nonce, Payload { msg: &dek.0, aad })
         // Encryption of a fixed 32-byte plaintext with a valid key cannot fail; a panic here is a
         // genuine library invariant violation, not an operator-facing error.
         .expect("XChaCha20Poly1305 encryption of the 32-byte DEK must not fail");
@@ -216,15 +210,7 @@ pub fn unwrap_dek(kek: Kek, nonce: &[u8], wrapped: &[u8], aad: &[u8]) -> Option<
     }
     let cipher = XChaCha20Poly1305::new(Key::from_slice(&kek.0));
     let xnonce = XNonce::from_slice(nonce);
-    let mut pt = cipher
-        .decrypt(
-            xnonce,
-            Payload {
-                msg: wrapped,
-                aad,
-            },
-        )
-        .ok()?; // Poly1305 tag mismatch -> None (the sole correctness oracle).
+    let mut pt = cipher.decrypt(xnonce, Payload { msg: wrapped, aad }).ok()?; // Poly1305 tag mismatch -> None (the sole correctness oracle).
 
     // The DEK must be exactly 32 bytes; anything else is a corrupt/foreign envelope.
     if pt.len() != 32 {
@@ -406,7 +392,10 @@ mod tests {
         assert_eq!(wrapped.len(), 48);
 
         let out = unwrap_dek(fixed_kek(), &nonce, &wrapped, &aad).expect("round-trip must unwrap");
-        assert!(bool::from(out.0.ct_eq(&fixed_dek().0)), "recovered DEK matches");
+        assert!(
+            bool::from(out.0.ct_eq(&fixed_dek().0)),
+            "recovered DEK matches"
+        );
     }
 
     #[test]
@@ -416,7 +405,10 @@ mod tests {
         let (n2, c2) = wrap_dek(fixed_kek(), &fixed_dek(), &aad);
         // Random per-call nonce => different nonce and different ciphertext for the same plaintext.
         assert_ne!(n1, n2, "nonces must never be reused");
-        assert_ne!(c1, c2, "same DEK under fresh nonce yields different ciphertext");
+        assert_ne!(
+            c1, c2,
+            "same DEK under fresh nonce yields different ciphertext"
+        );
     }
 
     // ---- wrong KEK rejected -------------------------------------------------------------------
@@ -587,7 +579,11 @@ mod tests {
         // Per-slot mutation (label is covered by header_mac but not by the AAD).
         let mut mutated = slots.clone();
         mutated[0].label = "renamed".to_string();
-        assert_ne!(base, header_mac(&dek, &mutated, 1_000), "slot mutation binds");
+        assert_ne!(
+            base,
+            header_mac(&dek, &mutated, 1_000),
+            "slot mutation binds"
+        );
 
         // Reorder: the canonical encoding is order-sensitive by design.
         let reordered = vec![slots[1].clone(), slots[0].clone()];
@@ -595,7 +591,11 @@ mod tests {
 
         // A different DEK yields a different MAC (key separation).
         let other_dek = Dek([0x01; 32]);
-        assert_ne!(base, header_mac(&other_dek, &slots, 1_000), "DEK keys the MAC");
+        assert_ne!(
+            base,
+            header_mac(&other_dek, &slots, 1_000),
+            "DEK keys the MAC"
+        );
     }
 
     // ---- AAD canonical encoding ---------------------------------------------------------------

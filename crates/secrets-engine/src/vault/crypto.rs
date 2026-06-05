@@ -53,7 +53,13 @@ pub fn seal(dek: &Dek, aad: &[u8], plaintext: &[u8]) -> (Vec<u8>, Vec<u8>) {
     // MANDATE OsRng (OI-16): a fresh 24-byte CSPRNG nonce per seal.
     let nonce: XNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let ct_tag = cipher
-        .encrypt(&nonce, Payload { msg: plaintext, aad })
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         // Encryption of an in-memory buffer under a valid 32-byte key cannot fail for this AEAD;
         // a failure here would be an unrecoverable internal invariant violation.
         .expect("XChaCha20-Poly1305 seal must not fail for an in-memory plaintext");
@@ -132,7 +138,13 @@ one tip for the future, sunscreen would be it."
 
         // Encrypt and compare against the pinned ct||tag.
         let got = cipher
-            .encrypt(xnonce, Payload { msg: &plaintext, aad: &aad })
+            .encrypt(
+                xnonce,
+                Payload {
+                    msg: &plaintext,
+                    aad: &aad,
+                },
+            )
             .expect("encrypt");
         let mut expected = expected_ct.clone();
         expected.extend_from_slice(&expected_tag);
@@ -161,7 +173,10 @@ one tip for the future, sunscreen would be it."
         // Two seals of the same plaintext must use distinct (random) nonces.
         let (nonce2, ct_tag2) = seal(&dek, aad, plaintext);
         assert_ne!(nonce, nonce2, "OsRng nonces must differ across seals");
-        assert_ne!(ct_tag, ct_tag2, "fresh nonce must yield distinct ciphertext");
+        assert_ne!(
+            ct_tag, ct_tag2,
+            "fresh nonce must yield distinct ciphertext"
+        );
 
         // Tamper: flip one ciphertext byte => tag check fails => None.
         let mut tampered = ct_tag.clone();

@@ -34,11 +34,20 @@ fn check_one(g: &Guard, runner: &dyn HookRunner, ctx: &RunContext) -> Option<Str
         }
 
         Guard::HookSucceeds { hook } => {
-            let r = runner.run("<guard>", Phase::Detect, hook, false, &crate::event::EventSink::null());
+            let r = runner.run(
+                "<guard>",
+                Phase::Detect,
+                hook,
+                false,
+                &crate::event::EventSink::null(),
+            );
             if r.status == OpStatus::Ok {
                 None
             } else {
-                Some(format!("refused: guard hook did not succeed ({})", r.message))
+                Some(format!(
+                    "refused: guard hook did not succeed ({})",
+                    r.message
+                ))
             }
         }
 
@@ -60,9 +69,9 @@ fn check_one(g: &Guard, runner: &dyn HookRunner, ctx: &RunContext) -> Option<Str
                 return Some(format!("refused: {uuid} is the LIVE root filesystem"));
             }
             match (resolve_dev(uuid), live_root_source()) {
-                (Some(dev), Some(live)) if dev == live => {
-                    Some(format!("refused: {uuid} resolves to the live device {live}"))
-                }
+                (Some(dev), Some(live)) if dev == live => Some(format!(
+                    "refused: {uuid} resolves to the live device {live}"
+                )),
                 (None, _) => Some(format!(
                     "refused: {uuid} did not resolve — cannot prove it is not the live device"
                 )),
@@ -230,13 +239,21 @@ pub fn verify_path_uuid(path: &str, uuid: &str, ctx: &RunContext) -> Option<Stri
     if let Some(r) = check_one(&Guard::UuidResolves { uuid: uuid.into() }, &NullRunner, ctx) {
         return Some(r);
     }
-    if let Some(r) = check_one(&Guard::NotLiveDevice { uuid: uuid.into() }, &NullRunner, ctx) {
+    if let Some(r) = check_one(
+        &Guard::NotLiveDevice { uuid: uuid.into() },
+        &NullRunner,
+        ctx,
+    ) {
         return Some(r);
     }
     match mount_uuid_of(&p) {
         Some(f) if f == uuid => None,
-        Some(f) => Some(format!("refused: {path} is on UUID {f}, not the declared {uuid}")),
-        None => Some(format!("refused: cannot determine the fs UUID carrying {path}")),
+        Some(f) => Some(format!(
+            "refused: {path} is on UUID {f}, not the declared {uuid}"
+        )),
+        None => Some(format!(
+            "refused: cannot determine the fs UUID carrying {path}"
+        )),
     }
 }
 
@@ -245,7 +262,10 @@ pub fn verify_path_uuid(path: &str, uuid: &str, ctx: &RunContext) -> Option<Stri
 /// (AUDIT-FIX major: SOURCE→blkid-only returned None on btrfs because the column
 /// carries a `[/subvol]` suffix that blkid rejects → purge wrongly refused.)
 fn mount_uuid_of(path: &str) -> Option<String> {
-    if let Ok(out) = Command::new("findmnt").args(["-no", "UUID", "--target", path]).output() {
+    if let Ok(out) = Command::new("findmnt")
+        .args(["-no", "UUID", "--target", path])
+        .output()
+    {
         if out.status.success() {
             let u = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !u.is_empty() {

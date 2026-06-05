@@ -4,6 +4,7 @@
 //!   * reproducibility — the exact component set + spec hashes are pinned;
 //!   * a CI gate — `envctl lock --check` fails (nonzero) if the manifest drifted
 //!     from the lock (a component was added/removed/changed without re-locking).
+//!
 //! Deterministic + diff-friendly (BTreeMap → stable TOML). No run-specific data
 //! lives here (timings/last-run belong in machine-local cache).
 use crate::component::Component;
@@ -38,7 +39,10 @@ pub struct LockEntry {
 
 impl Default for LockFile {
     fn default() -> Self {
-        LockFile { version: LOCK_VERSION, components: BTreeMap::new() }
+        LockFile {
+            version: LOCK_VERSION,
+            components: BTreeMap::new(),
+        }
     }
 }
 fn default_version() -> u8 {
@@ -55,7 +59,8 @@ impl LockFile {
     pub fn load(manifest_dir: &Path) -> anyhow::Result<LockFile> {
         let path = lock_path(manifest_dir);
         match std::fs::read_to_string(&path) {
-            Ok(t) => toml::from_str(&t).map_err(|e| anyhow::anyhow!("corrupt lock {}: {e}", path.display())),
+            Ok(t) => toml::from_str(&t)
+                .map_err(|e| anyhow::anyhow!("corrupt lock {}: {e}", path.display())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(LockFile::default()),
             Err(e) => Err(anyhow::anyhow!("reading lock {}: {e}", path.display())),
         }
@@ -85,7 +90,11 @@ pub fn generate(reg: &Registry) -> LockFile {
         requires.sort();
         lf.components.insert(
             c.id.clone(),
-            LockEntry { content_hash: component_hash(c), requires, resolved: String::new() },
+            LockEntry {
+                content_hash: component_hash(c),
+                requires,
+                resolved: String::new(),
+            },
         );
     }
     lf
@@ -106,7 +115,9 @@ pub fn diff(reg: &Registry, lock: &LockFile) -> Vec<(String, LockDriftKind)> {
     for (id, e) in &cur.components {
         match lock.components.get(id) {
             None => out.push((id.clone(), LockDriftKind::Added)),
-            Some(le) if le.content_hash != e.content_hash => out.push((id.clone(), LockDriftKind::Changed)),
+            Some(le) if le.content_hash != e.content_hash => {
+                out.push((id.clone(), LockDriftKind::Changed))
+            }
             _ => {}
         }
     }
@@ -133,11 +144,17 @@ fn canonical(v: &serde_json::Value) -> String {
         serde_json::Value::Object(m) => {
             let mut keys: Vec<&String> = m.keys().collect();
             keys.sort();
-            let parts: Vec<String> = keys.iter().map(|k| format!("{k:?}:{}", canonical(&m[*k]))).collect();
+            let parts: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{k:?}:{}", canonical(&m[*k])))
+                .collect();
             format!("{{{}}}", parts.join(","))
         }
         serde_json::Value::Array(a) => {
-            format!("[{}]", a.iter().map(canonical).collect::<Vec<String>>().join(","))
+            format!(
+                "[{}]",
+                a.iter().map(canonical).collect::<Vec<String>>().join(",")
+            )
         }
         serde_json::Value::String(s) => format!("{s:?}"),
         other => other.to_string(),
@@ -180,7 +197,11 @@ mod tests {
         bun.content_hash = "deadbeef".into();
         lock.components.remove("rustup");
         let d = diff(&r, &lock);
-        assert!(d.iter().any(|(id, k)| id == "bun" && *k == LockDriftKind::Changed));
-        assert!(d.iter().any(|(id, k)| id == "rustup" && *k == LockDriftKind::Added));
+        assert!(d
+            .iter()
+            .any(|(id, k)| id == "bun" && *k == LockDriftKind::Changed));
+        assert!(d
+            .iter()
+            .any(|(id, k)| id == "rustup" && *k == LockDriftKind::Added));
     }
 }

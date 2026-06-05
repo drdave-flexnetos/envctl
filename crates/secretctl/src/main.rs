@@ -215,7 +215,10 @@ async fn secret(cmd: SecretCmd, sock: PathBuf, json: bool) -> anyhow::Result<()>
                             "broker_only": item.broker_only })
                     );
                 } else {
-                    println!("{} v{} broker_only={}", item.name, item.version, item.broker_only);
+                    println!(
+                        "{} v{} broker_only={}",
+                        item.name, item.version, item.broker_only
+                    );
                 }
             }
         }
@@ -325,7 +328,10 @@ async fn relay(cmd: RelayCmd, sock: PathBuf, json: bool) -> anyhow::Result<()> {
                 .into_inner();
             for item in &r.items {
                 if json {
-                    println!("{}", serde_json::json!({ "name": item.name, "enabled": item.enabled }));
+                    println!(
+                        "{}",
+                        serde_json::json!({ "name": item.name, "enabled": item.enabled })
+                    );
                 } else {
                     println!("{} enabled={}", item.name, item.enabled);
                 }

@@ -11,6 +11,10 @@
 //! dead_code at module scope (mirroring the engine's own scaffold discipline) rather than delete a
 //! spec-mandated, tested-by-construction mapping.
 #![allow(dead_code)]
+// These conversions return `Result<_, tonic::Status>`; `Status` is intentionally large, so
+// `result_large_err` fires across the whole boundary. Boxing gRPC status errors is non-idiomatic
+// and would churn every call site for no real gain — allow it module-wide at the proto boundary.
+#![allow(clippy::result_large_err)]
 use envctl_secrets::broker::{Method, Provider, RelayKind, RelayPolicy, SwapMode};
 use envctl_secrets::keyslot::Factor;
 use envctl_secrets::{AuditRecord, SecretEvent, SecretMeta};
@@ -85,7 +89,8 @@ pub fn method_from_str(s: &str) -> Option<Method> {
 pub fn methods_from_proto(list: &[String]) -> Result<Vec<Method>, Status> {
     list.iter()
         .map(|m| {
-            method_from_str(m).ok_or_else(|| Status::invalid_argument(format!("unknown method '{m}'")))
+            method_from_str(m)
+                .ok_or_else(|| Status::invalid_argument(format!("unknown method '{m}'")))
         })
         .collect()
 }

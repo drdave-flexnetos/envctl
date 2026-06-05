@@ -117,7 +117,8 @@ impl EnvctlApp {
         let tel = TelemetryControl::new();
         let tel_worker = tel.clone();
         std::thread::spawn(move || {
-            let repaint: Box<dyn FnMut() + Send + 'static> = Box::new(move || ctx.request_repaint());
+            let repaint: Box<dyn FnMut() + Send + 'static> =
+                Box::new(move || ctx.request_repaint());
             run_event_loop(engine, cmd_rx, evt_tx, tel_worker, repaint);
         });
 
@@ -167,7 +168,11 @@ impl EnvctlApp {
                     self.header = format!(
                         "{} GPU(s) · driver {} · {}/{} present · {} drift",
                         report.gpu_count,
-                        if report.driver_loaded { "loaded" } else { "not loaded" },
+                        if report.driver_loaded {
+                            "loaded"
+                        } else {
+                            "not loaded"
+                        },
                         detected,
                         report.components.len(),
                         report.drift.len()
@@ -180,9 +185,11 @@ impl EnvctlApp {
                     self.components = report.components;
                     self.drift = report.drift;
                 }
-                Event::Log { component, stream, line } => {
-                    self.push_log(stream, format!("[{component}] {line}"))
-                }
+                Event::Log {
+                    component,
+                    stream,
+                    line,
+                } => self.push_log(stream, format!("[{component}] {line}")),
                 Event::Telemetry(t) => {
                     for g in &t.gpus {
                         let buf = self.util_history.entry(g.index).or_default();
@@ -213,7 +220,10 @@ impl EnvctlApp {
                         };
                         self.push_log(
                             stream,
-                            format!("{} {:?} -> {:?}", result.component, result.phase, result.status),
+                            format!(
+                                "{} {:?} -> {:?}",
+                                result.component, result.phase, result.status
+                            ),
                         );
                     }
                 }
@@ -291,7 +301,11 @@ impl eframe::App for EnvctlApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(&self.header).size(12.0).color(theme::TEXT_MUTED));
+                        ui.label(
+                            RichText::new(&self.header)
+                                .size(12.0)
+                                .color(theme::TEXT_MUTED),
+                        );
                     });
                 });
             });
@@ -339,7 +353,11 @@ impl EnvctlApp {
             RichText::new(s.label()).color(theme::TEXT_MUTED)
         };
         let btn = egui::Button::new(text)
-            .fill(if active { theme::ACCENT } else { Color32::TRANSPARENT })
+            .fill(if active {
+                theme::ACCENT
+            } else {
+                Color32::TRANSPARENT
+            })
             .stroke(egui::Stroke::NONE)
             .rounding(egui::Rounding::same(7.0));
         if ui.add(btn).clicked() {
@@ -517,8 +535,7 @@ impl EnvctlApp {
 
     /// Paint a small utilization sparkline from a 0..=100 history buffer.
     fn sparkline(&self, ui: &mut egui::Ui, hist: &VecDeque<f32>) {
-        let (rect, _resp) =
-            ui.allocate_exact_size(egui::vec2(120.0, 28.0), egui::Sense::hover());
+        let (rect, _resp) = ui.allocate_exact_size(egui::vec2(120.0, 28.0), egui::Sense::hover());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, egui::Rounding::same(5.0), theme::BG);
 
@@ -552,10 +569,17 @@ impl EnvctlApp {
             ui.label(RichText::new("Components").heading());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let any_missing = self.components.iter().any(|c| !c.detected);
-                let install = egui::Button::new(RichText::new("Install all missing").color(
-                    if any_missing { theme::ACCENT_TEXT } else { theme::TEXT_FAINT },
-                ))
-                .fill(if any_missing { theme::ACCENT } else { theme::SURFACE });
+                let install =
+                    egui::Button::new(RichText::new("Install all missing").color(if any_missing {
+                        theme::ACCENT_TEXT
+                    } else {
+                        theme::TEXT_FAINT
+                    }))
+                    .fill(if any_missing {
+                        theme::ACCENT
+                    } else {
+                        theme::SURFACE
+                    });
                 if ui.add_enabled(any_missing, install).clicked() {
                     let missing: Vec<String> = self
                         .components
@@ -567,7 +591,10 @@ impl EnvctlApp {
                         self.busy.insert(id.clone());
                     }
                     self.dispatch(
-                        EngineCommand::Install { targets: missing, dry_run: false },
+                        EngineCommand::Install {
+                            targets: missing,
+                            dry_run: false,
+                        },
                         None,
                     );
                 }
@@ -650,7 +677,10 @@ impl EnvctlApp {
                 for title in ["STATUS", "ID", "NAME", "HEALTH", ""] {
                     h.col(|ui| {
                         ui.label(
-                            RichText::new(title).size(11.0).strong().color(theme::TEXT_MUTED),
+                            RichText::new(title)
+                                .size(11.0)
+                                .strong()
+                                .color(theme::TEXT_MUTED),
                         );
                     });
                 }
@@ -695,7 +725,10 @@ impl EnvctlApp {
 
         if let Some(id) = to_install {
             self.dispatch(
-                EngineCommand::Install { targets: vec![id.clone()], dry_run: false },
+                EngineCommand::Install {
+                    targets: vec![id.clone()],
+                    dry_run: false,
+                },
                 Some(id),
             );
         }
@@ -704,7 +737,10 @@ impl EnvctlApp {
             // checked box must map directly to dry_run (was inverted, running Fix
             // for real by default and defeating the only GUI safety guard).
             self.dispatch(
-                EngineCommand::Fix { targets: vec![id.clone()], dry_run: self.dry_run_default },
+                EngineCommand::Fix {
+                    targets: vec![id.clone()],
+                    dry_run: self.dry_run_default,
+                },
                 Some(id),
             );
         }
@@ -718,16 +754,34 @@ impl EnvctlApp {
         let g = graph::analyze(self.geng.registry());
         let ids: Vec<String> = self.geng.registry().ids().cloned().collect();
         let focus = self.graph_focus.clone();
-        let im = if focus.is_empty() { None } else { graph::impact(self.geng.registry(), &focus) };
-        let paths = if focus.is_empty() { Vec::new() } else { graph::dependency_paths(self.geng.registry(), &focus) };
+        let im = if focus.is_empty() {
+            None
+        } else {
+            graph::impact(self.geng.registry(), &focus)
+        };
+        let paths = if focus.is_empty() {
+            Vec::new()
+        } else {
+            graph::dependency_paths(self.geng.registry(), &focus)
+        };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.label(theme::section("DEPENDENCY GRAPH"));
             ui.add_space(4.0);
             theme::card().show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(format!("{} components · {} edges · {} groups", g.nodes, g.edges, g.groups.len()));
-                ui.label(format!("{} roots · {} leaves · {} orphans", g.roots.len(), g.leaves.len(), g.orphans.len()));
+                ui.label(format!(
+                    "{} components · {} edges · {} groups",
+                    g.nodes,
+                    g.edges,
+                    g.groups.len()
+                ));
+                ui.label(format!(
+                    "{} roots · {} leaves · {} orphans",
+                    g.roots.len(),
+                    g.leaves.len(),
+                    g.orphans.len()
+                ));
                 if let Some((id, n)) = &g.max_dependents {
                     ui.colored_label(theme::TEXT_MUTED, format!("most depended-on: {id} ({n})"));
                 }
@@ -740,7 +794,11 @@ impl EnvctlApp {
             ui.label(theme::section("IMPACT — pick a component"));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let sel = if focus.is_empty() { "(select)".to_string() } else { focus.clone() };
+                let sel = if focus.is_empty() {
+                    "(select)".to_string()
+                } else {
+                    focus.clone()
+                };
                 egui::ComboBox::from_id_salt("graph_focus")
                     .selected_text(sel)
                     .width(280.0)
@@ -755,14 +813,27 @@ impl EnvctlApp {
                 ui.add_space(6.0);
                 theme::card().show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(format!("install {}", im.component)).color(theme::HEALTHY));
-                    ui.monospace(format!("pulls in ({}): {}", im.install_closure.len(), im.install_closure.join("  →  ")));
+                    ui.label(
+                        RichText::new(format!("install {}", im.component)).color(theme::HEALTHY),
+                    );
+                    ui.monospace(format!(
+                        "pulls in ({}): {}",
+                        im.install_closure.len(),
+                        im.install_closure.join("  →  ")
+                    ));
                     ui.add_space(4.0);
-                    ui.label(RichText::new(format!("reset {} --cascade", im.component)).color(theme::WARN));
+                    ui.label(
+                        RichText::new(format!("reset {} --cascade", im.component))
+                            .color(theme::WARN),
+                    );
                     ui.monospace(format!(
                         "also removes ({}): {}",
                         im.cascade_removes.len(),
-                        if im.cascade_removes.is_empty() { "(none)".into() } else { im.cascade_removes.join(", ") }
+                        if im.cascade_removes.is_empty() {
+                            "(none)".into()
+                        } else {
+                            im.cascade_removes.join(", ")
+                        }
                     ));
                     ui.add_space(6.0);
                     ui.label(RichText::new("why it's needed (root → it)").color(theme::TEXT_MUTED));
@@ -882,7 +953,11 @@ impl EnvctlApp {
     fn add_repo_cmd(&self, dry_run: bool) -> EngineCommand {
         let opt = |s: &str| {
             let t = s.trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         };
         let strategy = match self.add_strategy.as_str() {
             "cherry-pick" => BuildStrategy::CherryPick {
@@ -891,7 +966,12 @@ impl EnvctlApp {
             "rename" => BuildStrategy::Rename {
                 renames: split_csv(&self.add_renames)
                     .into_iter()
-                    .filter_map(|p| p.split_once('=').map(|(a, b)| RenameRule { from: a.trim().into(), to: b.trim().into() }))
+                    .filter_map(|p| {
+                        p.split_once('=').map(|(a, b)| RenameRule {
+                            from: a.trim().into(),
+                            to: b.trim().into(),
+                        })
+                    })
                     .collect(),
             },
             "refactor" => BuildStrategy::Refactor {
@@ -934,10 +1014,7 @@ impl EnvctlApp {
                 if ui.button("Clear").clicked() {
                     self.log.clear();
                 }
-                ui.colored_label(
-                    theme::TEXT_FAINT,
-                    format!("{} lines", self.log.len()),
-                );
+                ui.colored_label(theme::TEXT_FAINT, format!("{} lines", self.log.len()));
             });
         });
         ui.add_space(6.0);
@@ -994,7 +1071,10 @@ impl EnvctlApp {
             {
                 let _ = self.cmd_tx.send(EngineCommand::Detect);
             }
-            ui.colored_label(theme::TEXT_FAINT, "Re-scan the environment and refresh drift.");
+            ui.colored_label(
+                theme::TEXT_FAINT,
+                "Re-scan the environment and refresh drift.",
+            );
         });
     }
 }
@@ -1018,9 +1098,7 @@ fn stat_chip(ui: &mut egui::Ui, label: &str, value: &str, value_col: Color32) {
 /// Status pill color + short text for a component, factoring in drift severity.
 fn pill_for(c: &ComponentState, drift: Option<&DriftItem>) -> (Color32, String) {
     if !c.detected {
-        let col = drift
-            .map(|d| sev_color(d.severity))
-            .unwrap_or(theme::WARN);
+        let col = drift.map(|d| sev_color(d.severity)).unwrap_or(theme::WARN);
         return (col, "missing".into());
     }
     if let Some(d) = drift {
@@ -1043,7 +1121,10 @@ fn health_label(c: &ComponentState, drift: Option<&DriftItem>) -> (Color32, Stri
             DriftKind::WiringMissing => "wiring missing",
             DriftKind::DriverInactive => "driver inactive",
         };
-        return (sev_color(d.severity), format!("{kind} · {}", d.suggested_verb));
+        return (
+            sev_color(d.severity),
+            format!("{kind} · {}", d.suggested_verb),
+        );
     }
     if !c.detected {
         return (theme::WARN, "not installed".into());

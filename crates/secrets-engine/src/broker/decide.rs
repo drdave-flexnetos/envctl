@@ -409,7 +409,10 @@ mod tests {
 
     #[test]
     fn baseline_allows() {
-        assert_eq!(run(&base_policy(), &base_bearer(), &base_req()), RelayDecision::Allow);
+        assert_eq!(
+            run(&base_policy(), &base_bearer(), &base_req()),
+            RelayDecision::Allow
+        );
     }
 
     fn assert_deny(p: &RelayPolicy, b: &VerifiedBearer, r: &CanonRequest, reason: DenyReason) {
@@ -482,14 +485,24 @@ mod tests {
     fn path_not_allowed() {
         let mut r = base_req();
         r.path = "/admin/secrets".to_string();
-        assert_deny(&base_policy(), &base_bearer(), &r, DenyReason::PathNotAllowed);
+        assert_deny(
+            &base_policy(),
+            &base_bearer(),
+            &r,
+            DenyReason::PathNotAllowed,
+        );
     }
 
     #[test]
     fn method_not_allowed() {
         let mut r = base_req();
         r.method = Method::Get;
-        assert_deny(&base_policy(), &base_bearer(), &r, DenyReason::MethodNotAllowed);
+        assert_deny(
+            &base_policy(),
+            &base_bearer(),
+            &r,
+            DenyReason::MethodNotAllowed,
+        );
     }
 
     #[test]
@@ -498,7 +511,12 @@ mod tests {
         // outer fence denies. Use a host that IS in host_allow so we pass check 7 and reach 10.
         let mut p = base_policy();
         p.provider = Provider::Generic;
-        assert_deny(&p, &base_bearer(), &base_req(), DenyReason::UpstreamNotAllowed);
+        assert_deny(
+            &p,
+            &base_bearer(),
+            &base_req(),
+            DenyReason::UpstreamNotAllowed,
+        );
     }
 
     #[test]
@@ -512,7 +530,12 @@ mod tests {
     fn sni_host_mismatch() {
         let mut r = base_req();
         r.sni = Some("other.com".to_string());
-        assert_deny(&base_policy(), &base_bearer(), &r, DenyReason::SniHostMismatch);
+        assert_deny(
+            &base_policy(),
+            &base_bearer(),
+            &r,
+            DenyReason::SniHostMismatch,
+        );
     }
 
     #[test]
@@ -683,7 +706,12 @@ mod tests {
         // failed closed rather than allowed.
         let mut r = remote_req();
         r.remote.as_mut().unwrap().dpop_verified = false;
-        assert_deny(&base_policy(), &remote_bearer(), &r, DenyReason::RemoteNoDPoP);
+        assert_deny(
+            &base_policy(),
+            &remote_bearer(),
+            &r,
+            DenyReason::RemoteNoDPoP,
+        );
     }
 
     #[test]
@@ -720,7 +748,12 @@ mod tests {
         let mut r = remote_req();
         r.host = "evil.example".to_string();
         r.sni = Some("evil.example".to_string()); // keep SNI==host so HostNotAllowed (7) fires first
-        assert_deny(&base_policy(), &remote_bearer(), &r, DenyReason::HostNotAllowed);
+        assert_deny(
+            &base_policy(),
+            &remote_bearer(),
+            &r,
+            DenyReason::HostNotAllowed,
+        );
     }
 
     #[test]

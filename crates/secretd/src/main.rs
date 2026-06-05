@@ -24,9 +24,9 @@ use std::path::Path;
 
 use anyhow::Context;
 use clap::Parser;
+use envctl_secretd::{config, peercred, server};
 use envctl_secrets::paths::Paths;
 use envctl_secrets::Engine;
-use envctl_secretd::{config, peercred, server};
 use rustix::process::{setrlimit, Resource, Rlimit};
 
 /// secretd — the env-ctl control-plane secrets daemon (gRPC over a Unix-domain socket).
@@ -34,7 +34,11 @@ use rustix::process::{setrlimit, Resource, Rlimit};
 /// With no flags it serves the control plane (the systemd `ExecStart` path). The one option is the
 /// non-serving health probe used by the envctl manifest `verify` hook.
 #[derive(Parser)]
-#[command(name = "secretd", version, about = "env-ctl control-plane secrets daemon (gRPC over a UDS)")]
+#[command(
+    name = "secretd",
+    version,
+    about = "env-ctl control-plane secrets daemon (gRPC over a UDS)"
+)]
 struct Cli {
     /// Run startup pre-flight checks (ring crypto provider, XDG paths, store config) and EXIT,
     /// without binding the control socket or serving. Exit 0 = the daemon could come up here; a
@@ -138,14 +142,14 @@ async fn serve() -> anyhow::Result<()> {
 
     // Graceful shutdown on SIGINT / SIGTERM.
     let shutdown = async {
-        let mut sigterm = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to install SIGTERM handler");
-                return;
-            }
-        };
+        let mut sigterm =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to install SIGTERM handler");
+                    return;
+                }
+            };
         tokio::select! {
             _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT received; shutting down"),
             _ = sigterm.recv() => tracing::info!("SIGTERM received; shutting down"),
@@ -168,7 +172,9 @@ async fn serve() -> anyhow::Result<()> {
 async fn build_engine(paths: Paths, cfg: config::StoreConfig) -> anyhow::Result<Engine> {
     match cfg.backend {
         config::Backend::InMem => {
-            tracing::info!("store backend = in-memory (ephemeral; set [store] in secretd.toml for durability)");
+            tracing::info!(
+                "store backend = in-memory (ephemeral; set [store] in secretd.toml for durability)"
+            );
             Engine::open(paths).context("opening the engine on the in-memory store")
         }
         config::Backend::LibSql => {

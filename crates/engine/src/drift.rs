@@ -46,7 +46,11 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
                 items.push(DriftItem {
                     component: c.id.clone(),
                     kind: DriftKind::Missing,
-                    severity: if is_meta { Severity::Low } else { Severity::Medium },
+                    severity: if is_meta {
+                        Severity::Low
+                    } else {
+                        Severity::Medium
+                    },
                     suggested_verb: format!("envctl install {}", c.id),
                     detail: "declared but not installed".into(),
                 });
@@ -60,11 +64,17 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
             let destructive = comp.map(|x| x.destructive).unwrap_or(false);
             let (verb, detail) = if destructive {
                 (
-                    format!("envctl auto-fix {}   (dry-run first; review, then --apply)", c.id),
+                    format!(
+                        "envctl auto-fix {}   (dry-run first; review, then --apply)",
+                        c.id
+                    ),
                     "verify failed — destructive fix, run dry-run and confirm before --apply",
                 )
             } else {
-                (format!("envctl auto-fix {} --apply", c.id), "installed but verify failed")
+                (
+                    format!("envctl auto-fix {} --apply", c.id),
+                    "installed but verify failed",
+                )
             };
             items.push(DriftItem {
                 component: c.id.clone(),
@@ -187,7 +197,12 @@ mod tests {
         let s = DriftSummary::from_items(&items);
         assert_eq!(
             s,
-            DriftSummary { high: 2, medium: 1, low: 3, total: 6 }
+            DriftSummary {
+                high: 2,
+                medium: 1,
+                low: 3,
+                total: 6
+            }
         );
     }
 
@@ -200,7 +215,12 @@ mod tests {
 
     #[test]
     fn summary_display_wording() {
-        let s = DriftSummary { high: 1, medium: 0, low: 2, total: 3 };
+        let s = DriftSummary {
+            high: 1,
+            medium: 0,
+            low: 2,
+            total: 3,
+        };
         assert_eq!(s.to_string(), "Drift: 1 high, 0 medium, 2 low (3 total)");
     }
 

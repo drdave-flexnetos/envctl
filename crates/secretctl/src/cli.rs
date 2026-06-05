@@ -3,7 +3,10 @@
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "env-ctl", about = "env-ctl — local secrets vault + credential broker")]
+#[command(
+    name = "env-ctl",
+    about = "env-ctl — local secrets vault + credential broker"
+)]
 pub struct Cli {
     /// Emit machine-readable NDJSON instead of pretty output.
     #[arg(long, global = true)]

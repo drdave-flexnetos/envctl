@@ -7,8 +7,8 @@ pub mod gate;
 pub mod policy;
 pub mod token;
 
-pub use decide::{decide, CanonRequest, DenyReason, RelayDecision, VerifiedBearer};
 pub use decide::RemotePeer;
+pub use decide::{decide, CanonRequest, DenyReason, RelayDecision, VerifiedBearer};
 pub use gate::{gate_absent_since_ms, GateState, PresenceGate};
 pub use policy::{
     canonical_upstreams, clamp_ttl, Bearer, Method, Provider, RelayId, RelayKind, RelayPolicy,
@@ -99,7 +99,16 @@ pub fn bearer_row_mac_message(
     let cid = client_id.map(|s| s.as_bytes());
     let kind: u8 = if client_id.is_some() { 1 } else { 0 };
     let mut m = Vec::with_capacity(
-        BEARER_ROW_MAC_DOMAIN.len() + 1 + 8 + tid.len() + 8 * 4 + 2 * 5 + 9 + cid.map_or(0, |c| c.len()) + 33 + 1,
+        BEARER_ROW_MAC_DOMAIN.len()
+            + 1
+            + 8
+            + tid.len()
+            + 8 * 4
+            + 2 * 5
+            + 9
+            + cid.map_or(0, |c| c.len())
+            + 33
+            + 1,
     );
     m.extend_from_slice(BEARER_ROW_MAC_DOMAIN);
     m.push(kind);
@@ -238,18 +247,49 @@ mod tests {
         // Identical non-binding fields; the LOCAL (uid) vs REMOTE (client_id+jkt) planes MUST produce
         // different MAC messages (F12) — so a store tamper that flips a local row to remote, or swaps
         // the bound client_id/jkt, changes the message and fails the row MAC closed.
-        let local = bearer_row_mac_message("tok", 1, 100, 50, 10, Some(1000), None, None, None, false);
-        let remote =
-            bearer_row_mac_message("tok", 1, 100, 50, 10, None, None, Some("phone"), Some(&jkt), false);
+        let local =
+            bearer_row_mac_message("tok", 1, 100, 50, 10, Some(1000), None, None, None, false);
+        let remote = bearer_row_mac_message(
+            "tok",
+            1,
+            100,
+            50,
+            10,
+            None,
+            None,
+            Some("phone"),
+            Some(&jkt),
+            false,
+        );
         assert_ne!(local, remote, "local and remote planes must not collide");
 
         // The bound client_id and jkt are each authenticated.
-        let remote_other_cid =
-            bearer_row_mac_message("tok", 1, 100, 50, 10, None, None, Some("laptop"), Some(&jkt), false);
+        let remote_other_cid = bearer_row_mac_message(
+            "tok",
+            1,
+            100,
+            50,
+            10,
+            None,
+            None,
+            Some("laptop"),
+            Some(&jkt),
+            false,
+        );
         assert_ne!(remote, remote_other_cid, "client_id is bound");
         let jkt2 = [0x22u8; 32];
-        let remote_other_jkt =
-            bearer_row_mac_message("tok", 1, 100, 50, 10, None, None, Some("phone"), Some(&jkt2), false);
+        let remote_other_jkt = bearer_row_mac_message(
+            "tok",
+            1,
+            100,
+            50,
+            10,
+            None,
+            None,
+            Some("phone"),
+            Some(&jkt2),
+            false,
+        );
         assert_ne!(remote, remote_other_jkt, "dpop_jkt is bound");
 
         // Determinism + `revoked` binding (unchanged behavior) + None vs Some("") do not alias.
@@ -260,8 +300,21 @@ mod tests {
         let local_revoked =
             bearer_row_mac_message("tok", 1, 100, 50, 10, Some(1000), None, None, None, true);
         assert_ne!(local, local_revoked, "revoked is bound");
-        let empty_cid =
-            bearer_row_mac_message("tok", 1, 100, 50, 10, None, None, Some(""), Some(&jkt), false);
-        assert_ne!(remote, empty_cid, "Some(\"\") client_id must not alias a real one");
+        let empty_cid = bearer_row_mac_message(
+            "tok",
+            1,
+            100,
+            50,
+            10,
+            None,
+            None,
+            Some(""),
+            Some(&jkt),
+            false,
+        );
+        assert_ne!(
+            remote, empty_cid,
+            "Some(\"\") client_id must not alias a real one"
+        );
     }
 }

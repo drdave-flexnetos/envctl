@@ -183,7 +183,11 @@ mod tests {
     #[test]
     fn distinct_tokens_do_not_collide() {
         let stored = mac_bearer(&KEY, BEARER);
-        assert!(!verify_bearer(&KEY, "a-completely-different-bearer", &stored));
+        assert!(!verify_bearer(
+            &KEY,
+            "a-completely-different-bearer",
+            &stored
+        ));
         // Empty presented token against a real MAC must fail.
         assert!(!verify_bearer(&KEY, "", &stored));
     }

@@ -14,16 +14,16 @@
 //! (error.rs discipline). The relay/CA/run paths remain `todo!()` (Phase 4+).
 #![allow(dead_code)] // Some scaffold fields/bodies are placeholders until later phases.
 
-pub mod event; // SecretEvent, EventSink (std mpsc), Stream, AuditRecord
-pub mod error; // EngineError (thiserror, setup-time only), VaultState
-pub mod seam; // Clock, UsbProbe, ProviderMint, Upstream + SystemClock/RealUsbProbe + fakes
-pub mod guard; // SecGuard, check_sec_guards, UnlockContext (fail-closed)
-pub mod paths; // Paths (XDG, env-ctl-namespaced)
-pub mod keyslot; // Keyslot, Kdf, Argon2Params, wrap/unwrap (LUKS-style dual KEK) + header MAC
-pub mod vault; // Vault state machine + Store trait + crypto (seal/open) + canonical AAD + audit
 pub mod broker; // Broker, RelayPolicy, Bearer, decide(), token verify, clamp_ttl, SwapOutcome
 pub mod ca; // LocalCa (feature mitm-ca)
-pub mod inject; // ChildEnvPlan, ResolvedInjection, injection_template, run_wrapped
+pub mod error; // EngineError (thiserror, setup-time only), VaultState
+pub mod event; // SecretEvent, EventSink (std mpsc), Stream, AuditRecord
+pub mod guard; // SecGuard, check_sec_guards, UnlockContext (fail-closed)
+pub mod inject;
+pub mod keyslot; // Keyslot, Kdf, Argon2Params, wrap/unwrap (LUKS-style dual KEK) + header MAC
+pub mod paths; // Paths (XDG, env-ctl-namespaced)
+pub mod seam; // Clock, UsbProbe, ProviderMint, Upstream + SystemClock/RealUsbProbe + fakes
+pub mod vault; // Vault state machine + Store trait + crypto (seal/open) + canonical AAD + audit // ChildEnvPlan, ResolvedInjection, injection_template, run_wrapped
 
 pub use broker::{
     clamp_ttl, Bearer, DenyReason, Method, Provider, RelayDecision, RelayId, RelayKind,
@@ -342,9 +342,10 @@ impl Engine {
             Unlock::Passphrase(pp) => {
                 let pp_bytes = Zeroizing::new(pp.as_bytes().to_vec());
                 let mut dek = None;
-                for slot in slots.iter().filter(|s| {
-                    s.enabled && s.factor == Factor::Passphrase
-                }) {
+                for slot in slots
+                    .iter()
+                    .filter(|s| s.enabled && s.factor == Factor::Passphrase)
+                {
                     // Validate the slot's KDF params against the floors AND the argon2 structural
                     // invariants BEFORE deriving. `kek_from_passphrase` calls `Params::new(..)
                     // .expect(..)`, which PANICS for `p_lanes == 0` (ThreadsTooFew) or `m_kib <
@@ -366,7 +367,8 @@ impl Engine {
                     };
                     let kek = kek_from_passphrase(&pp_bytes, &slot.salt, params);
                     let aad = keyslot_aad(slot);
-                    if let Some(d) = keyslot::unwrap_dek(kek, &slot.wrap_nonce, &slot.wrapped_dek, &aad)
+                    if let Some(d) =
+                        keyslot::unwrap_dek(kek, &slot.wrap_nonce, &slot.wrapped_dek, &aad)
                     {
                         dek = Some(d);
                         break;
@@ -376,7 +378,10 @@ impl Engine {
             }
             Unlock::Usb => {
                 let mut dek = None;
-                for slot in slots.iter().filter(|s| s.enabled && s.factor == Factor::Usb) {
+                for slot in slots
+                    .iter()
+                    .filter(|s| s.enabled && s.factor == Factor::Usb)
+                {
                     // UUID match is NOT possession (CF-4): we must actually obtain the keyfile.
                     let Some(uuid) = slot.usb_partition_uuid.as_deref() else {
                         continue;
@@ -386,7 +391,8 @@ impl Engine {
                     };
                     let kek = kek_from_usb(&keyfile, &slot.salt);
                     let aad = keyslot_aad(slot);
-                    if let Some(d) = keyslot::unwrap_dek(kek, &slot.wrap_nonce, &slot.wrapped_dek, &aad)
+                    if let Some(d) =
+                        keyslot::unwrap_dek(kek, &slot.wrap_nonce, &slot.wrapped_dek, &aad)
                     {
                         dek = Some(d);
                         break;
@@ -409,7 +415,12 @@ impl Engine {
         // set was tampered; zeroize the dek and refuse.
         if !verify_header_mac(&dek, &slots, issuance_floor_ms, &stored_mac) {
             drop(dek); // ZeroizeOnDrop wipes it.
-            self.audit_failed(sink, "vault_unlock", None, serde_json::json!({ "reason": "header_mac" }))?;
+            self.audit_failed(
+                sink,
+                "vault_unlock",
+                None,
+                serde_json::json!({ "reason": "header_mac" }),
+            )?;
             return Err(EngineError::HeaderMacMismatch.into());
         }
 
@@ -464,7 +475,9 @@ impl Engine {
         // `vault_unlocked` row (it was appended while still Locked, so the in-`audit` advance was a
         // no-op). This leaves the freshly-unlocked vault with a current tail anchor.
         self.advance_audit_anchor_if_unlocked()?;
-        sink.emit(SecretEvent::VaultUnlocked { factor: want_factor });
+        sink.emit(SecretEvent::VaultUnlocked {
+            factor: want_factor,
+        });
         Ok(VaultState::Unlocked)
     }
 
@@ -694,9 +707,10 @@ impl Engine {
             Option<[u8; 32]>,
         ) = match binding {
             broker::BearerBinding::Local { peer_uid, peer_pid } => (peer_uid, peer_pid, None, None),
-            broker::BearerBinding::Remote { client_id, dpop_jkt } => {
-                (None, None, Some(client_id), Some(dpop_jkt))
-            }
+            broker::BearerBinding::Remote {
+                client_id,
+                dpop_jkt,
+            } => (None, None, Some(client_id), Some(dpop_jkt)),
         };
         let now_ms = inner.clock.now().timestamp_millis();
         // Monotonic anchor captured at mint (OI-6): the rollback fence in `decide` measures elapsed
@@ -719,8 +733,15 @@ impl Engine {
         // but guards a direct `relay_mint(None, None)` misuse.
         if client_uid.is_none() && client_pid.is_none() && client_id.is_none() {
             drop(v);
-            self.refuse(sink, "relay_mint", &spec.relay_id, "bearer binding has no principal (uid/pid/client_id all absent)")?;
-            anyhow::bail!("relay_mint refused: binding has neither a local peer nor a remote client_id");
+            self.refuse(
+                sink,
+                "relay_mint",
+                &spec.relay_id,
+                "bearer binding has no principal (uid/pid/client_id all absent)",
+            )?;
+            anyhow::bail!(
+                "relay_mint refused: binding has neither a local peer nor a remote client_id"
+            );
         }
 
         // USB-GATE (HF-14): prove possession of the keyfile backing an enabled USB keyslot BEFORE
@@ -729,7 +750,12 @@ impl Engine {
         // event), then a typed `UsbAbsent` Err; the real key is never derived.
         if !self.usb_possession_proven()? {
             drop(v);
-            self.refuse(sink, "relay_mint", &spec.relay_id, "usb possession not proven")?;
+            self.refuse(
+                sink,
+                "relay_mint",
+                &spec.relay_id,
+                "usb possession not proven",
+            )?;
             return Err(EngineError::UsbAbsent.into());
         }
 
@@ -742,7 +768,12 @@ impl Engine {
             Some(e) => e,
             None => {
                 drop(v);
-                self.refuse(sink, "relay_mint", &spec.relay_id, "ttl clamp refused (non-positive)")?;
+                self.refuse(
+                    sink,
+                    "relay_mint",
+                    &spec.relay_id,
+                    "ttl clamp refused (non-positive)",
+                )?;
                 anyhow::bail!("relay_mint refused: clamped TTL is non-positive");
             }
         };
@@ -876,7 +907,12 @@ impl Engine {
         let now_ms = inner.clock.now().timestamp_millis();
         // USB possession (operator gate), same as mint — registering a remote principal is privileged.
         if !self.usb_possession_proven()? {
-            self.refuse(sink, "register_remote_client", &client_id, "usb possession not proven")?;
+            self.refuse(
+                sink,
+                "register_remote_client",
+                &client_id,
+                "usb possession not proven",
+            )?;
             return Err(EngineError::UsbAbsent.into());
         }
         inner.store.save_remote_client(crate::vault::RemoteClient {
@@ -917,18 +953,31 @@ impl Engine {
         match registered {
             Some(c) if c.enabled && c.revoked_at_ms.is_none() && c.dpop_jkt == dpop_jkt => {}
             Some(_) => {
-                self.refuse(sink, "relay_mint_remote", &spec.relay_id, "remote client disabled/revoked or jkt mismatch")?;
+                self.refuse(
+                    sink,
+                    "relay_mint_remote",
+                    &spec.relay_id,
+                    "remote client disabled/revoked or jkt mismatch",
+                )?;
                 anyhow::bail!("relay_mint_remote refused: client not enabled, or DPoP jkt does not match registration");
             }
             None => {
-                self.refuse(sink, "relay_mint_remote", &spec.relay_id, "unknown remote client")?;
+                self.refuse(
+                    sink,
+                    "relay_mint_remote",
+                    &spec.relay_id,
+                    "unknown remote client",
+                )?;
                 anyhow::bail!("relay_mint_remote refused: client {client_id:?} is not registered");
             }
         }
         self.mint_bearer_core(
             spec,
             requested_ttl_secs,
-            broker::BearerBinding::Remote { client_id, dpop_jkt },
+            broker::BearerBinding::Remote {
+                client_id,
+                dpop_jkt,
+            },
             sink,
         )
     }
@@ -1053,12 +1102,7 @@ impl Engine {
     /// return value. A `Deny` (or any internal error) never fetches the key and never reaches the
     /// upstream. All locks are dropped before the `.await` (the real key is moved out as an owned
     /// `Zeroizing<Vec<u8>>`).
-    pub async fn relay_swap(
-        &self,
-        bearer: &str,
-        req: &EgressReq,
-        sink: &EventSink,
-    ) -> SwapOutcome {
+    pub async fn relay_swap(&self, bearer: &str, req: &EgressReq, sink: &EventSink) -> SwapOutcome {
         // The whole pre-await body is fallible; funnel any `?` (lock poison / store error) into a
         // durable-audited `InternalRefused` so an internal error can NEVER fail-open into a send.
         match self.relay_swap_prepare(bearer, req, sink) {
@@ -1092,10 +1136,9 @@ impl Engine {
                 // carried in `allow` (and `owned.host`) forecloses any divergence if the actual
                 // upstream target ever becomes a function of an adapter/base-url rewrite. A miss
                 // refuses WITHOUT sending — the key (still in `allow`) is dropped/zeroized.
-                if !canonical_upstreams(allow.provider)
-                    .iter()
-                    .any(|h| h.eq_ignore_ascii_case(&owned.host) && h.eq_ignore_ascii_case(&allow.host))
-                {
+                if !canonical_upstreams(allow.provider).iter().any(|h| {
+                    h.eq_ignore_ascii_case(&owned.host) && h.eq_ignore_ascii_case(&allow.host)
+                }) {
                     let _ = self.audit_failed(
                         sink,
                         "relay_swapped",
@@ -1174,12 +1217,20 @@ impl Engine {
 
         // 1. Parse. A malformed / foreign bearer is UnknownBearer (no store hit, no crypto).
         let Some((token_id, raw)) = parse_bearer(bearer) else {
-            return Ok(Prepared::Deny(self.deny_swap(sink, None, None, DenyReason::UnknownBearer)?));
+            return Ok(Prepared::Deny(self.deny_swap(
+                sink,
+                None,
+                None,
+                DenyReason::UnknownBearer,
+            )?));
         };
 
         // 2. Snapshot under the vault READ lock. A poisoned lock fails closed (mapped to
         // InternalRefused by the caller), never a panic that unwinds past the deny funnel.
-        let v = inner.vault.read().map_err(|_| anyhow::anyhow!("vault lock poisoned"))?;
+        let v = inner
+            .vault
+            .read()
+            .map_err(|_| anyhow::anyhow!("vault lock poisoned"))?;
         let dek = match v.dek() {
             Some(d) => d,
             // A locked vault returns InternalRefused (never a send) — fail-closed.
@@ -1192,7 +1243,12 @@ impl Engine {
         // Load the bearer row by the public token_id (O(1)); a miss is UnknownBearer.
         let Some(row) = inner.store.load_bearer(token_id)? else {
             drop(v);
-            return Ok(Prepared::Deny(self.deny_swap(sink, None, Some(token_id), DenyReason::UnknownBearer)?));
+            return Ok(Prepared::Deny(self.deny_swap(
+                sink,
+                None,
+                Some(token_id),
+                DenyReason::UnknownBearer,
+            )?));
         };
 
         // Constant-time MAC verify over the WHOLE wire string. A forged/wrong secret cannot be
@@ -1201,7 +1257,12 @@ impl Engine {
         if !verify_bearer(&hmac_key, raw, &row.mac) {
             drop(hmac_key);
             drop(v);
-            return Ok(Prepared::Deny(self.deny_swap(sink, None, Some(token_id), DenyReason::UnknownBearer)?));
+            return Ok(Prepared::Deny(self.deny_swap(
+                sink,
+                None,
+                Some(token_id),
+                DenyReason::UnknownBearer,
+            )?));
         }
         drop(hmac_key);
 
@@ -1226,7 +1287,12 @@ impl Engine {
         if !verify_bearer_row(&row_mac_key, &row_msg, &row.row_mac) {
             drop(row_mac_key);
             drop(v);
-            return Ok(Prepared::Deny(self.deny_swap(sink, None, Some(token_id), DenyReason::UnknownBearer)?));
+            return Ok(Prepared::Deny(self.deny_swap(
+                sink,
+                None,
+                Some(token_id),
+                DenyReason::UnknownBearer,
+            )?));
         }
         drop(row_mac_key);
 
@@ -1237,7 +1303,12 @@ impl Engine {
             Some(pr) => pr,
             None => {
                 drop(v);
-                return Ok(Prepared::Deny(self.deny_swap(sink, None, Some(token_id), DenyReason::UnknownBearer)?));
+                return Ok(Prepared::Deny(self.deny_swap(
+                    sink,
+                    None,
+                    Some(token_id),
+                    DenyReason::UnknownBearer,
+                )?));
             }
         };
         let relay_id = policy_row.policy.relay_id.clone();
@@ -1309,7 +1380,12 @@ impl Engine {
         ) {
             RelayDecision::Deny { reason } => {
                 drop(v);
-                Ok(Prepared::Deny(self.deny_swap(sink, Some(relay_id), Some(token_id), reason)?))
+                Ok(Prepared::Deny(self.deny_swap(
+                    sink,
+                    Some(relay_id),
+                    Some(token_id),
+                    reason,
+                )?))
             }
             RelayDecision::Allow => {
                 // ONLY NOW fetch the real secret — internal open, reveal=false-internal — producing
@@ -1373,7 +1449,11 @@ impl Engine {
     /// clear-text state. Requires the vault unlocked (`Err(Locked)` otherwise — a locked vault can
     /// neither mint nor revoke, fail-closed).
     fn reseal_bearer_row(&self, row: &mut BearerRow) -> anyhow::Result<()> {
-        let v = self.inner.vault.read().map_err(|_| anyhow::anyhow!("vault lock poisoned"))?;
+        let v = self
+            .inner
+            .vault
+            .read()
+            .map_err(|_| anyhow::anyhow!("vault lock poisoned"))?;
         let dek = match v.dek() {
             Some(d) => d,
             None => return Err(EngineError::Locked.into()),
@@ -1618,7 +1698,9 @@ impl Engine {
         );
         let mac = audit_head_mac(dek, high_water, high_water, tail_hash);
         let _ = new_seq;
-        self.inner.store.put_meta(META_AUDIT_HEAD, &hex_encode(&mac))?;
+        self.inner
+            .store
+            .put_meta(META_AUDIT_HEAD, &hex_encode(&mac))?;
         Ok(())
     }
 

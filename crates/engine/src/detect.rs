@@ -16,8 +16,20 @@ use std::process::Command;
 
 /// Tools probed for version (curated to ones that print-and-exit; avoids hangs).
 const PROBE_TOOLS: &[&str] = &[
-    "cargo", "rustc", "bun", "node", "nvcc", "nvidia-smi", "nix", "gh", "uv", "wasmer", "podman",
-    "python3", "git", "curl",
+    "cargo",
+    "rustc",
+    "bun",
+    "node",
+    "nvcc",
+    "nvidia-smi",
+    "nix",
+    "gh",
+    "uv",
+    "wasmer",
+    "podman",
+    "python3",
+    "git",
+    "curl",
 ];
 
 pub fn run(reg: &Registry, runner: &dyn HookRunner, sink: &EventSink) -> anyhow::Result<EnvReport> {
@@ -80,12 +92,14 @@ pub fn run(reg: &Registry, runner: &dyn HookRunner, sink: &EventSink) -> anyhow:
             continue;
         }
         if let Some(h) = comp.detect.as_ref() {
-            st.detected = runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok;
+            st.detected =
+                runner.run(&comp.id, Phase::Detect, h, false, sink).status == OpStatus::Ok;
         }
         if st.detected {
             if let Some(h) = comp.verify.as_ref() {
-                st.healthy =
-                    Some(runner.run(&comp.id, Phase::Verify, h, false, sink).status == OpStatus::Ok);
+                st.healthy = Some(
+                    runner.run(&comp.id, Phase::Verify, h, false, sink).status == OpStatus::Ok,
+                );
             }
         }
         report.components.push(st);
@@ -121,7 +135,10 @@ pub(crate) fn pci_nvidia_count() -> usize {
 
 fn nvidia_open_module() -> bool {
     // The open kernel modules report a free license; the proprietary one does not.
-    if let Ok(out) = Command::new("modinfo").args(["-F", "license", "nvidia"]).output() {
+    if let Ok(out) = Command::new("modinfo")
+        .args(["-F", "license", "nvidia"])
+        .output()
+    {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
             return s.contains("mit") || s.contains("gpl");
@@ -132,7 +149,12 @@ fn nvidia_open_module() -> bool {
 
 fn nvidia_smi_names() -> Vec<String> {
     run_capture("nvidia-smi", &["--query-gpu=name", "--format=csv,noheader"])
-        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        .map(|s| {
+            s.lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -146,13 +168,16 @@ fn nvidia_smi_driver_version() -> Option<String> {
 }
 
 fn lspci_nvidia_names() -> Vec<String> {
-    run_capture("bash", &["-lc", "lspci | grep -iE 'vga|3d' | grep -i nvidia"])
-        .map(|s| {
-            s.lines()
-                .filter_map(|l| l.split_once(": ").map(|(_, n)| n.trim().to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
+    run_capture(
+        "bash",
+        &["-lc", "lspci | grep -iE 'vga|3d' | grep -i nvidia"],
+    )
+    .map(|s| {
+        s.lines()
+            .filter_map(|l| l.split_once(": ").map(|(_, n)| n.trim().to_string()))
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 fn nvcc_cuda_version() -> Option<String> {
@@ -231,8 +256,14 @@ fn wiring_present(comp: &crate::component::Component) -> bool {
             .map(|t| w.nix_conf_lines.iter().all(|l| t.contains(&l.line)))
             .unwrap_or(false)
     };
-    let cdi_ok = w.cdi_specs.iter().all(|c| std::path::Path::new(&c.output).exists());
-    let alt_ok = w.alternatives.iter().all(|a| std::path::Path::new(&a.link).exists());
+    let cdi_ok = w
+        .cdi_specs
+        .iter()
+        .all(|c| std::path::Path::new(&c.output).exists());
+    let alt_ok = w
+        .alternatives
+        .iter()
+        .all(|a| std::path::Path::new(&a.link).exists());
 
     shell_rc_ok && path_ok && apt_ok && nix_ok && cdi_ok && alt_ok
 }

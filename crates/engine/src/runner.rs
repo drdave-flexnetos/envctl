@@ -24,7 +24,14 @@ use std::time::{Duration, Instant};
 pub struct ProcessRunner;
 
 impl HookRunner for ProcessRunner {
-    fn run(&self, comp: &str, phase: Phase, hook: &Hook, dry_run: bool, sink: &EventSink) -> OpResult {
+    fn run(
+        &self,
+        comp: &str,
+        phase: Phase,
+        hook: &Hook,
+        dry_run: bool,
+        sink: &EventSink,
+    ) -> OpResult {
         if dry_run {
             return mk(comp, phase, OpStatus::DryRun, None, "dry-run");
         }
@@ -48,21 +55,45 @@ impl HookRunner for ProcessRunner {
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return mk(comp, phase, OpStatus::Failed, None, &format!("spawn failed: {e}")),
+            Err(e) => {
+                return mk(
+                    comp,
+                    phase,
+                    OpStatus::Failed,
+                    None,
+                    &format!("spawn failed: {e}"),
+                )
+            }
         };
         let pid = child.id();
 
         let log = Arc::new(Mutex::new(if streaming { open_run_log() } else { None }));
         let tail = Arc::new(Mutex::new(Vec::<String>::new())); // last stderr lines for the message
-        // Audit fix (minor #27): also keep a stdout tail so probes that echo their
-        // diagnostic to stdout then exit 1 don't yield an empty failure message.
+                                                               // Audit fix (minor #27): also keep a stdout tail so probes that echo their
+                                                               // diagnostic to stdout then exit 1 don't yield an empty failure message.
         let out_tail = Arc::new(Mutex::new(Vec::<String>::new()));
 
         let h_out = child.stdout.take().map(|r| {
-            pump(r, comp.to_string(), Stream::Stdout, streaming, sink.clone(), log.clone(), Some(out_tail.clone()))
+            pump(
+                r,
+                comp.to_string(),
+                Stream::Stdout,
+                streaming,
+                sink.clone(),
+                log.clone(),
+                Some(out_tail.clone()),
+            )
         });
         let h_err = child.stderr.take().map(|r| {
-            pump(r, comp.to_string(), Stream::Stderr, streaming, sink.clone(), log.clone(), Some(tail.clone()))
+            pump(
+                r,
+                comp.to_string(),
+                Stream::Stderr,
+                streaming,
+                sink.clone(),
+                log.clone(),
+                Some(tail.clone()),
+            )
         });
 
         let (code, success, timed_out) = wait_timeout(&mut child, timeout_for(phase), pid);
@@ -79,7 +110,13 @@ impl HookRunner for ProcessRunner {
             // conventional timeout exit code (124) so JSON consumers can tell a
             // timeout from a did-not-run, regardless of what `code` carries.
             let _ = code;
-            return mk(comp, phase, OpStatus::Failed, Some(124), &format!("timed out after {}s", timeout_for(phase).as_secs()));
+            return mk(
+                comp,
+                phase,
+                OpStatus::Failed,
+                Some(124),
+                &format!("timed out after {}s", timeout_for(phase).as_secs()),
+            );
         }
         if success {
             mk(comp, phase, OpStatus::Ok, code, "")
@@ -96,7 +133,13 @@ impl HookRunner for ProcessRunner {
     }
 }
 
-fn mk(comp: &str, phase: Phase, status: OpStatus, exit_code: Option<i32>, message: &str) -> OpResult {
+fn mk(
+    comp: &str,
+    phase: Phase,
+    status: OpStatus,
+    exit_code: Option<i32>,
+    message: &str,
+) -> OpResult {
     OpResult {
         component: comp.into(),
         phase,
@@ -137,9 +180,15 @@ fn pump<R: Read + Send + 'static>(
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }
-            let line = String::from_utf8_lossy(&buf).trim_end_matches(['\n', '\r']).to_string();
+            let line = String::from_utf8_lossy(&buf)
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
             if streaming {
-                sink.emit(Event::Log { component: comp.clone(), stream, line: line.clone() });
+                sink.emit(Event::Log {
+                    component: comp.clone(),
+                    stream,
+                    line: line.clone(),
+                });
                 if let Ok(mut g) = log.lock() {
                     if let Some(f) = g.as_mut() {
                         // Audit fix (minor #26): on the first tee write error, emit one
@@ -229,7 +278,12 @@ fn truncate(s: &str, max: usize) -> &str {
 /// without one it fails fast instead of hanging on a TTY-less password prompt.
 fn build_command(hook: &Hook) -> Command {
     match hook {
-        Hook::Command { command, args, env, needs_sudo } => {
+        Hook::Command {
+            command,
+            args,
+            env,
+            needs_sudo,
+        } => {
             let mut c = sudo_or(command, *needs_sudo);
             c.args(args);
             for (k, v) in env {
@@ -237,7 +291,13 @@ fn build_command(hook: &Hook) -> Command {
             }
             c
         }
-        Hook::Script { script, path, env, needs_sudo, login_shell } => {
+        Hook::Script {
+            script,
+            path,
+            env,
+            needs_sudo,
+            login_shell,
+        } => {
             let shell_flag = if *login_shell { "-lc" } else { "-c" };
             // The `bash -lc` command string is the inline script, or — when a
             // `path` is given — the path itself (bash executes it).
@@ -260,7 +320,11 @@ fn build_command(hook: &Hook) -> Command {
             }
             c
         }
-        Hook::ShippedScript { path, args, needs_sudo } => {
+        Hook::ShippedScript {
+            path,
+            args,
+            needs_sudo,
+        } => {
             let mut c = if *needs_sudo {
                 let mut s = Command::new("sudo");
                 s.arg("-n").arg("bash").arg(path);
