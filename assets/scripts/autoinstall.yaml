@@ -159,6 +159,7 @@ autoinstall:
       for d in /cdrom /media/* /run/media/*/* .; do
         [ -f "$d/yazelix-setup.sh" ]  && install -D -m 755 "$d/yazelix-setup.sh"  /target/usr/local/bin/yazelix-setup.sh;
         [ -f "$d/yazelix-config.sh" ] && install -D -m 755 "$d/yazelix-config.sh" /target/usr/local/bin/yazelix-config.sh;
+        [ -f "$d/yazelix-gpu-verify-install.sh" ] && install -D -m 755 "$d/yazelix-gpu-verify-install.sh" /target/usr/local/bin/yazelix-gpu-verify-install.sh;
       done'
 
   # --- First-boot configuration (cloud-init, on the real booted system) ------
