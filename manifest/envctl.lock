@@ -151,6 +151,11 @@ content_hash = "4ba601bcc9326bb6"
 requires = ["nix"]
 resolved = ""
 
+[components.kasetto]
+content_hash = "cd67e755fdf1f886"
+requires = ["rustup"]
+resolved = ""
+
 [components.keepassxc]
 content_hash = "e43fd87c3b6f30ac"
 requires = []
