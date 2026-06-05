@@ -4,11 +4,11 @@ loop: env-install-loop
 branch: env-install-loop
 worktree: /home/drdave/Desktop/meta/.worktrees/env-install-loop/envctl
 cycle_budget: 3
-cycles_this_session: 0
-cycles_total: 0
-last_item: (none — discovery baseline only)
-status: DISCOVER complete — backlog seeded (3 installable, 14 needs-human/sudo)
-last_update: 2026-06-05T02:52:37Z
+cycles_this_session: 1
+cycles_total: 1
+last_item: node-via-bun — BLOCKED (real node v22 conflicts with bun-symlink; bun node wrapper fails --version)
+status: cycle 1 done (node-via-bun blocked); 2 installable remain (env-ctl, pytorch-venv) pending scope decision
+last_update: 2026-06-05T03:00:00Z
 notes: |
   17 declared components missing (all medium, kind=missing). No config/health drift.
   Privilege wall: sudo NOT pre-authorized (doctor sudo X) -> 14 items are needs-human.

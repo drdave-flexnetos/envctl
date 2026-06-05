@@ -8,7 +8,13 @@ first per the dependency graph (`requires` edges).
 Legend: `- [ ]` todo · `- [x]` installed+verified · `- [!]` blocked (reason).
 
 ## Loop-installable (user-space, prerequisites met, no sudo)
-- [ ] node-via-bun — `ln -sf` bun→node symlink in ~/.bun/bin (requires: bun OK). Trivial.
+- [!] node-via-bun — CONFLICT/needs-human: symlink ~/.bun/bin/node->bun was created, but a
+      REAL node v22.22.3 (~/.local/bin/node -> ~/.local/node/bin/node) precedes ~/.bun/bin on
+      PATH, so detect (`command -v node` -> readlink grep bun) can never pass. Also bun 1.3.14's
+      node wrapper FAILS `node --version` ("does not support a repl"), so the verify hook can't
+      pass even if it won PATH. Declared bun-symlink-node conflicts with the installed real node.
+      Decision needed: (a) keep real node, drop this component (envctl reset node-via-bun); or
+      (b) remove ~/.local/bin/node so the bun symlink wins (and fix bun node-compat).
 - [ ] env-ctl — cargo build secretd/secretctl from workspace -> ~/.cargo/bin + XDG dirs
       + systemd user unit (requires: rustup OK). Needs ENV_CTL_REPO=this worktree.
 - [ ] pytorch-venv — python venv ~/.venvs/torch + pip torch/torchvision cu132
