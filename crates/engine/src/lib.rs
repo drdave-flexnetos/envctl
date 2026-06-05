@@ -23,6 +23,7 @@ pub mod register; // Phase 4: synthesize the components.d drop-in (provenance + 
 pub mod command; // EngineCommand / EngineEvent + run_event_loop (GUI worker API)
 
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
+pub use drift::DriftSummary;
 pub use model::{
     AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, ComponentState, DataPath, DesktopEntry,
     DriftItem, DriftKind, EnvReport, OpResult, OpStatus, Refactor, RefactorGoal, Registry,
