@@ -110,3 +110,29 @@ conventions (camelCase, `*.test.ts`, JS imports) — those are **wrong for this 
 - `manifest/*.toml` — declarative components; drop-ins land in `manifest/components.d/`.
 - The manifest dir defaults to `./manifest` (override with `ENVCTL_MANIFEST_DIR`).
 - Logging: `RUST_LOG` (e.g. `RUST_LOG=envctl_engine=debug`).
+
+## Harness: Feature Forge (the construction crew)
+
+**Goal:** turn a feature / upgrade / design request into invariant-verified working Rust, fast —
+a design → implement → verify crew. The crew *builds* the feature; it is not the building.
+
+**Trigger:** for any request to add / build / implement / design / upgrade / extend / refactor an
+envctl feature, Engine method, CLI/GUI surface, secrets-stack capability, or manifest component
+(and follow-ups like "re-run", "fix the guardian's findings", "revise the design"), use the
+**`feature-forge`** skill. It drives `feature-architect` → `rust-implementer` →
+`invariant-guardian`. Simple questions and trivial edits may be answered/done directly. (Pure
+env install → `env-toolchain-install`; drift/lock/doctor → `env-stabilize`; conventions →
+`agent-env-config`.)
+
+**Placement:** the harness is **hand-authored and git-tracked**, intentionally *outside* the
+kasetto pipeline. Agent definitions live in `.claude/agents/*.md` and the harness skills
+(`feature-forge`, `rust-feature-impl`) live directly in `.claude/skills/` — edit those files in
+place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
+`kasetto.lock`, and not produced by `kasetto sync`. (Note: this is a deliberate exception to the
+general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-managed skills remain
+`agent-env-config`, `env-stabilize`, `env-toolchain-install`.)
+
+**Change history:**
+| Date | Change | Target | Reason |
+|------|--------|--------|--------|
+| 2026-06-04 | Initial harness build | agents/{feature-architect,rust-implementer,invariant-guardian}; skills/{feature-forge,rust-feature-impl} | Build a feature-delivery construction crew (design/implement/verify) that upholds the non-negotiable invariants |
