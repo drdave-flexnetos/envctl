@@ -104,3 +104,18 @@ previously by-design gaps became REAL, fixable loop work and were closed:
 2. gpu.toml cuda-oxide — pinned `cargo +nightly-2026-04-03` (was building on stable -> E0554).
 3. Deployed shipped scripts assets/scripts/{yazelix-config,yazelix-setup,ubuntu-boot-repair}.sh
    -> /usr/local/bin (mirrors autoinstall.yaml; were missing on this non-autoinstalled box).
+
+## grit adoption (meta-repo-wide parallel-agent coordination)
+- [x] grit-component — envctl-manage the `grit` parallel-agent AST git-lock coordinator
+      (FlexNetOS/grit, `~/Desktop/meta/grit`) as a declarative manifest component:
+      detect/install/verify/fix/remove + `~/.cargo/bin` PATH, installed box-wide via
+      `cargo install --path`. NOT a Cargo workspace member / NOT a crate dep — it links C
+      (rusqlite bundled) + aws/azure SDKs, so it stays an external *tool* binary (managed as
+      data, a TOML component) to keep envctl's no-C trust boundary clean. `grit.toml` added,
+      `envctl.lock` re-synced. (branch grit-component)
+- [ ] grit-harness-parallel — adopt grit `claim → work → done` in the Feature Forge harness so
+      multiple rust-implementer agents run in parallel across meta member repos with zero
+      merge conflicts: `grit init` per repo (idempotent), opt-in parallel mode in
+      `.claude/skills/{feature-forge,forge-loop}` (function-level claims via `file::symbol`,
+      `--queue` for contested symbols, `--with-deps` for dependency-aware locks), meta-wide
+      seeding via `meta exec -- grit init`. Local SQLite-WAL backend default; Azure/S3 later.
