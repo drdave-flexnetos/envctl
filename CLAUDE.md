@@ -127,14 +127,17 @@ coordinates over **weave**, schedules a best-effort successor cron at a per-sess
 To **provision the whole box / install all toolchains, PATH, and env vars in a loop until
 `doctor` is green** ("install everything", "set up the box", "loop until installed"), use
 **`env-install-loop`** (the same loop+relay continuity, driving envctl's `doctor`/`install`/
-`auto-fix` verbs + `env-toolchain-install`). Simple questions and trivial edits may be answered/done
-directly. (A SINGLE component install → `env-toolchain-install`; drift/lock/doctor → `env-stabilize`;
-conventions → `agent-env-config`.)
+`auto-fix` verbs + `env-toolchain-install`). For **fully unattended, self-restarting** provisioning
+with a fresh context every cycle ("run it overnight / set-and-forget", "auto-provision", "cycle
+install and reset until done") use **`auto-provision`** — the external Ralph runner that spawns a
+fresh `claude -p` per cycle (the `/new` effect) wrapping `env-install-loop`. Simple questions and
+trivial edits may be answered/done directly. (A SINGLE component install → `env-toolchain-install`;
+drift/lock/doctor → `env-stabilize`; conventions → `agent-env-config`.)
 
 **Placement:** the harness is **hand-authored and git-tracked**, intentionally *outside* the
 kasetto pipeline. Agent definitions live in `.claude/agents/*.md` and the harness skills
-(`feature-forge`, `rust-feature-impl`, `forge-loop`, `session-relay`, `env-install-loop`) live
-directly in `.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
+(`feature-forge`, `rust-feature-impl`, `forge-loop`, `session-relay`, `env-install-loop`,
+`auto-provision`) live directly in `.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
 `kasetto.lock`, and not produced by `kasetto sync`. (Note: this is a deliberate exception to the
 general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-managed skills remain
 `agent-env-config`, `env-stabilize`, `env-toolchain-install`.)
@@ -148,3 +151,4 @@ general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-ma
 | 2026-06-04 | Add continuity layer: Ralph loop + session handoff | agents/continuity-steward; skills/{forge-loop,session-relay}; skills/feature-forge | Run Feature Forge continuously over a backlog and survive context rot / token burn — cycle-budget handoff writes a durable checkpoint, coordinates over weave, and schedules a durable-cron successor session |
 | 2026-06-05 | Correct relay signal model after full smoke | skills/session-relay | Smoke test: `CronCreate{durable}` is session-only here (not persisted), and a self-identity weave message is invisible to the successor's own inbox. Authoritative resume signal = committed `HANDOFF.md` + cron prompt; weave is a cross-identity (`to:all`) observable heartbeat |
 | 2026-06-05 | Add env-install-loop (whole-box provisioning loop) | skills/env-install-loop; agents/continuity-steward; skills/session-relay | First-class loop to drive the workstation to fully-installed/healthy/drift-free via envctl doctor/install/auto-fix + env-toolchain-install, reusing the loop+relay continuity. Generalized continuity-steward + session-relay to serve both the feature and env loops |
+| 2026-06-05 | Add auto-provision (self-restarting fresh-context Ralph runner) | skills/auto-provision (+scripts/ralph-provision.sh); skills/env-install-loop | Fully-unattended provisioning that restarts with a fresh context each cycle (the `/new` effect) by spawning a fresh `claude -p` per iteration, wrapping env-install-loop; added install↔reset remediation rung + DONE/NEEDS-HUMAN/STOP sentinels. Safe-by-default (RALPH_APPLY opt-in for unattended apply) |
