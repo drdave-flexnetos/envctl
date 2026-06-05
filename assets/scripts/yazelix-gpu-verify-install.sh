@@ -8,7 +8,12 @@
 # non-interactive (the smoke test it writes is what prompts, at login, not this).
 set -euo pipefail
 
-if ! lspci 2>/dev/null | grep -qiE 'nvidia'; then
+# NOTE: do NOT use `grep -q` here. Under `set -o pipefail`, `grep -q` exits on the
+# first match and closes the pipe, so lspci (long output) dies with SIGPIPE (141);
+# pipefail then reports the whole pipeline as failed even though nvidia WAS matched,
+# turning this gate into a false "no GPU" on every real multi-line-lspci box. Letting
+# grep consume all input (redirect to /dev/null, no -q) keeps pipefail meaningful.
+if ! lspci 2>/dev/null | grep -iE 'nvidia' >/dev/null 2>&1; then
   echo "no NVIDIA GPU detected — yazelix-gpu-verify not installed (N/A)"
   exit 0
 fi

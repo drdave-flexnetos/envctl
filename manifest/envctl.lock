@@ -36,7 +36,7 @@ requires = ["bun"]
 resolved = ""
 
 [components.cuda-oxide]
-content_hash = "bb4fa13d0e0ed95f"
+content_hash = "da3960d9b533467f"
 requires = [
     "cuda-toolkit",
     "llvm-clang",
@@ -61,7 +61,7 @@ requires = []
 resolved = ""
 
 [components.env-ctl]
-content_hash = "d8d5999ece9620a3"
+content_hash = "bf0528abf457845a"
 requires = ["rustup"]
 resolved = ""
 
@@ -113,7 +113,7 @@ requires = []
 resolved = ""
 
 [components.group-gpu-stack]
-content_hash = "14a9afbfed4792e3"
+content_hash = "dd28c2ecbe2cef5d"
 requires = [
     "cuda-oxide",
     "cuda-toolkit",

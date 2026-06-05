@@ -163,14 +163,19 @@ command = "bash"
 args = ["-lc", "command -v cargo-oxide || [ -x \"$HOME/.cargo/bin/cargo-oxide\" ]"]
 [component.install]
 kind = "script"
-script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide"
+# Pin the nightly toolchain explicitly: cuda-oxide's cuda-core uses `#![feature(f16)]`,
+# which only compiles on nightly. `cargo +<toolchain>` overrides RUSTUP_TOOLCHAIN and any
+# stable default/rust-toolchain.toml, so this builds correctly regardless of the caller's
+# environment (relying on the repo's own toolchain file is fragile — an inherited
+# RUSTUP_TOOLCHAIN silently overrides it and the build fails E0554 on stable).
+script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo +nightly-2026-04-03 install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide"
 [component.verify]
 kind = "command"
 command = "bash"
 args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo-oxide --version"]
 [component.fix]
 kind = "script"
-script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo install --force --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide"
+script = "export PATH=\"$HOME/.cargo/bin:$PATH\"; cargo +nightly-2026-04-03 install --force --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide"
 [component.remove]
 kind = "command"
 command = "bash"
@@ -293,4 +298,8 @@ gpu_required = true
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "command -v nvcc >/dev/null && command -v nvidia-smi >/dev/null && command -v cargo-oxide >/dev/null"]
+# Resolve nvcc by its installed path (same dynamic CUDA_HOME as cuda-toolkit's verify),
+# NOT bare `command -v nvcc`: envctl runs detect via a non-interactive `bash -lc`, which
+# hits ~/.bashrc's interactivity guard and returns BEFORE the "cuda env" PATH block — so
+# `command -v nvcc` false-negatives even though the toolkit is installed and wired.
+args = ["-lc", "CUDA_HOME=/usr/local/cuda; [ -d \"$CUDA_HOME/bin\" ] || CUDA_HOME=\"$(ls -d /usr/local/cuda-* 2>/dev/null | sort -V | tail -n1)\"; [ -x \"$CUDA_HOME/bin/nvcc\" ] && command -v nvidia-smi >/dev/null && command -v cargo-oxide >/dev/null"]
