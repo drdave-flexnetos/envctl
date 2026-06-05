@@ -1,0 +1,13 @@
+sudo: A terminal is required to authenticate
+    could not pre-authorize sudo (no TTY / not a sudoer?) — privileged steps will fail fast. Run from a real terminal.
+[1;36m==> [1/4] nix :: Install[0m
+  — skip nix (already present)
+[1;36m==> [2/4] nix-yazelix-cache :: Install[0m
+    wiring applied
+[1;32m  ✓ nix-yazelix-cache Install[0m
+[1;36m==> [3/4] ghostty :: Install[0m
+  — skip ghostty (already present)
+[1;36m==> [4/4] ghostty-default-terminal :: Install[0m
+    set alternative x-terminal-emulator -> /usr/bin/ghostty
+[1;32m  ✓ ghostty-default-terminal Install[0m
+[1;32mdone.[0m

@@ -27,36 +27,35 @@ Legend: `- [ ]` todo · `- [x]` installed+verified · `- [!]` blocked (reason).
       healthy, off drift. Required fixing a manifest bug first: the MSRV gate in env-ctl.toml
       had reversed `sort -V -C` operands and rejected every cargo >= 1.80 (FATAL on a healthy
       1.96 toolchain). Fixed (put 1.80.0 first). Built with ENV_CTL_REPO=this worktree.
-- [!] pytorch-venv — needs-human (sudo): `python3 -m venv` FAILS — system Python 3.14 has no
-      ensurepip/venv module. Requires `sudo apt install python3.14-venv` FIRST, then re-run.
-      (Box has `uv` which could build the venv without python3-venv, but the component declares
-      `python3 -m venv`; changing that is a manifest design change, not a loop action.)
+- [x] pytorch-venv — INSTALLED + verified after `sudo apt install python3.14-venv`:
+      torch 2.12.0+cu132, torch.cuda.is_available()=True, sees 2 devices (both RTX 5090).
+      detect healthy, off drift.
 
 ## Blocked on privilege wall — needs-human (sudo NOT pre-authorized; doctor: sudo X)
 These cannot be completed unattended. A human must `sudo -v` in a real terminal (or run
 the privileged installs via `! envctl install <id>`), then re-run the loop to resume.
 
-apt base (direct `needs_sudo = true`, `apt-get`):
-- [!] ghostty — needs-human: apt-get install needs sudo (not pre-authorized)
-- [!] podman — needs-human: apt-get install needs sudo
-- [!] keepassxc — needs-human: apt-get install needs sudo
-- [!] virt-stack — needs-human: apt-get install needs sudo
+apt base (direct `needs_sudo = true`, `apt-get`) — DONE (user authorized sudo):
+- [x] ghostty — installed (/usr/bin/ghostty), detect healthy
+- [x] podman — installed (/usr/bin/podman), detect healthy
+- [x] keepassxc — installed (/usr/bin/keepassxc), detected (no verify hook)
+- [x] virt-stack — installed (libvirt/qemu, virt-host-validate present), detect healthy
 
-CUDA repo chain (sudo dpkg / apt):
-- [!] nvidia-cuda-repo — needs-human: `sudo dpkg -i cuda-keyring` + `sudo apt-get update`
-- [!] cuda-toolkit — needs-human: apt needs_sudo + requires nvidia-cuda-repo (blocked)
-- [!] llvm-clang — needs-human: apt needs_sudo + requires nvidia-cuda-repo (blocked)
+CUDA repo chain (sudo dpkg / apt) — INSTALLING (background, multi-GB):
+- [ ] nvidia-cuda-repo — [INSTALLING] `sudo dpkg -i cuda-keyring` + `sudo apt-get update`
+- [ ] cuda-toolkit — [INSTALLING] apt, requires nvidia-cuda-repo
+- [ ] llvm-clang — [INSTALLING] apt, requires nvidia-cuda-repo
 
-nix system config (writes /etc/nix — /etc not writable):
-- [!] nix-yazelix-cache — needs-human: `sudo install/tee /etc/nix/nix.custom.conf` + systemctl
+nix system config (writes /etc/nix) — DONE:
+- [x] nix-yazelix-cache — installed (yazelix.cachix.org substituter in /etc/nix/nix.custom.conf)
 
-transitively blocked (depend on a needs-human item above):
-- [!] ghostty-default-terminal — needs-human: `sudo update-alternatives` + requires ghostty
-- [!] cuda-oxide — needs-human: requires cuda-toolkit + llvm-clang (both sudo-blocked)
-- [!] nvidia-container-toolkit — needs-human: requires podman (sudo-blocked)
-- [!] yazelix — needs-human: requires nix-yazelix-cache + ghostty (sudo-blocked)
-- [!] yazelix-config — needs-human: requires yazelix (blocked)
-- [!] yazelix-desktop — needs-human: requires yazelix (blocked)
+transitively unblocked (sudo authorized):
+- [x] ghostty-default-terminal — installed (ghostty set as x-terminal-emulator alternative)
+- [ ] cuda-oxide — [INSTALLING in CUDA closure] requires cuda-toolkit + llvm-clang
+- [ ] nvidia-container-toolkit — [INSTALLING in CUDA closure] requires podman (OK now)
+- [ ] yazelix — [INSTALLING, heavy nix build] requires nix-yazelix-cache + home-manager + ghostty
+- [ ] yazelix-config — [INSTALLING] requires yazelix
+- [ ] yazelix-desktop — [INSTALLING] requires yazelix
 
 ## Notes
 - `podman` shows `(absent)` in doctor toolchains; everything else in doctor's toolchain
