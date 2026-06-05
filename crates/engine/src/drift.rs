@@ -130,6 +130,24 @@ impl DriftSummary {
         }
         s
     }
+
+    /// True when there is no drift at all (no items of any severity).
+    pub fn is_clean(&self) -> bool {
+        self.total == 0
+    }
+
+    /// The highest severity present, or `None` when clean. High > Medium > Low.
+    pub fn worst_severity(&self) -> Option<Severity> {
+        if self.high > 0 {
+            Some(Severity::High)
+        } else if self.medium > 0 {
+            Some(Severity::Medium)
+        } else if self.low > 0 {
+            Some(Severity::Low)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for DriftSummary {
@@ -184,5 +202,24 @@ mod tests {
     fn summary_display_wording() {
         let s = DriftSummary { high: 1, medium: 0, low: 2, total: 3 };
         assert_eq!(s.to_string(), "Drift: 1 high, 0 medium, 2 low (3 total)");
+    }
+
+    #[test]
+    fn summary_is_clean() {
+        assert!(DriftSummary::from_items(&[]).is_clean());
+        assert!(!DriftSummary::from_items(&[item(Severity::Low)]).is_clean());
+    }
+
+    #[test]
+    fn summary_worst_severity() {
+        assert_eq!(DriftSummary::from_items(&[]).worst_severity(), None);
+        assert_eq!(
+            DriftSummary::from_items(&[item(Severity::Low)]).worst_severity(),
+            Some(Severity::Low)
+        );
+        assert_eq!(
+            DriftSummary::from_items(&[item(Severity::Low), item(Severity::High)]).worst_severity(),
+            Some(Severity::High)
+        );
     }
 }
