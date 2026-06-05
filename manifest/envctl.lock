@@ -50,6 +50,14 @@ content_hash = "c5be706d2f4a8bac"
 requires = ["nvidia-cuda-repo"]
 resolved = ""
 
+[components.dashboard]
+content_hash = "7be54724c8738147"
+requires = [
+    "claude-code-cli",
+    "yazelix",
+]
+resolved = ""
+
 [components.desktop-app]
 content_hash = "264f738506ab4ce1"
 requires = ["rustup"]

@@ -12,9 +12,9 @@ mod theme;
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column, TableBuilder};
 use envctl_engine::{
-    run_event_loop, AddRepoSpec, BuildStrategy, ComponentState, DriftItem, DriftKind, Engine,
-    EngineCommand, EngineEvent, Event, OpStatus, Refactor, RefactorGoal, RenameRule, Severity,
-    Stream, Telemetry, TelemetryControl,
+    run_event_loop, AddRepoSpec, BuildStrategy, ComponentState, DashboardPlan, DashboardSpec,
+    DriftItem, DriftKind, Engine, EngineCommand, EngineEvent, Event, OpStatus, Refactor,
+    RefactorGoal, RenameRule, Severity, Stream, Telemetry, TelemetryControl,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -37,6 +37,7 @@ enum Screen {
     Components,
     Graph,
     AddRepo,
+    Mesh,
     Logs,
     Settings,
 }
@@ -48,6 +49,7 @@ impl Screen {
             Screen::Components => "Components",
             Screen::Graph => "Graph",
             Screen::AddRepo => "Add Repo",
+            Screen::Mesh => "Mesh",
             Screen::Logs => "Logs",
             Screen::Settings => "Settings",
         }
@@ -100,6 +102,10 @@ struct EnvctlApp {
     add_ai_goal: String,
     add_ai_instruction: String,
     add_build_flag: bool,
+    // meta mission-control dashboard parity
+    dash_plan: Option<DashboardPlan>,
+    dash_panes_per_tab: usize,
+    dash_status: String,
 }
 
 impl EnvctlApp {
@@ -154,6 +160,9 @@ impl EnvctlApp {
             add_ai_goal: "port-to-rust".into(),
             add_ai_instruction: String::new(),
             add_build_flag: false,
+            dash_plan: None,
+            dash_panes_per_tab: 6,
+            dash_status: String::new(),
         };
         let _ = app.cmd_tx.send(EngineCommand::Detect);
         let _ = app.cmd_tx.send(EngineCommand::SampleTelemetry);
@@ -230,6 +239,20 @@ impl EnvctlApp {
                 Event::RunFinished { .. } => {
                     let _ = self.cmd_tx.send(EngineCommand::Detect); // refresh after a run
                 }
+                Event::Dashboard { plan } => {
+                    self.dash_status = format!("rendered {} tabs", plan.tabs.len());
+                    self.dash_plan = Some(plan);
+                }
+                Event::DashboardDeployed { outcome } => {
+                    self.dash_status = if outcome.applied {
+                        format!("deployed -> {}", outcome.target.display())
+                    } else {
+                        format!("dry-run: would write {}", outcome.target.display())
+                    };
+                    for note in &outcome.notes {
+                        self.push_log(Stream::Stdout, format!("[dashboard] {note}"));
+                    }
+                }
                 _ => {}
             }
         }
@@ -294,6 +317,7 @@ impl eframe::App for EnvctlApp {
                         Screen::Components,
                         Screen::Graph,
                         Screen::AddRepo,
+                        Screen::Mesh,
                         Screen::Logs,
                         Screen::Settings,
                     ] {
@@ -321,6 +345,7 @@ impl eframe::App for EnvctlApp {
                 Screen::Components => self.components_screen(ui),
                 Screen::Graph => self.graph_screen(ui),
                 Screen::AddRepo => self.add_repo_screen(ui),
+                Screen::Mesh => self.mesh_screen(ui),
                 Screen::Logs => self.logs_screen(ui),
                 Screen::Settings => self.settings_screen(ui),
             });
@@ -1046,6 +1071,91 @@ impl EnvctlApp {
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
+    /// meta mission-control dashboard parity: render the zellij layout from
+    /// `.meta.yaml` (read-only) and deploy it (gated by the dry-run toggle, like
+    /// the other mutations). Drives the IDENTICAL Engine API the CLI uses via
+    /// EngineCommand::Dashboard / DeployDashboard.
+    fn mesh_screen(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Mesh — meta mission-control").heading());
+        ui.add_space(6.0);
+        ui.colored_label(
+            theme::TEXT_FAINT,
+            "Render a zellij dashboard layout from .meta.yaml (tabs by tag, pane-per-repo).",
+        );
+        ui.add_space(10.0);
+
+        let start = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let spec = DashboardSpec {
+            panes_per_tab: self.dash_panes_per_tab.max(1),
+            ..DashboardSpec::default()
+        };
+
+        ui.horizontal(|ui| {
+            ui.label("Panes per tab:");
+            ui.add(egui::DragValue::new(&mut self.dash_panes_per_tab).range(1..=24));
+        });
+        ui.add_space(8.0);
+
+        ui.horizontal(|ui| {
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Render").color(theme::ACCENT_TEXT))
+                        .fill(theme::ACCENT),
+                )
+                .clicked()
+            {
+                let _ = self.cmd_tx.send(EngineCommand::Dashboard {
+                    start: start.clone(),
+                    meta_file: None,
+                    spec: spec.clone(),
+                });
+            }
+            // Deploy is a mutation: dry-run unless the dry-run-default toggle is OFF
+            // (mirrors how Fix gates its --apply in this GUI).
+            let dry_run = self.dry_run_default;
+            let label = if dry_run {
+                "Deploy (dry-run)"
+            } else {
+                "Deploy (apply)"
+            };
+            if ui.button(label).clicked() {
+                let _ = self.cmd_tx.send(EngineCommand::DeployDashboard {
+                    start: start.clone(),
+                    meta_file: None,
+                    spec: spec.clone(),
+                    dry_run,
+                    force: false,
+                });
+            }
+        });
+
+        if !self.dash_status.is_empty() {
+            ui.add_space(8.0);
+            ui.colored_label(theme::TEXT_MUTED, &self.dash_status);
+        }
+
+        if let Some(plan) = &self.dash_plan {
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+            ui.label(RichText::new(format!("{} ({} tabs)", plan.name, plan.tabs.len())).strong());
+            ui.colored_label(
+                theme::TEXT_FAINT,
+                format!("target: {}", plan.target.display()),
+            );
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical()
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut plan.kdl.as_str())
+                            .code_editor()
+                            .desired_width(f32::INFINITY),
+                    );
+                });
+        }
+    }
+
     fn settings_screen(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Settings").heading());
         ui.add_space(10.0);

@@ -63,6 +63,15 @@ impl Registry {
         Ok(Registry { by_id, order })
     }
 
+    /// An empty registry (no components). Used by manifest-independent verbs
+    /// (e.g. `dashboard`) so they work without a `manifest/` dir present.
+    pub fn empty() -> Self {
+        Registry {
+            by_id: BTreeMap::new(),
+            order: Vec::new(),
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<&Component> {
         self.by_id.get(id)
     }
