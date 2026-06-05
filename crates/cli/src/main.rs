@@ -3,8 +3,8 @@
 //! `--apply` to act. `auto-detect` is read-only and prints a real EnvReport.
 use clap::{Parser, Subcommand};
 use envctl_engine::{
-    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, Engine, EnvReport, Event, EventSink, OpStatus,
-    Phase, Refactor, RefactorGoal, RenameRule, ResetGates, RunPlan, Severity,
+    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, DriftSummary, Engine, EnvReport, Event,
+    EventSink, OpStatus, Phase, Refactor, RefactorGoal, RenameRule, ResetGates, RunPlan, Severity,
 };
 
 #[derive(Parser)]
@@ -191,6 +191,9 @@ fn main() -> anyhow::Result<()> {
                 }
             } else {
                 print_graph_summary(reg);
+                if let Some(rep) = live_report.as_ref() {
+                    println!("{}", DriftSummary::from_items(&rep.drift));
+                }
             }
             Ok(())
         }

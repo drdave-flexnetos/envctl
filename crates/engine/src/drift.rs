@@ -3,6 +3,7 @@
 //! CLI/GUI can tell the user not just *what* is off but *what to run*. Pure and
 //! deterministic — unit-tested against constructed reports.
 use crate::model::{DriftItem, DriftKind, EnvReport, Registry, Severity};
+use serde::{Deserialize, Serialize};
 
 pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
     let mut items = Vec::new();
@@ -104,4 +105,84 @@ pub fn compute(report: &EnvReport, reg: &Registry) -> Vec<DriftItem> {
         Severity::Low => 2,
     });
     items
+}
+
+/// Counts of drift items by severity. Pure, non-printing; the CLI/GUI render it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriftSummary {
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
+    pub total: usize,
+}
+
+impl DriftSummary {
+    /// Fold drift items into per-severity counts. Deterministic.
+    pub fn from_items(items: &[DriftItem]) -> DriftSummary {
+        let mut s = DriftSummary::default();
+        for d in items {
+            match d.severity {
+                Severity::High => s.high += 1,
+                Severity::Medium => s.medium += 1,
+                Severity::Low => s.low += 1,
+            }
+            s.total += 1;
+        }
+        s
+    }
+}
+
+impl std::fmt::Display for DriftSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Drift: {} high, {} medium, {} low ({} total)",
+            self.high, self.medium, self.low, self.total
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(severity: Severity) -> DriftItem {
+        DriftItem {
+            component: "c".into(),
+            kind: DriftKind::Missing,
+            severity,
+            suggested_verb: "envctl install c".into(),
+            detail: "test".into(),
+        }
+    }
+
+    #[test]
+    fn summary_counts_by_severity() {
+        let items = vec![
+            item(Severity::High),
+            item(Severity::High),
+            item(Severity::Medium),
+            item(Severity::Low),
+            item(Severity::Low),
+            item(Severity::Low),
+        ];
+        let s = DriftSummary::from_items(&items);
+        assert_eq!(
+            s,
+            DriftSummary { high: 2, medium: 1, low: 3, total: 6 }
+        );
+    }
+
+    #[test]
+    fn summary_empty_is_zero() {
+        let s = DriftSummary::from_items(&[]);
+        assert_eq!(s, DriftSummary::default());
+        assert_eq!(s.total, 0);
+    }
+
+    #[test]
+    fn summary_display_wording() {
+        let s = DriftSummary { high: 1, medium: 0, low: 2, total: 3 };
+        assert_eq!(s.to_string(), "Drift: 1 high, 0 medium, 2 low (3 total)");
+    }
 }
