@@ -13,15 +13,21 @@ and the resume on the other side. It has two entry points: **HAND OFF** and **RE
 ## Substrates (verify before using)
 - **Checkpoint:** `_workspace/HANDOFF.md`, produced by the `continuity-steward` agent — the cold-start
   resume package. This is the real payload; everything else just points at it.
-- **weave** (`weave_whoami`/`weave_send`/`weave_inbox`/`weave_reply`) — the coordination + audit
-  channel between sessions. Confirm identity with `weave_whoami` first. On this host the session
-  identity is stable (e.g. `envctl`), so the *successor* reads the handoff from its weave **inbox**;
-  the message is the durable, ordered signal that a transfer is pending. (`injectable=false` here →
-  it arrives on the successor's next turn, which is exactly when it starts. That's fine.)
-- **durable cron** (`CronCreate {durable: true}`) — schedules the successor run; persists to
-  `.claude/scheduled_tasks.json` and survives restarts, so the loop continues on this machine even
-  across a Claude restart. No cloud cost. (Note the 7-day auto-expiry on recurring jobs; the relay
-  uses a **one-shot** resume, re-created each handoff, so expiry doesn't bite.)
+- **weave** (`weave_whoami`/`weave_send`/`weave_inbox`/`weave_reply`) — the **cross-identity**
+  coordination + audit channel. **Smoke-test finding:** a message addressed to your *own* identity
+  does **not** appear in your own inbox — and the same-machine successor inherits the same identity
+  (e.g. `envctl`), so weave-inbox is **not** the resume signal for a same-identity handoff. Use weave
+  for what it actually does well: a **broadcast `to: "all"`** (or to a distinct peer / a human) as an
+  *observable heartbeat* (`forge-relay:handoff` / `forge-relay:resumed`) so the mesh and operators can
+  watch the relay. The **actual resume signal is the committed checkpoint + the cron prompt** (below).
+- **cron** (`CronCreate {recurring: false}`) — schedules the successor run on this machine when the
+  REPL is next idle, and the prompt itself carries the resume instruction. **Smoke-test finding:**
+  `durable: true` is **not honored in this runtime** — jobs report `[session-only]` and nothing is
+  written to `.claude/scheduled_tasks.json`, so a cron successor does **not** survive a Claude
+  restart; it only fires while this session is alive. Treat cron as **best-effort**. For genuinely
+  out-of-process / survives-restart continuation, the durable signal is the **committed
+  `_workspace/HANDOFF.md`** (any new session resumes from it) — optionally escalate to `RemoteTrigger`
+  (claude.ai routine) when an unattended cloud successor is wanted.
 
 ---
 
@@ -37,34 +43,40 @@ Run these in order; each step is durable before the next, so a crash mid-handoff
 2. **Commit it.** `git add _workspace/ && git commit` (subject `loop: handoff checkpoint @ <ts>`).
    The successor resumes from committed state, so the checkpoint must be in git, not just on disk.
    Push if the loop runs against a shared remote.
-3. **Announce over weave.** `weave_send` to the successor (the same session identity) **and** record
-   it for observers:
-   - `to`: the session identity from `weave_whoami` (the successor inherits it); optionally also a
-     broadcast `to: "all"` so mesh peers can observe the relay.
+3. **Broadcast the heartbeat over weave.** `weave_send` `to: "all"` (cross-identity observers — do
+   **not** address your own identity; it won't reach the successor's inbox):
    - `subject`: `forge-relay:handoff`
-   - `body`: the `_workspace/HANDOFF.md` path, the worktree path + branch, the resume command, and
-     the one-line backlog status (e.g. "4/7 done, resume at item 5"). Keep it pointer-sized; the
-     detail lives in the checkpoint.
-4. **Schedule the successor.** `CronCreate { durable: true, recurring: false }` with a near-future
-   one-shot time and a `prompt` that re-enters the loop in RESUME mode, e.g.:
-   `"/forge-loop resume from _workspace/HANDOFF.md (branch harness-loop) — read the handoff + weave
-   inbox first"`. One-shot avoids the 7-day recurring expiry and double-runs; the next handoff
-   creates the next one-shot.
+   - `body`: the `_workspace/HANDOFF.md` path, worktree path + branch, the resume command, and the
+     one-line backlog status (e.g. "4/7 done, resume at item 5"). Pointer-sized; detail lives in the
+     committed checkpoint. This is observation/audit, not the resume signal.
+4. **Schedule the successor.** `CronCreate { recurring: false }` with a near-future one-shot time and
+   a `prompt` that re-enters the loop in RESUME mode **and self-describes the resume** (the prompt is
+   the real signal — don't rely on inbox), e.g.:
+   `"/forge-loop resume from _workspace/HANDOFF.md (branch <branch>, worktree <path>) — read the
+   committed handoff checkpoint, verify baseline, then continue at the backlog's next item"`.
+   One-shot avoids double-runs; the next handoff creates the next one-shot. **Caveat (verified):**
+   `durable` is not honored here — this fires only while the session stays alive. If the loop must
+   survive a restart, rely on the committed `HANDOFF.md` (a human or `RemoteTrigger` resumes from it).
 5. **Stop this session's loop.** Do **not** issue another `ScheduleWakeup`. Report: handed off after
-   N cycles, checkpoint committed, successor scheduled for <time>, backlog at X/Y.
+   N cycles, checkpoint committed (hash), heartbeat broadcast, successor scheduled for <time>
+   (best-effort), backlog at X/Y.
 
 > If the user chose **handoff-only** (no auto-spawn): do steps 1-3 and skip 4 — a human or an
 > already-running peer picks it up from the weave announce + committed checkpoint.
 
 ## RESUME (successor session, on start / cron fire / weave nudge)
 
-1. **Confirm identity & read the signal.** `weave_whoami`, then `weave_inbox` — find the
-   `forge-relay:handoff` message; it points at `_workspace/HANDOFF.md`.
+1. **Take the signal from the prompt/checkpoint, not the inbox.** Your resume instruction comes from
+   the cron prompt (or a human) and the **committed `_workspace/HANDOFF.md`** — that is the
+   authoritative signal. `weave_inbox` will **not** contain a same-identity handoff (a self-addressed
+   message isn't in your own inbox), so don't depend on it; check it only for *cross-identity* notes
+   from peers/operators. Run `weave_whoami` to confirm identity.
 2. **Load the checkpoint.** Read `_workspace/HANDOFF.md` fully. Verify the worktree path + branch
    match and the tree is clean; run its **Verify-on-resume** commands to confirm a sane baseline
    (e.g. the 3 CI gates / a build) before mutating anything.
-3. **Acknowledge.** `weave_reply` to the handoff message: `RESUMED @ <ts>, baseline verified,
-   continuing at item <N>` (closes the coordination loop; gives observers a heartbeat).
+3. **Acknowledge.** Broadcast a heartbeat: `weave_send to: "all" subject: forge-relay:resumed` —
+   `RESUMED @ <ts>, baseline verified, continuing at item <N>` (gives the mesh/operators a visible
+   heartbeat). Use `weave_reply` only if a *cross-identity* peer sent a directly-addressed note.
 4. **Reset the ledger.** In `_workspace/loop_state.md` set `cycles_this_session = 0` (the budget is
    per-session); keep `cycles_total`. 
 5. **Continue the loop.** Re-enter `forge-loop`'s iteration body at the backlog's current item. The
@@ -84,11 +96,14 @@ Run these in order; each step is durable before the next, so a crash mid-handoff
   latest commit; if so, stand down rather than double-building.
 
 ## Test Scenarios
-**Happy path:** forge-loop hits budget=3 → spawn continuity-steward → `HANDOFF.md` written + committed
-(`loop: handoff checkpoint`) → `weave_send subject=forge-relay:handoff` with the pointer →
-`CronCreate{durable:true,recurring:false}` one-shot resume in ~2 min → session stops. Cron fires: new
-session reads inbox + HANDOFF, runs the 3 gates green, `weave_reply RESUMED`, resets the session
-counter, continues at item 4.
+**Happy path** (verified by smoke test): forge-loop hits the budget → spawn continuity-steward →
+`HANDOFF.md` written + committed (`loop: handoff checkpoint`) → `weave_send to:"all"
+subject=forge-relay:handoff` (heartbeat) → `CronCreate{recurring:false}` one-shot resume whose prompt
+self-describes the resume → session stops. The successor (cron prompt or a human reading the committed
+`HANDOFF.md`) verifies baseline green, broadcasts `forge-relay:resumed`, resets the session counter,
+and continues at the next item. (Smoke notes: `durable` was reported session-only here, and the
+self-identity handoff message did not appear in the successor's own inbox — so the committed
+checkpoint + cron prompt are the signal, weave is the observable heartbeat.)
 
 **Error path:** steward returns `HANDOFF INCOMPLETE` (backlog says item 4 done, but no commit exists
 for it). Relay does NOT schedule a successor; it commits the checkpoint with the contradiction
