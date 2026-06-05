@@ -1,161 +1,49 @@
-# Dashboard follow-up backlog — successor auto-loop
+# env-install-loop backlog — 2026-06-05T22:03Z (resume / re-discover)
 
-Source of truth for the post-feature loop. Built from the Feature Forge synthesis +
-guardian notes. Ordered: merge-gated wire-live first, then follow-ups.
+Source of truth for the provisioning loop. Rebuilt from REAL state on a fresh worktree off
+`origin/master` (tip `fcf3d0c`, PR #24 develop→master merged; manifest now **49 components**):
+`envctl doctor` (all toolchains green; only `/etc` not writable = sudo territory) +
+`auto-detect --json` (39 detected+healthy, 8 detected/no-verify groups, **2 missing in drift**).
 
-Legend: `- [ ]` todo · `- [x]` done · `- [!]` blocked (reason).
-
-## Gate (human/review)
-- [!] MERGE PRs — blocked on review. envctl #23 -> develop; meta #7 -> main.
-      Auto-merge intentionally NOT enabled. The successor MUST confirm both merged
-      (`gh pr view 23 --repo FlexNetOS/envctl`, `gh pr view 7 --repo FlexNetOS/meta`)
-      before wiring live, OR work from the merged develop/main once available.
-
-## 1. Wire it live (after merge)
-- [ ] `envctl install dashboard` — deploys launcher to ~/.local/bin + the zellij KDL
-      layout to ~/.config/yazelix/configs/zellij/layouts/mission-control.kdl.
-      (Or `envctl dashboard --deploy --apply` for the layout alone.) Fail-closed/dry-run
-      by default — install applies.
-- [ ] Verify: `envctl doctor` / `envctl auto-detect` shows the `dashboard` component
-      detected+healthy; layout file present; `envctl-dashboard-pane` on PATH.
-- [ ] Put `meta-dashboard` (the plugin binary) on PATH so `meta dashboard` resolves
-      (build meta_dashboard_cli + install to ~/.local/bin, or wire into the component).
-- [ ] Smoke: open yazelix with the mission-control layout; confirm tabs/panes render and
-      each pane launches an idle claude session on weave + repowire.
-
-## 2. Follow-ups (feature)
-- [ ] Escalate panes from idle agents to autonomous loops via ENVCTL_DASHBOARD_PANE_CMD
-      (forge-loop / env-install-loop per repo) — opt-in, document the per-pane override.
-- [ ] Refine grouping of UNTAGGED repos: agent, claude-plugins, meta-plugins currently
-      fall into the synthetic "meta-core" tab. This is a `.meta.yaml` tag edit (add tags
-      so they group correctly) — no code change, no-drift holds.
-
-## Dropped (handled elsewhere)
-- ~~Broker unification into the weave bus~~ — weave is already upgrading to merge
-  weave+repowire+broker into one bus. Do NOT implement here.
-
-## Audit trail (committed)
-- _workspace/01_architect_plan.md — design + the both-surfaces/no-drift resolution
-- _workspace/02_implementer_log.md — Pass 1 + Pass 2 implementation logs
-- _workspace/03_guardian_report.md — Pass 1 + Pass 2 independent verification
-# env-install-loop backlog — 2026-06-05T02:52Z
-
-Source of truth for the provisioning loop. Built from REAL state:
-`envctl doctor` + `auto-detect --json` (17 `missing`/medium drift items; zero
-config/health drift; every *detected* component healthy). Ordered most-foundational
-first per the dependency graph (`requires` edges).
+Prior env-install-loop reached DONE at 45–46/46 (cycles_total 18). Since then the dashboard +
+grit components landed on master (46→49 declared). Re-discovery shows the box is healthy except
+the two drift items below. The committed `_workspace/HANDOFF.md` on master belongs to the
+*forge-loop* (dashboard wire-live), NOT this loop — out of scope here.
 
 Legend: `- [ ]` todo · `- [x]` installed+verified · `- [!]` blocked (reason).
 
-## Loop-installable (user-space, prerequisites met, no sudo)
-- [!] node-via-bun — TABLED (design item; research-resolved 2026-06-05). The box is FUNCTIONALLY
-      CORRECT as-is; this is cosmetic detect-drift only. Findings (research agent, sourced):
-      * Bun's `node` shim CANNOT do `node --version` BY DESIGN (not a version regression) — it
-        only runs `node <script>`. So the component's verify hook can never pass on bun 1.3.x/1.4.
-      * n8n CANNOT run on Bun at all (n8n's isolated-vm needs V8; Bun uses JSC). n8n requires
-        REAL Node 20–24; the installed real node v22.22.3 (~/.local/bin/node) is correct & in-range.
-      * Recommendation (a): keep real node for n8n + bun as `bun`/`bun --bun`; node-via-bun is
-        inapplicable on an n8n box. NO PATH change (real node first is exactly what n8n needs).
-      * Symlink ~/.bun/bin/node->bun left in place: it's INERT (real node precedes it) and
-        `envctl reset node-via-bun` is REFUSED by the fail-closed guard — group-ai-clis declares a
-        live reverse-dep on it; removing would cascade the healthy ai-clis stack. Not forced.
-      HUMAN/FEATURE-FORGE follow-up (NOT a loop action): make the manifest mark node-via-bun
-      not-applicable when a real Node in n8n's range is present (or add a `node-real` component +
-      drop the group-ai-clis -> node-via-bun edge), so doctor goes truthfully green.
-- [x] env-ctl — INSTALLED + verified: secretd/secretctl on PATH, `secretd --self-check` OK,
-      systemd user unit `env-ctl.service` enabled, ~/.bashrc SECRETCTL_SOCK wired, detect
-      healthy, off drift. Required fixing a manifest bug first: the MSRV gate in env-ctl.toml
-      had reversed `sort -V -C` operands and rejected every cargo >= 1.80 (FATAL on a healthy
-      1.96 toolchain). Fixed (put 1.80.0 first). Built with ENV_CTL_REPO=this worktree.
-- [x] pytorch-venv — INSTALLED + verified after `sudo apt install python3.14-venv`:
-      torch 2.12.0+cu132, torch.cuda.is_available()=True, sees 2 devices (both RTX 5090).
-      detect healthy, off drift.
+## Done this session
+- [x] grit — INSTALLED + verified (grit 0.3.0 on PATH at ~/.cargo/bin/grit, fresh login shell;
+      detect healthy; install idempotent "skip already present"; drift cleared). Two blockers
+      found and fixed the rust-native / declared way:
+      1. meta-root Cargo.toml excluded agent/envctl/lane but NOT grit → "package believes it's
+         in a workspace when it's not". FIXED: added "grit" to `exclude` in
+         /home/drdave/Desktop/meta/Cargo.toml (sibling-repo pattern; grit MUST NOT be a member —
+         it links C SQLite, would break no-c.sh). [meta parent repo]
+      2. grit's build needs OpenSSL dev headers (openssl-sys via grit's aws/azure SDKs); only the
+         OpenSSL runtime was present. User AUTHORIZED `sudo apt-get install -y libssl-dev
+         pkg-config`. CODIFIED: new `libssl-dev` component in apt-base.toml (needs_sudo;
+         detect/verify via `pkg-config --exists/--modversion openssl`) + added to grit `requires`.
+         no-c.sh still PASS (libssl-dev is a system pkg, grit is excluded from the envctl graph).
+      Re-locked: envctl.lock 49→50 components, `lock --check` clean.
 
-## Blocked on privilege wall — needs-human (sudo NOT pre-authorized; doctor: sudo X)
-These cannot be completed unattended. A human must `sudo -v` in a real terminal (or run
-the privileged installs via `! envctl install <id>`), then re-run the loop to resume.
+- [!] libssl-dev component install via `envctl install libssl-dev` emits a harmless
+      "sudo: A terminal is required to authenticate / could not pre-authorize sudo" warning when
+      run without a TTY, but since libssl-dev is already present it no-ops correctly. NOTE for a
+      truly fresh box: the needs_sudo apt install requires a TTY / pre-cached sudo to actually
+      run (same privilege-broker constraint as every other apt-base component). Not a blocker here.
 
-apt base (direct `needs_sudo = true`, `apt-get`) — DONE (user authorized sudo):
-- [x] ghostty — installed (/usr/bin/ghostty), detect healthy
-- [x] podman — installed (/usr/bin/podman), detect healthy
-- [x] keepassxc — installed (/usr/bin/keepassxc), detected (no verify hook)
-- [x] virt-stack — installed (libvirt/qemu, virt-host-validate present), detect healthy
+## Blocked / by-design (NOT loop actions — surfaced for the human)
+- [!] node-via-bun — TABLED by design (carried from prior loop). Bun's `node` shim cannot do
+      `node --version` BY DESIGN, so the verify hook can never pass; n8n needs REAL node (v22
+      installed, in-range). `reset node-via-bun` is REFUSED by the fail-closed group-ai-clis
+      reverse-dep guard. Box is functionally correct; this is cosmetic detect-drift only.
+      Manifest design follow-up (NOT a loop action): mark not-applicable when a real Node in
+      n8n's range is present, or add a `node-real` component + drop the group-ai-clis edge.
 
-CUDA repo chain (sudo dpkg / apt) — DONE:
-- [x] nvidia-cuda-repo — installed (cuda-keyring; ubuntu2604 sources)
-- [x] cuda-toolkit — installed (nvcc release 13.3 V13.3.33)
-- [x] llvm-clang — installed (clang-21 / LLVM 21; verify clang-21 --version OK)
-
-nix system config (writes /etc/nix) — DONE:
-- [x] nix-yazelix-cache — installed (yazelix.cachix.org substituter in /etc/nix/nix.custom.conf)
-
-transitively unblocked (sudo authorized) — DONE:
-- [x] ghostty-default-terminal — installed (ghostty set as x-terminal-emulator alternative)
-- [x] nvidia-container-toolkit — installed (/usr/bin/nvidia-ctk), detect healthy
-- [x] cuda-oxide — installed (cargo-oxide 0.1.0). Required a manifest fix: the install hook
-      didn't pin a toolchain, so it built on STABLE (RUSTUP_TOOLCHAIN leaked from `cargo run`)
-      and failed E0554 (cuda-core uses `#![feature(f16)]`, nightly-only). Fixed gpu.toml to
-      `cargo +nightly-2026-04-03 install` (overrides env + stable default). Re-locked.
-- [x] yazelix — installed (heavy nix build; detect healthy)
-- [x] yazelix-config — installed. Required deploying the shipped helper: the component runs
-      `/usr/local/bin/yazelix-config.sh` (placed there by autoinstall.yaml at OS-install time),
-      absent on this box. Deployed all 3 manifest-referenced shipped scripts from assets/scripts/
-      to /usr/local/bin (install -D -m755), mirroring autoinstall.yaml lines 160-161.
-- [x] yazelix-desktop — installed (detect healthy)
-
-## Final state (2026-06-05, updated) — 45 of 46 components detected+healthy
-DONE for everything the loop+sudo can reach. Only `node-via-bun` remains undetected
-(tabled by design). After merging origin/master (gpu-verify port + auto-provision) two
-previously by-design gaps became REAL, fixable loop work and were closed:
-- [x] gpu-verify-scripts — INSTALLED + verified. Master's PR #17 port shipped
-      `yazelix-gpu-verify-install.sh`, but it had a **real SIGPIPE/pipefail bug**: the NVIDIA
-      gate `lspci | grep -qiE nvidia` under `set -o pipefail` made lspci die SIGPIPE (141) when
-      grep -q closed the pipe early, so pipefail reported failure even though nvidia matched →
-      the `! pipeline` flipped it to "no NVIDIA GPU (N/A)" on EVERY real multi-line-lspci box.
-      Fixed: `grep -iE nvidia >/dev/null` (consumes all input, no SIGPIPE). Redeployed to
-      /usr/local/bin; install regenerates smoke-test + launcher + autostart; verify hook GREEN
-      (2x RTX 5090, torch sm_120 kernel, cargo-oxide, Podman CDI). detect healthy.
-- [x] group-gpu-stack — now detects truthfully. Root cause was envctl running detect via a
-      non-interactive `bash -lc` that hits ~/.bashrc's line-10 interactivity guard and returns
-      BEFORE the "cuda env" PATH block, so bare `command -v nvcc` false-negated. Fixed the
-      aggregator's detect to resolve nvcc by its installed path via the SAME dynamic CUDA_HOME
-      the cuda-toolkit component's own verify uses (`[ -x "$CUDA_HOME/bin/nvcc" ]`). Re-locked.
-- doctor: all toolchains green; sudo cached; podman 5.7.0; nvidia driver loaded.
-- auto-detect: zero drift; only node-via-bun undetected (by design).
-- lock --check clean (46 comps); kasetto sync --locked clean; build + no-c/shape/enable PASS.
-- PATH/env verified in a fresh **interactive** shell: nvcc 13.3, CUDA_HOME, CUDA_OXIDE_LLC,
-  cargo-oxide, secretd/secretctl, torch+CUDA (2x RTX 5090).
-
-## By-design non-loop items (NOT failures — surfaced for the human)
-- node-via-bun — TABLED (see above): inapplicable on an n8n box; real node v22 is correct.
-  Still the only undetected component. Manifest design follow-up remains (mark not-applicable
-  when a real Node in n8n's range is present, or add `node-real` + drop the group-ai-clis edge).
-
-## Resolved since (were "by-design", now fixed — see Final state)
-- gpu-verify-scripts — RESOLVED after merging master's port + fixing its SIGPIPE/pipefail gate.
-- group-gpu-stack — RESOLVED by making its detect resolve nvcc by installed path (interactive-
-  shell-independent). NOTE: the deeper observation stands but is out of loop scope — envctl
-  wires the cuda env into ~/.bashrc AFTER the interactivity guard, so nvcc is not on PATH for
-  non-interactive shells/services. A Feature-Forge follow-up could wire CUDA system-wide
-  (/etc/profile.d/cuda.sh) so scripts/systemd see nvcc too; detect is now truthful regardless.
-
-## Manifest fixes made by this loop (rust-native, committed, re-locked)
-1. env-ctl.toml — reversed MSRV `sort -V -C` gate (rejected every cargo >= 1.80).
-2. gpu.toml cuda-oxide — pinned `cargo +nightly-2026-04-03` (was building on stable -> E0554).
-3. Deployed shipped scripts assets/scripts/{yazelix-config,yazelix-setup,ubuntu-boot-repair}.sh
-   -> /usr/local/bin (mirrors autoinstall.yaml; were missing on this non-autoinstalled box).
-
-## grit adoption (meta-repo-wide parallel-agent coordination)
-- [x] grit-component — envctl-manage the `grit` parallel-agent AST git-lock coordinator
-      (FlexNetOS/grit, `~/Desktop/meta/grit`) as a declarative manifest component:
-      detect/install/verify/fix/remove + `~/.cargo/bin` PATH, installed box-wide via
-      `cargo install --path`. NOT a Cargo workspace member / NOT a crate dep — it links C
-      (rusqlite bundled) + aws/azure SDKs, so it stays an external *tool* binary (managed as
-      data, a TOML component) to keep envctl's no-C trust boundary clean. `grit.toml` added,
-      `envctl.lock` re-synced. (branch grit-component)
-- [ ] grit-harness-parallel — adopt grit `claim → work → done` in the Feature Forge harness so
-      multiple rust-implementer agents run in parallel across meta member repos with zero
-      merge conflicts: `grit init` per repo (idempotent), opt-in parallel mode in
-      `.claude/skills/{feature-forge,forge-loop}` (function-level claims via `file::symbol`,
-      `--queue` for contested symbols, `--with-deps` for dependency-aware locks), meta-wide
-      seeding via `meta exec -- grit init`. Local SQLite-WAL backend default; Azure/S3 later.
+## Notes
+- The 8 detected/healthy=None components are aggregator groups / no-verify-hook comps
+  (group-boot-repair, group-ai-clis, group-nix-yazelix, group-gpu-stack, boot-repair-diagnose,
+  keepassxc, meta-base-sanity, yazelix-shell) — detected=True; healthy=None just means no
+  explicit health probe. Not gaps.
+- `dashboard` component detects healthy (not in drift) — already wired on this box.
