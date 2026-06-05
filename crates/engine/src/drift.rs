@@ -130,6 +130,11 @@ impl DriftSummary {
         }
         s
     }
+
+    /// True when there is no drift at all (no items of any severity).
+    pub fn is_clean(&self) -> bool {
+        self.total == 0
+    }
 }
 
 impl std::fmt::Display for DriftSummary {
@@ -184,5 +189,11 @@ mod tests {
     fn summary_display_wording() {
         let s = DriftSummary { high: 1, medium: 0, low: 2, total: 3 };
         assert_eq!(s.to_string(), "Drift: 1 high, 0 medium, 2 low (3 total)");
+    }
+
+    #[test]
+    fn summary_is_clean() {
+        assert!(DriftSummary::from_items(&[]).is_clean());
+        assert!(!DriftSummary::from_items(&[item(Severity::Low)]).is_clean());
     }
 }
