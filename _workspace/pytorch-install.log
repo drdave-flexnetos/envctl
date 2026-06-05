@@ -1,0 +1,14 @@
+[1;36m==> [1/1] pytorch-venv :: Install[0m
+    The virtual environment was not created successfully because ensurepip is not
+    available.  On Debian/Ubuntu systems, you need to install the python3-venv
+    package using the following command.
+    
+        apt install python3.14-venv
+    
+    You may need to use sudo with that command.  After installing the python3-venv
+    package, recreate your virtual environment.
+    
+    Failing command: /home/drdave/.venvs/torch/bin/python3
+    
+[1;33m  ! FAILED pytorch-venv (exit Some(1))[0m
+[1;33mdone with 1 failed, 0 refused, 0 blocked, 0 incomplete.[0m

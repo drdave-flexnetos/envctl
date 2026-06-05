@@ -33,8 +33,11 @@ set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # MSRV gate (rust-version = 1.80 in the workspace). Fail closed, do not silently upgrade.
+# Pass iff cargo >= 1.80.0: with the MSRV line FIRST, `sort -V -C` succeeds only when the
+# pair is ascending (1.80.0 <= $ver). (Operands were reversed, which rejected every cargo
+# newer than 1.80 — i.e. always — failing the install on a healthy toolchain.)
 ver="$(cargo --version | awk '{print $2}')"
-printf '%s\n1.80.0\n' "$ver" | sort -V -C || { echo "FATAL: cargo $ver < MSRV 1.80"; exit 1; }
+printf '1.80.0\n%s\n' "$ver" | sort -V -C || { echo "FATAL: cargo $ver < MSRV 1.80"; exit 1; }
 
 # Post-merge this IS the envctl workspace; pre-merge override with ENV_CTL_REPO.
 repo="${ENV_CTL_REPO:-$HOME/Desktop/envctl}"
