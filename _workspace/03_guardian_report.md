@@ -116,3 +116,140 @@ cargo test --workspace
 cargo fmt --all -- --check ; cargo clippy --workspace -- -D warnings
 cargo run -p envctl -- lock --check        # after envctl.lock is regenerated
 ```
+
+---
+
+# Verification report: meta Mission-Control Dashboard — Pass 2
+
+## Verdict — **PASS**
+
+Every NON-NEGOTIABLE invariant still holds after Pass 2. All three CI gates pass (exit 0),
+the full workspace + the standalone plugin crate build/test/fmt/clippy green (independently
+re-run, not trusted from the log), `lock --check` is CLEAN at 47 components, and all scope
+guards are respected. The scrutinized `Engine::detached()` deviation is **safe** — it cannot
+run any mutating verb against the empty registry and does not weaken the fail-closed deploy.
+Zero blocking findings; the two Pass-1 carry-forward notes (declaration order; launcher-on-PATH)
+are both resolved.
+
+## Gate results (run by the guardian)
+| Gate | Command | Exit | Evidence |
+|---|---|---|---|
+| no-c | `bash ci/gates/no-c.sh` | **0** | `resolved graph clean: rustls=['0.23.40'] on ring=['0.17.14']; zero aws-lc/openssl/C-SQLite` → `NO-C GATE PASS` |
+| shape | `bash ci/gates/shape.sh` | **0** | `SHAPE GATE PASS` |
+| enable | `bash ci/gates/enable.sh` | **0** | `ENABLE GATE PASS` |
+
+## cargo (envctl workspace)
+| Check | Command | Exit | Evidence |
+|---|---|---|---|
+| build | `cargo build -p envctl-engine -p envctl` | **0** | Finished |
+| test | `cargo test --workspace` | **0** | all suites pass, 0 failed; engine lib 31 + engine integration 18 + cli dashboard 4 |
+| fmt | `cargo fmt --all -- --check` | **0** | clean |
+| clippy | `cargo clippy --workspace -- -D warnings` | **0** | Finished, no warnings |
+| lock | `cargo run -p envctl -- lock --check` | **0** | `✓ envctl.lock matches the manifest (47 components)` |
+
+Pass-2 tests observed passing by name: `reader_preserves_declaration_order_not_lexicographic`
+(engine lib), `detached_engine_renders_dashboard_without_manifest` (engine integration); all
+Pass-1 dashboard/deploy/CLI tests still green.
+
+## cargo (standalone plugin `meta_dashboard_cli`)
+| Check | Command | Exit | Evidence |
+|---|---|---|---|
+| build | `cargo build` | **0** | Finished |
+| test | `cargo test` | **0** | 7 unit + 2 contract pass (incl. `exec_fails_closed_when_envctl_not_on_path`, `info_response_advertises_dashboard_command`) |
+| clippy | `cargo clippy --all-targets -- -D warnings` | **0** | Finished, no warnings |
+
+## Invariant checks (1–8)
+1. **No C in trust boundary — PASS.** Independent `cargo metadata` for BOTH crates: zero banned
+   crates (libsqlite3-sys/rusqlite/openssl(-sys)/aws-lc-*). envctl: exactly one rustls 0.23.40 on
+   ring 0.17.14; `serde_yaml 0.9.34` + `unsafe-libyaml 0.2.11` pure-Rust (the ordering fix added
+   NO new dep — uses serde_yaml's existing `Mapping`/`from_value`). Plugin: no rustls/ring (no
+   TLS — correct), only the `links` field on `prettyplease` (a Rust crate, not C). No banned crate.
+2. **Code-shape — PASS.** `shape.sh` exit 0.
+3. **secretd enable — PASS.** `enable.sh` exit 0 (unaffected).
+4. **Engine purity — PASS.** Diff of `crates/engine/src/` vs origin/master adds zero
+   `println!/eprint!/print!/io::stdout`. `dashboard.rs` has no `clap`/`eframe`/`egui`. New
+   `Engine::detached()`/`Registry::empty()` are sync, non-printing. Logic stays in the engine.
+5. **Front-end parity — PASS.** Both surfaces drive the IDENTICAL engine methods (table below).
+   GUI `mesh_screen` (`crates/gui/src/main.rs:1078`) sends `EngineCommand::Dashboard`/
+   `DeployDashboard`, routed by `command.rs` to `engine.dashboard`/`engine.deploy_dashboard` —
+   the same methods the CLI's `run_dashboard` calls. The meta plugin is a SEPARATE process that
+   shells `envctl dashboard --json` (no engine logic, no envctl crate dep — confirmed by metadata
+   AND Cargo.toml: dep = `meta_plugin_protocol` path only).
+6. **Fail-closed + dry-run — PASS.** Render read-only. Deploy: `dry_run=true` default, refuses to
+   clobber a non-owner-marker file without `--force` (`dashboard::deploy`, registry-independent),
+   backs up `.bak.<nanos>` before overwrite. GUI deploy gated by `dry_run = self.dry_run_default`,
+   `force: false` (never applies silently). Plugin fails CLOSED when envctl absent (`resolve_envctl`
+   bails naming envctl; contract test asserts non-zero exit). All refusal paths unit-tested.
+7. **Rust-native, no drift — PASS.** Added files are Rust + sanctioned config assets only
+   (launcher bash `assets/scripts/envctl-dashboard-pane`, `manifest/dashboard.toml`, golden KDL).
+   Plugin tracked files: `Cargo.{toml,lock}`, `.gitignore`, `src/{lib,main}.rs`, `tests/contract.rs`
+   — no JS/TS/py/go, no node. Launcher `bash -n` clean.
+8. **Lock honesty — PASS.** `manifest/envctl.lock` regenerated: `+[components.dashboard]` added
+   (diff vs HEAD); `lock --check` exit 0 → CLEAN, 47 components (count claim verified). Plugin
+   `Cargo.lock` committed (binary crate).
+
+## DEVIATION scrutiny — `Engine::detached()` / `Registry::empty()` — **SAFE (not a finding)**
+- `Engine::detached()` (`lib.rs:88`) builds an Engine with `Registry::empty()` (`model.rs:68`,
+  empty `by_id`/`order`) and the REAL `ProcessRunner`.
+- **Exactly one production call site**: `crates/cli/src/main.rs:188`, guarded by
+  `matches!(cli.cmd, Cmd::Dashboard { .. })`. Every other verb takes `Engine::load_default()?`
+  (line 190), which still hard-fails without a real `manifest/` dir. The only other reference is
+  the engine test `detached_engine_renders_dashboard_without_manifest`.
+- **No mutating verb can reach it.** install/auto-fix/reset/add-repo/doctor never select detached;
+  and even if they did, an empty registry has zero components to act on, and their destructive
+  guards (`UuidResolves`/`NotLiveDevice`/`NotMounted`) live in component-action paths the
+  `dashboard` verb never enters.
+- **Deploy fail-closed unchanged.** `dashboard::deploy` keys off the layout file's owner marker +
+  `dry_run`/`force` — it is registry-INDEPENDENT, so the empty registry cannot weaken it. Verified
+  end-to-end: `envctl dashboard --meta-file <real .meta.yaml>` ran from the meta root (no manifest
+  dir) exit 0, rendering the overview tab + meta-core in dependency order.
+- Verdict: the deviation makes the planned plugin behaviour work WITHOUT weakening any invariant.
+
+## Pass-1 carry-forward notes — both RESOLVED
+- **Declaration order (was note #1):** reader now uses `serde_yaml::Mapping` (IndexMap-backed),
+  `BTreeMap` removed from the reader/group path. Test `reader_preserves_declaration_order_not_
+  lexicographic` is NON-vacuous (keys `zeta, alpha, mike` deliberately anti-alphabetical; asserts
+  declaration order, NOT sorted). End-to-end: meta-core panes render `loop_lib → meta_plugin_protocol
+  → meta_plugin_api → meta_core → meta_git_lib → loop_cli → meta_cli` — dependency order. RESOLVED.
+- **Launcher on PATH (was note #2):** `manifest/dashboard.toml` install/fix does
+  `install -D -m755` the launcher into `~/.local/bin`, then `envctl dashboard --deploy --apply`.
+  detect/verify check the launcher resolves on PATH. RESOLVED.
+
+## Parity check — Engine method → CLI caller / GUI caller
+| Engine method | CLI caller | GUI caller |
+|---|---|---|
+| `Engine::dashboard` | `run_dashboard` `crates/cli/src/main.rs` (via `Engine::detached()` at main.rs:188) | `mesh_screen` `crates/gui/src/main.rs:1107` → `EngineCommand::Dashboard` → `command.rs:194` → `engine.dashboard` (`command.rs:199`) |
+| `Engine::deploy_dashboard` | `run_dashboard` deploy branch | `mesh_screen` `crates/gui/src/main.rs:1122` → `EngineCommand::DeployDashboard` → `command.rs:203` → `engine.deploy_dashboard` |
+
+Plugin: SEPARATE process; `meta_dashboard_cli` metadata shows NO envctl crate dep; loose coupling
+via the `envctl dashboard --json` CLI contract only.
+
+## Manifest / lock integrity — PASS
+`manifest/dashboard.toml` well-formed: id `dashboard`, `requires = ["yazelix", "claude-code-cli"]`,
+all hooks user-scoped (NO sudo). Both `requires` edges resolve — `graph --why dashboard` shows
+`yazelix → dashboard` and `claude-code-cli → dashboard` (yazelix in `nix-yazelix.toml:94`,
+claude-code-cli in `ai-clis.toml`); topo-sort succeeds. `lock --check` CLEAN, 47 components.
+
+## Scope guard (Pass 2) — PASS
+- Real `/home/drdave/Desktop/meta/.meta.yaml` and root `.gitignore`: NOT edited (meta root clean
+  for those paths). No `.meta.yaml` exists in the envctl worktree.
+- envctl Pass-2 deltas are UNCOMMITTED working-tree changes (orchestrator commits envctl); the
+  one committed envctl commit (`8ea5f98`, branch `yazelix-dashboard`) is the Pass-1 work — local
+  only, 1 ahead of origin/master, NOT pushed.
+- Plugin repo `meta_dashboard_cli`: exactly ONE local commit (`a1a74cc`, `dashboard:`-prefixed),
+  NO remote, clean tree, NOT pushed.
+
+## Findings
+- **NOTE (informational, route to orchestrator/architect — not blocking):** the `dashboard`
+  component `requires = ["yazelix", "claude-code-cli"]` makes it a leaf depending on a yazelix
+  group + ai-clis. This is correct given the layout targets yazelix's zellij dir and the launcher
+  execs `claude`; flagged only so the orchestrator confirms the dependency intent matches the
+  install ordering it wants when wiring `dashboard` into the default install set.
+- **NOTE (informational):** the broker-unification (single mesh broker serving weave+repowire) is
+  documented in the launcher as a north-star follow-on, NOT implemented — matches the plan
+  (broker = follow-on, not v1). No action.
+
+## Re-test needed
+None for Pass 2 — verdict is PASS, zero blocking findings. The orchestrator's remaining wiring
+(commit envctl deltas; add the plugin to `.meta.yaml`/`.gitignore`/remote) is out of the
+implementer's scope and was correctly deferred.

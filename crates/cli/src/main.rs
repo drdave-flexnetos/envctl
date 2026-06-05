@@ -179,7 +179,16 @@ enum Cmd {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let engine = Engine::load_default()?;
+    // `dashboard` is manifest-INDEPENDENT (it reads `.meta.yaml`, never the
+    // component registry), so it must work from any cwd without a `manifest/` dir
+    // — e.g. when the `meta dashboard` plugin shells to `envctl dashboard` from the
+    // meta root. Use a detached engine (empty registry) for it; every other verb
+    // still requires the real manifest.
+    let engine = if matches!(cli.cmd, Cmd::Dashboard { .. }) {
+        Engine::detached()
+    } else {
+        Engine::load_default()?
+    };
     let json = cli.json;
 
     match cli.cmd {

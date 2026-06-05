@@ -13,8 +13,13 @@
 //! zellij layout KDL: a top-level `layout { tab name="..." { pane name="..."
 //! cwd="..." command="..." { args "..." } } }` tree.
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+// NOTE: project *declaration order* (from `.meta.yaml`) is load-bearing — the
+// synthetic meta-core tab must list core crates in dependency order. We parse the
+// `projects:` mapping via serde_yaml's order-preserving `Mapping` (backed by
+// IndexMap) rather than a `BTreeMap`, so panes appear in document order, not
+// lexicographic order. Grouping/buckets below preserve this insertion order too.
 
 // ============================================================ types ===========
 
@@ -43,7 +48,8 @@ pub struct MetaRepo {
 pub struct MetaWorkspace {
     /// Absolute path of the directory containing `.meta.yaml`.
     pub root: PathBuf,
-    /// Projects in declaration order (BTreeMap-from-YAML is sorted; see reader).
+    /// Projects in `.meta.yaml` declaration order (preserved via serde_yaml's
+    /// order-preserving `Mapping`; see reader).
     pub repos: Vec<MetaRepo>,
 }
 
@@ -137,10 +143,13 @@ pub fn read_workspace(meta_file: &Path) -> anyhow::Result<MetaWorkspace> {
 
 /// The shape of `.meta.yaml` we parse. We deserialize only the fields we use and
 /// ignore the rest (meta's config has more keys we don't touch).
+///
+/// `projects` is a `serde_yaml::Mapping` (order-preserving, IndexMap-backed) so we
+/// keep the document's declaration order — NOT lexicographic — when we iterate.
 #[derive(Deserialize)]
 struct RawMeta {
     #[serde(default)]
-    projects: BTreeMap<String, RawProject>,
+    projects: serde_yaml::Mapping,
 }
 
 /// A project value may be a bare string (`repo: git@...`) or a map. We accept a
@@ -174,13 +183,18 @@ pub fn parse_workspace(text: &str, meta_file: &Path) -> anyhow::Result<MetaWorks
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    // BTreeMap gives a deterministic (lexicographic) order — declaration order
-    // is not preserved by YAML maps, so we use the stable sorted key order as the
-    // canonical declaration order for the meta-core tab + golden tests.
-    let repos = raw
-        .projects
-        .into_iter()
-        .map(|(id, p)| match p {
+    // Iterate the `Mapping` in document order (IndexMap-backed) so the meta-core
+    // tab preserves dependency/declaration order, not lexicographic order.
+    let mut repos = Vec::with_capacity(raw.projects.len());
+    for (key, val) in raw.projects {
+        // Project keys are strings; skip any non-string key defensively.
+        let id = match key.as_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let p: RawProject = serde_yaml::from_value(val)
+            .map_err(|e| anyhow::anyhow!("parse project {id} in {}: {e}", meta_file.display()))?;
+        repos.push(match p {
             RawProject::Url(repo) => MetaRepo {
                 id,
                 repo: Some(repo),
@@ -195,8 +209,8 @@ pub fn parse_workspace(text: &str, meta_file: &Path) -> anyhow::Result<MetaWorks
                 depends_on: m.depends_on,
                 provides: m.provides,
             },
-        })
-        .collect();
+        });
+    }
     Ok(MetaWorkspace { root, repos })
 }
 
@@ -236,24 +250,29 @@ fn tab_for(repo: &MetaRepo) -> String {
 }
 
 /// Group repos into ordered (tab-name -> repos) buckets. Within a bucket repos
-/// keep workspace order; buckets are ordered by KNOWN_TABS, then any extra
-/// custom tabs in sorted order for determinism.
+/// keep `.meta.yaml` declaration order; buckets are ordered by KNOWN_TABS, then
+/// any extra custom tabs in first-appearance order (declaration order), so the
+/// whole layout is stable and document-order-faithful.
 fn group(workspace: &MetaWorkspace) -> Vec<(String, Vec<&MetaRepo>)> {
-    let mut buckets: BTreeMap<String, Vec<&MetaRepo>> = BTreeMap::new();
+    // Insertion-ordered accumulator: (tab-name, repos), found by first appearance.
+    let mut buckets: Vec<(String, Vec<&MetaRepo>)> = Vec::new();
     for r in &workspace.repos {
-        buckets.entry(tab_for(r)).or_default().push(r);
-    }
-    let mut out: Vec<(String, Vec<&MetaRepo>)> = Vec::new();
-    // Known tabs first, in canonical order.
-    for known in KNOWN_TABS {
-        if let Some(v) = buckets.remove(*known) {
-            out.push(((*known).to_string(), v));
+        let tab = tab_for(r);
+        match buckets.iter_mut().find(|(name, _)| name == &tab) {
+            Some((_, v)) => v.push(r),
+            None => buckets.push((tab, vec![r])),
         }
     }
-    // Any remaining custom tabs, sorted (BTreeMap iteration is already sorted).
-    for (k, v) in buckets {
-        out.push((k, v));
+    let mut out: Vec<(String, Vec<&MetaRepo>)> = Vec::new();
+    // Known tabs first, in canonical KNOWN_TABS priority order.
+    for known in KNOWN_TABS {
+        if let Some(pos) = buckets.iter().position(|(name, _)| name == known) {
+            let (name, v) = buckets.remove(pos);
+            out.push((name, v));
+        }
     }
+    // Any remaining custom tabs, in first-appearance (declaration) order.
+    out.extend(buckets);
     out
 }
 
@@ -505,17 +524,17 @@ projects:
     fn reader_parses_projects_map_and_url_forms() {
         let w = ws();
         assert_eq!(w.root, Path::new("/work"));
-        // 6 projects, sorted by key (BTreeMap).
+        // 6 projects, in .meta.yaml DECLARATION order (order-preserving Mapping).
         let ids: Vec<&str> = w.repos.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(
             ids,
             vec![
-                "envctl",
-                "loop_lib",
                 "meta_cli",
                 "meta_core",
-                "repowire",
-                "weave"
+                "envctl",
+                "loop_lib",
+                "weave",
+                "repowire"
             ]
         );
         // bare-url form parsed with no tags
@@ -532,6 +551,21 @@ projects:
     }
 
     #[test]
+    fn reader_preserves_declaration_order_not_lexicographic() {
+        // Keys deliberately out of alphabetical order; declaration order must win.
+        let text = r#"
+projects:
+  zeta: git@github.com:o/zeta.git
+  alpha: git@github.com:o/alpha.git
+  mike: git@github.com:o/mike.git
+"#;
+        let w = parse_workspace(text, Path::new("/work/.meta.yaml")).unwrap();
+        let ids: Vec<&str> = w.repos.iter().map(|r| r.id.as_str()).collect();
+        // declaration order (NOT sorted: would be alpha, mike, zeta)
+        assert_eq!(ids, vec!["zeta", "alpha", "mike"]);
+    }
+
+    #[test]
     fn grouping_untagged_go_to_meta_core() {
         let w = ws();
         let groups = group(&w);
@@ -540,7 +574,7 @@ projects:
         assert_eq!(names, vec!["meta-core", "tools/env", "ops", "mcp"]);
         let core = &groups[0].1;
         let core_ids: Vec<&str> = core.iter().map(|r| r.id.as_str()).collect();
-        // untagged: meta_cli, meta_core, repowire (workspace/sorted order)
+        // untagged repos in DECLARATION order: meta_cli, meta_core, then repowire
         assert_eq!(core_ids, vec!["meta_cli", "meta_core", "repowire"]);
     }
 

@@ -80,6 +80,24 @@ impl Engine {
         Engine::load(dir)
     }
 
+    /// An Engine with NO manifest loaded (empty registry, real runner). For
+    /// manifest-independent verbs (e.g. `dashboard`) that read `.meta.yaml`, never
+    /// the component registry — so they work from any cwd without a `manifest/` dir.
+    /// The manifest dir is still recorded (default resolution) for any path that
+    /// needs it, but the registry is empty.
+    pub fn detached() -> Engine {
+        let manifest_dir = std::env::var("ENVCTL_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("manifest"));
+        Engine {
+            inner: Arc::new(EngineInner {
+                registry: Registry::empty(),
+                manifest_dir,
+                runner: Box::new(ProcessRunner),
+            }),
+        }
+    }
+
     /// Construct an Engine with a custom HookRunner (used by tests: DryRunRunner).
     pub fn with_runner(
         manifest_dir: PathBuf,

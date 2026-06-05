@@ -754,3 +754,43 @@ fn runtime_record_and_load_roundtrip() {
     std::env::remove_var("XDG_CACHE_HOME");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// `Engine::detached()` (no manifest registry) can still render a dashboard from a
+/// dir that has NO `manifest/` — proving the `dashboard` verb is manifest-independent
+/// (so the `meta dashboard` plugin can shell to `envctl dashboard` from the meta root).
+#[test]
+fn detached_engine_renders_dashboard_without_manifest() {
+    use envctl_engine::{DashboardSpec, Engine, EventSink};
+    let dir = std::env::temp_dir().join(format!(
+        "envctl-detached-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let meta = dir.join(".meta.yaml");
+    std::fs::write(
+        &meta,
+        "projects:\n  zeta: git@github.com:o/zeta.git\n  alpha: git@github.com:o/alpha.git\n",
+    )
+    .unwrap();
+
+    let engine = Engine::detached();
+    let sink = EventSink::null();
+    let plan = engine
+        .dashboard(dir.clone(), Some(meta), DashboardSpec::default(), &sink)
+        .expect("detached engine renders dashboard without a manifest dir");
+
+    // overview tab first, then the two repos in DECLARATION order (zeta before alpha).
+    assert_eq!(plan.tabs[0].name, "mission-control");
+    let core = plan
+        .tabs
+        .iter()
+        .find(|t| t.name == "meta-core")
+        .expect("untagged repos land in meta-core");
+    let ids: Vec<&str> = core.panes.iter().map(|p| p.repo.as_str()).collect();
+    assert_eq!(ids, vec!["zeta", "alpha"]);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
