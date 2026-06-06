@@ -109,14 +109,13 @@ requires = ["rustup"]
 resolved = ""
 
 [components.group-ai-clis]
-content_hash = "120fb5a65c2d2201"
+content_hash = "3bd21a9b8ad7ef5c"
 requires = [
     "claude-code-cli",
     "codex-cli",
     "devin-cli",
     "gemini-cli",
     "kimi-cli",
-    "node-via-bun",
 ]
 resolved = ""
 
@@ -202,8 +201,13 @@ content_hash = "f986c70d2091b3d0"
 requires = ["nix"]
 resolved = ""
 
+[components.node-real]
+content_hash = "ccd41ad72108a3ab"
+requires = []
+resolved = ""
+
 [components.node-via-bun]
-content_hash = "34fb0dc5decd8d32"
+content_hash = "de3c65560bc30907"
 requires = ["bun"]
 resolved = ""
 

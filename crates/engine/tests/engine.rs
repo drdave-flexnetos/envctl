@@ -209,7 +209,43 @@ fn reverse_dependents_transitive() {
     );
     assert!(
         rdeps.contains(&"group-ai-clis".to_string()),
-        "transitive (via node-via-bun): {rdeps:?}"
+        "transitive (via codex-cli/gemini-cli -> bun): {rdeps:?}"
+    );
+}
+
+#[test]
+fn group_ai_clis_does_not_require_node_via_bun() {
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    let reqs = &reg
+        .get("group-ai-clis")
+        .expect("group-ai-clis exists")
+        .requires;
+    assert!(
+        !reqs.contains(&"node-via-bun".to_string()),
+        "group-ai-clis must not require node-via-bun (false edge dropped): {reqs:?}"
+    );
+    for cli in [
+        "claude-code-cli",
+        "codex-cli",
+        "gemini-cli",
+        "kimi-cli",
+        "devin-cli",
+    ] {
+        assert!(
+            reqs.contains(&cli.to_string()),
+            "group-ai-clis must require {cli}: {reqs:?}"
+        );
+    }
+}
+
+#[test]
+fn node_real_component_exists_with_empty_requires() {
+    let reg = Registry::load(&manifest_dir()).expect("manifest loads");
+    let node_real = reg.get("node-real").expect("node-real component exists");
+    assert!(
+        node_real.requires.is_empty(),
+        "node-real must have empty requires (standalone n8n carve-out): {:?}",
+        node_real.requires
     );
 }
 
