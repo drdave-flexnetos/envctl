@@ -51,6 +51,24 @@ capability or one component per item — so a cycle fits comfortably under the b
    > their own TTLs). The cycle completes only when **all** target repos reach guardian PASS (or
    > are marked `- [!]` blocked). Cycle-budget counting and the `session-relay` handoff are
    > unchanged — an A2 cycle is still one cycle against the per-session budget.
+   >
+   > **Partial-completion + resume (FM-2).** Track per-repo `sub-status ∈ {PASS, FAIL,
+   > in-flight:<phase∈architect|implementer|guardian|commit>, pending, blocked}`. A **resumed** A2
+   > cycle continues the **SAME** backlog item — re-run Phase 2-A2 **only for repos whose sub-status
+   > ≠ PASS**; PASSed repos are **skipped** (their commit already landed at their guardian PASS, step
+   > 6). Tick the cycle's item:
+   > - `- [x]` **only when EVERY** target repo is PASS;
+   > - `- [!]` **only when ≥1** repo is blocked/FAIL-unrecoverable **and none** are still in-flight;
+   > - otherwise leave it `- [ ]` (still in flight) — it carries forward into the handoff.
+   > Budget counts **once**, when the item finally closes. Mirror the per-repo state as an indented
+   > **sub-note ledger** directly under the cycle's backlog item, one line per repo:
+   > ```
+   > - [ ] <id>: <one-line goal>   (A2 — N repos)
+   >   - r1 <name>: PASS @ <commit>
+   >   - r2 <name>: in-flight:guardian (last-good <commit>)
+   >   - r3 <name>: blocked: <reason>
+   > ```
+   > The HANDOFF per-repo table is the durable mirror of this ledger (see `continuity-steward`).
 5. **Write state back:** tick the item (`- [x]` done / `- [!]` blocked), increment
    `cycles_this_session` and `cycles_total`, update `last_item` and `status` in `loop_state.md`,
    and append a one-line progress note. Commit the `_workspace/` update.
@@ -77,6 +95,13 @@ every session short, cheap, and well below context rot — by construction, not 
 If invoked to **resume** (a `_workspace/HANDOFF.md` exists, or weave inbox / the successor cron
 prompt says so): follow `session-relay`'s resume protocol first (read HANDOFF + ack via weave +
 reset `cycles_this_session`), then run the iteration body normally from the backlog's current item.
+
+If the resumed item is an **A2 cycle** (the HANDOFF carries a `## Per-repo vector` per-repo table),
+session-relay RESUME runs **2-pre → 2 → 2a → 2b** (set existence/recreate on recorded branches →
+baseline fan-out cleanliness+gates → grit reconcile → idempotent double-resume) **before** you
+re-enter the iteration body. Then re-enter Phase 2-A2 at the **not-yet-PASSed** repos only
+(`sub-status ≠ PASS`, per FM-2 above) — skip the PASSed repos (commit already landed). The item
+stays the **same** backlog item; it ticks `- [x]`/`- [!]` only per the partial-completion rule above.
 
 ## Stop conditions (end the loop — no re-fire)
 - Backlog complete (all items `- [x]`/`- [!]`) → DONE summary.

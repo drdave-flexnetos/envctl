@@ -167,6 +167,11 @@ it commits/merges/PRs, only after that repo's guardian PASSes — never `grit do
 8. **Synthesize per repo.** Summarize each repo's result and preserve every `_workspace/<repo>/`
    audit trail (don't delete on success).
 
+> **Cross-session resume of an in-flight A2 cycle** (N-branch checkpoint, meta-set recreate, grit
+> reconcile, idempotent double-resume) is owned by **`session-relay` RESUME** (2-pre/2/2a/2b) +
+> **`continuity-steward`** — see the per-repo HANDOFF table for the durable state. No behavior change
+> to this phase; it just hands the in-flight per-repo vector to those skills at a budget handoff.
+
 ## Phase 2-Y: intra-repo serialized merge (opt-in, Option Y)
 
 Run this **instead of** Phase 2 when Phase 1.5 routed to Option Y (**1 repo**, >3 modules that **share

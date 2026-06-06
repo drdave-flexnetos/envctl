@@ -44,9 +44,20 @@ Gather from the worktree + loop state:
   `envctl doctor` delta + which PATH/env-var wiring still needs confirming in a fresh shell.
 - **Per-repo vector (A2 only)** — when the in-flight cycle ran A2 (>1 target repo), capture the
   meta worktree **set name** and a **per-repo state table** (mirror the session-relay schema):
-  `{repo, worktree dir, branch, sub-item/module, last-good commit, in-flight phase, open grit
-  claims, verify-on-resume cmd}`. Confirm the set still exists with `meta git worktree list <slug>`.
-  For a single-repo cycle, omit this entirely.
+  `{repo, worktree dir, branch, sub-item/module, sub-status, last-good commit, in-flight phase,
+  open grit claims, verify-on-resume cmd, option-y ptr}`. The **sub-status** is the per-repo
+  completion state `∈ {PASS, FAIL, in-flight:<phase∈architect|implementer|guardian|commit>,
+  pending, blocked}` (PASS = that repo's guardian passed AND its commit landed; everything else =
+  not-yet-PASSed → the successor re-runs it). The **verify-on-resume cmd** is the exact command the
+  successor fans out per repo to confirm a clean baseline (envctl = its `.forge/invariants.toml`
+  gates; other repos = their descriptor gates or the generic-Rust fallback). The **option-y ptr**
+  points at that repo's `## Option-Y wave` sub-table when it ran Option Y intra-repo (else `n/a`).
+  Note that each member `_workspace/<repo>/` is **in-flight scratch (NOT committed)** — the
+  successor resumes from the repo's **branch + last-good commit**, not from that scratch dir.
+  Confirm the set still exists with
+  `meta --json git worktree list | jq -e '.worktrees[]|select(.name=="<slug>")'`
+  (`worktree list` takes **no** name arg — it lists all sets). For a single-repo cycle, omit this
+  entirely.
 - **Option-Y wave (intra-repo serialized merge, `FORGE_OPTION_Y=1` only)** — when the in-flight cycle
   ran Option Y, capture a **per-agent table** so the successor can reconcile each writer:
   `{agent id, claimed file::symbols, .grit/worktrees/<id> exists?, guardian verdict (PASS/FAIL/none),
@@ -71,8 +82,17 @@ Write `_workspace/HANDOFF.md` with this structure (keep it scannable — heading
 ## Open findings    — blockers / FAILs / NEEDS-DECISION (empty if none)
 ## Decisions & dead ends — non-obvious choices; approaches ruled out
 ## Invariant watch  — anything touching the non-negotiables to re-verify (or "none")
-## Per-repo vector — A2 only: meta set name + per-repo state table (repo, worktree, branch, sub-item/module, last-good commit, in-flight phase, open grit claims, verify-on-resume) (or "n/a — single-repo cycle")
-## Option-Y wave — Option Y only: per-agent table (agent id, claimed file::symbols, .grit/worktrees/<id> exists?, guardian verdict, merged-via-done?, next action) from `grit status` — reap nothing; stale `.grit/merge.lock` self-heals, don't delete (or "n/a — not an Option-Y cycle")
+## Per-repo vector — A2 only (n/a — single-repo cycle)
+- meta set name (slug): <slug>
+- host checkpoint: _workspace/HANDOFF.md (committed in the envctl host repo)
+- resume command: /forge-loop resume from _workspace/HANDOFF.md --repos <r1>,<r2>,<r3>
+- member _workspace/<repo>/ are in-flight scratch (NOT committed); resume from branch + last-good commit.
+
+| repo | worktree dir | branch | sub-item/module | sub-status | last-good commit | in-flight phase | open grit claims | verify-on-resume cmd | option-y? |
+|------|--------------|--------|-----------------|------------|------------------|-----------------|------------------|----------------------|-----------|
+
+## Option-Y wave — per repo that ran Option Y (n/a — no Option-Y wave)
+(PR-3 per-agent table, namespaced by repo: agent id, claimed file::symbols, .grit/worktrees/<id> exists?, guardian verdict, merged-via-done?, next action — from `grit status`; reap nothing; stale `.grit/merge.lock` self-heals, don't delete)
 ## Verify-on-resume — commands the successor runs first to confirm a clean baseline
 ```
 
