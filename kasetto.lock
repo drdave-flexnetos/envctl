@@ -53,6 +53,13 @@ assets:
     source: ./agent-skills
     destination: memory
     source_revision: local
+  mcp::./agent-skills::n8n-mcp.json:
+    kind: mcp
+    name: n8n-mcp.json
+    hash: 045ec7470e2adcbbff186fcb114dc8e8f31e7aa3e2428940e15465af04ddb8e0
+    source: ./agent-skills
+    destination: n8n-mcp
+    source_revision: local
   mcp::./agent-skills::playwright.json:
     kind: mcp
     name: playwright.json
