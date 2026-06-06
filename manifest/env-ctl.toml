@@ -15,7 +15,7 @@
 id = "env-ctl"
 name = "env-ctl secrets daemon"
 description = "Pure-Rust gRPC secrets vault + credential broker (secretd/secretctl). AEAD-at-rest, <=24h peer-bound relay bearers, in-process TLS for the relay edge. Control = UDS + SO_PEERCRED owner-only; data = loopback."
-requires = ["rustup"]      # cargo + stable >= 1.80 (id "rustup" defined in manifest/base.toml)
+requires = ["rustup", "sqld"]  # cargo + stable >= 1.80 (manifest/base.toml); durable store (manifest/sqld.toml)
 destructive = false
 
 # DETECT == the "already installed AND healthy enough to be present" predicate.
@@ -53,6 +53,21 @@ install -Dm755 "$repo/target/release/secretctl" "$HOME/.cargo/bin/secretctl"
 install -d -m700 "$HOME/.config/env-ctl"
 install -d -m700 "$HOME/.local/share/env-ctl"
 install -d -m700 "$HOME/.local/state/env-ctl"
+
+# Durable store config (docs/ops/08): point secretd at the loopback sqld (libSQL remote backend).
+# Idempotent: written only if absent (operator edits are preserved). The AUTH TOKEN is NEVER written
+# here — it comes from SECRETD_LIBSQL_AUTH_TOKEN[_FILE] only (config.rs refuses a token in this file).
+cfg="$HOME/.config/env-ctl/secretd.toml"
+if [ ! -f "$cfg" ]; then
+  cat > "$cfg" <<'TOML'
+# secretd store backend (OI-1 (a)). libSQL `remote` -> a LOOPBACK sqld (see manifest/sqld.toml).
+# The auth token is NEVER stored here (credentials come from SECRETD_LIBSQL_AUTH_TOKEN[_FILE]).
+[store]
+backend = "libsql"
+url = "http://127.0.0.1:8080"
+TOML
+  chmod 0600 "$cfg"
+fi
 '''
 
 # VERIFY: bins answer, AND secretd's own non-serving self-check passes. `secretd --self-check` runs
@@ -60,10 +75,31 @@ install -d -m700 "$HOME/.local/state/env-ctl"
 # EXITS — it never binds the socket, connects the store, or serves, so verify cannot block and is safe
 # to run while the daemon is live. A misconfigured/un-built daemon reports verify=false (drift
 # visible) WITHOUT triggering a destructive fix — detect, not verify, is the install predicate.
+#
+# SERVING PROBE (non-fatal): additionally, IF the unit is active, confirm a live `secretctl status`
+# round-trip — this is what proves the sd-notify READY + durable-store fix actually serves. It is
+# strictly best-effort: a not-yet-started/locked daemon must NOT fail verify (locked is HEALTHY; the
+# vault is simply unprovisioned), and verify never asserts "unlocked" and never triggers a fix. The
+# hard predicate stays the two binary/self-check checks; the serving probe only logs.
 [component.verify]
 kind = "command"
 command = "bash"
-args = ["-lc", "export PATH=\"$HOME/.cargo/bin:$PATH\"; secretctl --help >/dev/null && secretd --self-check >/dev/null"]
+args = ["-lc", '''
+export PATH="$HOME/.cargo/bin:$PATH"
+# Hard predicate (fail-closed): bins answer + the daemon's offline self-check passes.
+secretctl --help >/dev/null && secretd --self-check >/dev/null || exit 1
+# Best-effort serving probe — NEVER fails verify (locked is healthy; daemon may be stopped).
+if systemctl --user is-active --quiet env-ctl.service; then
+  if secretctl status >/dev/null 2>&1; then
+    echo "serving probe: env-ctl.service active and secretctl status round-trips (healthy)"
+  else
+    echo "serving probe: env-ctl.service active but secretctl status did not round-trip (non-fatal)"
+  fi
+else
+  echo "serving probe: env-ctl.service not active (non-fatal; start it to serve)"
+fi
+exit 0
+''']
 
 # FIX: idempotent rebuild + reinstall (the dev-tools.toml `cargo install --force` analogue).
 [component.fix]
@@ -75,6 +111,19 @@ repo="${ENV_CTL_REPO:-$HOME/Desktop/envctl}"
 cargo build --release --manifest-path "$repo/Cargo.toml" -p envctl-secretd -p envctl-secretctl
 install -Dm755 "$repo/target/release/secretd"   "$HOME/.cargo/bin/secretd"
 install -Dm755 "$repo/target/release/secretctl" "$HOME/.cargo/bin/secretctl"
+
+# Re-assert the durable store config idempotently (write only if absent; operator edits preserved).
+install -d -m700 "$HOME/.config/env-ctl"
+cfg="$HOME/.config/env-ctl/secretd.toml"
+if [ ! -f "$cfg" ]; then
+  cat > "$cfg" <<'TOML'
+[store]
+backend = "libsql"
+url = "http://127.0.0.1:8080"
+TOML
+  chmod 0600 "$cfg"
+fi
+
 systemctl --user daemon-reload || true
 systemctl --user try-restart env-ctl.service || true
 '''
@@ -98,8 +147,11 @@ path_entries = ["~/.cargo/bin"]
 [[component.wiring.shell_rc]]
 file = "~/.bashrc"
 marker = "env-ctl"     # engine writes "BEGIN env-ctl (added by envctl)" / "END env-ctl" guard lines
+# SOCKET NAME FIX: the real control socket is `secretd.sock` (Paths::control_socket()), NOT
+# `control.sock`. The old name pointed secretctl at a path the daemon never binds, so every
+# round-trip failed "is secretd running?" even with a healthy daemon.
 content = '''
-export SECRETCTL_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/env-ctl/control.sock"
+export SECRETCTL_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/env-ctl/secretd.sock"
 '''
 
 [[component.wiring.systemd_user]]
@@ -112,6 +164,11 @@ Documentation=file:///home/drdave/Desktop/envctl/docs/ARCHITECTURE.md
 # No network ordering for the control/data planes (UDS + loopback). Only the relay HTTPS
 # edge needs the network, and that is operator-enabled, not a startup dependency.
 After=default.target
+# Durable store ordering: the loopback sqld must be up first (libSQL remote backend on
+# http://127.0.0.1:8080). Wants (not Requires) so a transient sqld blip auto-relocks rather than
+# hard-failing the daemon; the libSQL store retries the connection on use.
+Wants=sqld.service
+After=sqld.service
 
 [Service]
 Type=notify

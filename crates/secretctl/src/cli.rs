@@ -22,6 +22,22 @@ pub struct Cli {
 pub enum Cmd {
     /// Vault lock status (no unlock side effect).
     Status,
+    /// Initialize a fresh vault: mint the DEK + enroll keyslots. Dry-run preview unless `--apply`;
+    /// REFUSES to overwrite an existing vault. The daemon forces the hardened Argon2 floor.
+    Init {
+        /// Read the passphrase from stdin (owner-only, over the peercred-gated socket).
+        #[arg(long)]
+        passphrase_stdin: bool,
+        /// Also enroll a USB keyslot (requires `--usb-partuuid`; keyfile read on the daemon side).
+        #[arg(long)]
+        enroll_usb: bool,
+        /// PARTUUID of the USB partition holding the keyfile (the slot selector; not the key).
+        #[arg(long = "usb-partuuid")]
+        usb_partuuid: Option<String>,
+        /// Actually initialize. Without it, prints a dry-run preview and mutates nothing (CF-8).
+        #[arg(long)]
+        apply: bool,
+    },
     /// Unlock the vault (USB-first; passphrase only if the USB is absent).
     Unlock {
         #[arg(long)]

@@ -69,8 +69,11 @@ requires = []
 resolved = ""
 
 [components.env-ctl]
-content_hash = "bf0528abf457845a"
-requires = ["rustup"]
+content_hash = "370a8f964fb5bed4"
+requires = [
+    "rustup",
+    "sqld",
+]
 resolved = ""
 
 [components.gemini-cli]
@@ -247,6 +250,11 @@ resolved = ""
 
 [components.rustup]
 content_hash = "27302c5aae65a605"
+requires = []
+resolved = ""
+
+[components.sqld]
+content_hash = "cd6716965bf5b09f"
 requires = []
 resolved = ""
 
