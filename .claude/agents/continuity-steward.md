@@ -42,6 +42,11 @@ Gather from the worktree + loop state:
 - **Invariant / health watch** — for feature work: anything touching the NON-NEGOTIABLE invariants
   (no-C, rustls/ring, engine purity, fail-closed) to re-verify. For env work: the current
   `envctl doctor` delta + which PATH/env-var wiring still needs confirming in a fresh shell.
+- **Per-repo vector (A2 only)** — when the in-flight cycle ran A2 (>1 target repo), capture the
+  meta worktree **set name** and a **per-repo state table** (mirror the session-relay schema):
+  `{repo, worktree dir, branch, sub-item/module, last-good commit, in-flight phase, open grit
+  claims, verify-on-resume cmd}`. Confirm the set still exists with `meta git worktree list <slug>`.
+  For a single-repo cycle, omit this entirely.
 
 ## Output protocol
 
@@ -58,6 +63,7 @@ Write `_workspace/HANDOFF.md` with this structure (keep it scannable — heading
 ## Open findings    — blockers / FAILs / NEEDS-DECISION (empty if none)
 ## Decisions & dead ends — non-obvious choices; approaches ruled out
 ## Invariant watch  — anything touching the non-negotiables to re-verify (or "none")
+## Per-repo vector — A2 only: meta set name + per-repo state table (repo, worktree, branch, sub-item/module, last-good commit, in-flight phase, open grit claims, verify-on-resume) (or "n/a — single-repo cycle")
 ## Verify-on-resume — commands the successor runs first to confirm a clean baseline
 ```
 

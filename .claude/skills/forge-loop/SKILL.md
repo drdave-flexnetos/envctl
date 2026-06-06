@@ -42,6 +42,15 @@ capability or one component per item — so a cycle fits comfortably under the b
    → guardian, with the same routing/loop caps and `_workspace/` artifacts. Commit on PASS /
    PASS-WITH-NOTES (area-prefixed subject). On an unrecoverable guardian FAIL or a NEEDS-DECISION,
    mark the item `- [!]` blocked with a one-line reason and move to the next item (don't thrash).
+
+   > **Multi-repo cycle (A2):** if the architect's plan for this item lists **>1 target repo**,
+   > step 4's build runs the A2 shape (feature-forge **Phase 1.5 → Phase 2-A2**): one coordinated
+   > meta worktree set, N implementers, per-repo guardian gates. The loop itself is unchanged —
+   > still **one backlog item per cycle**, A2 is just the internal shape of that cycle's build.
+   > Run `grit gc` per repo before each wave and keep heartbeat hygiene (the implementers refresh
+   > their own TTLs). The cycle completes only when **all** target repos reach guardian PASS (or
+   > are marked `- [!]` blocked). Cycle-budget counting and the `session-relay` handoff are
+   > unchanged — an A2 cycle is still one cycle against the per-session budget.
 5. **Write state back:** tick the item (`- [x]` done / `- [!]` blocked), increment
    `cycles_this_session` and `cycles_total`, update `last_item` and `status` in `loop_state.md`,
    and append a one-line progress note. Commit the `_workspace/` update.

@@ -72,7 +72,28 @@ type is **read-only and cannot Write**, so the architect **returns** the plan as
 
 - **NEEDS-DECISION** → surface the architect's open questions to the user and stop; resume when
   answered. Do not let the implementer guess past a design fork.
-- **GO** → proceed to Phase 2.
+- **GO** → proceed to Phase 1.5 (path selection), then build.
+
+## Phase 1.5: Path selection (scale auto-trigger)
+
+Between design and build, read the architect's **`## Target repos`** section (and its per-repo
+module count) and route by scale. This is the auto-trigger — the orchestrator picks the build
+shape; the default is unchanged.
+
+- **1 repo & ≤3 modules → sequential single-crew (DEFAULT, unchanged).** Run Phase 2 once as
+  today: one implementer, one guardian, in this worktree. This is the path for the overwhelming
+  majority of features — nothing about it changes.
+- **1 repo & >3 independent modules → intra-repo pipeline.** Model it with the `Workflow` tool:
+  `pipeline(modules, implement, verify)` — as the implementer finishes a module the guardian
+  verifies *that module* while the next starts, so a late no-C violation is caught after one
+  crate, not five. grit AST-locks (`file::symbol`) only come into play if the modules share files.
+- **>1 target repo → A2 cross-repo fan-out (Phase 2-A2 below).** One coordinated worktree set,
+  one implementer per repo run concurrently, per-repo guardian gates.
+
+**Escape hatch:** `FORGE_PARALLEL=0` forces the sequential single-crew path regardless of scale
+(and `FORGE_PARALLEL` *unset* leaves today's behavior intact — there is no opt-*in* required for
+the default). If no `## Target repos` section is present, treat it as 1 repo ≤3 modules and run
+sequentially.
 
 ## Phase 2: Build (rust-implementer)
 
@@ -83,6 +104,49 @@ status `GREEN` / `BLOCKED`.
 - **BLOCKED: plan defect** → route back to Phase 1 (architect revises the plan file), then
   re-run Phase 2. Retry the loop **once**; if it blocks again on design, escalate to the user
   with both artifacts.
+
+## Phase 2-A2: Cross-repo parallel build
+
+Run this **instead of** Phase 2 when Phase 1.5 routed to A2 (>1 target repo, `FORGE_PARALLEL`
+not `0`). The three-owner split: **meta** owns the cross-repo worktree set (one independent
+branch per repo → cross-repo edits can't conflict by construction), **grit** owns intra-repo
+`file::symbol` locks (Option X — locks only), the **orchestrator** owns the guardian gate (only
+it commits/merges/PRs, only after that repo's guardian PASSes — never `grit done`).
+
+1. **Create the coordinated worktree set.**
+   `meta git worktree create <slug> --repo <r1> --repo <r2> [--ephemeral --ttl 2d]`
+   (repos are meta **aliases**, one `--repo` per repo; `--ephemeral --ttl 2d` self-cleans). The
+   set lands at `.worktrees/<slug>/<repo>/`, one branch per repo.
+2. **Namespace the artifacts per repo.** Use `_workspace/<repo>/` for each repo's
+   `01_architect_plan.md` / `02_implementer_log.md` / `03_guardian_report.md` — the only
+   structural change to the artifact protocol (it is flat in the sequential path).
+3. **Init grit per repo (locks only).** Seed the whole worktree set in one shot with
+   `meta git worktree exec <slug> --include <r1,r2> -- grit init` (or `grit init` in each repo
+   worktree individually) — `grit init` is **idempotent** (a re-run just re-indexes symbols, exit
+   0), so seeding is safe to repeat. For a one-time, box-wide seed of grit into **every** meta
+   member repo (so the symbol index exists workspace-wide), use `meta exec -- grit init`. Then
+   `grit gc` per repo (reap any dead claims). Option X: grit is used only for
+   `init/claim/release/heartbeat/gc/status/queue` — never `done`/`session`/`worktree`.
+4. **Spawn N implementers, one per repo, concurrently.**
+   `Agent(general-purpose, model: opus, run_in_background: true, isolation: 'worktree')` pointed
+   at `.worktrees/<slug>/<repo>/`, grit id `forge-<repo>`. Each runs the existing
+   `rust-implementer` in its **Parallel mode** (claim → heartbeat → release → STOP at WORK; never
+   `grit done`). They build in parallel and stop at green-and-released — they do not commit.
+5. **Per-repo guardian gate (orchestrator-owned).** Spawn one `invariant-guardian` per repo:
+   - **envctl** → the full gate: the 3 CI gates (`no-c`/`shape`/`enable`) **plus** `fmt` /
+     `clippy` / `test`.
+   - **non-envctl Rust repo** → no envctl gate set exists, so **degrade** to `fmt` / `clippy` /
+     `test` and flag the missing invariant contract (PR-1 demonstrated scope = envctl-style Rust
+     repos; portable per-repo gate descriptors are staged to PR-2).
+6. **Commit/merge/PR — harness-owned, gated.** Only after a repo's guardian PASSes does the
+   orchestrator commit that repo (area-prefixed subject) → **N commits / N PRs** (meta keeps
+   independent histories; there is no single cross-repo commit). **Never** call grit `done`.
+7. **Aggregate.**
+   `meta --json git worktree exec <slug> --parallel --include <r1,r2> -- <verify>`
+   returns structured per-repo `{directory, exit_code, stdout, summary}`; reduce the N exit codes
+   to a pass/fail roll-up.
+8. **Synthesize per repo.** Summarize each repo's result and preserve every `_workspace/<repo>/`
+   audit trail (don't delete on success).
 
 ## Phase 3: Verify (invariant-guardian)
 
@@ -95,12 +159,6 @@ Spawn `invariant-guardian` with the plan + implementer log. It runs the three CI
   the fix. Loop **at most twice**; if still failing, stop and report the open findings — never
   weaken a guard or invariant to force a pass.
 - **PASS / PASS-WITH-NOTES** → proceed to synthesis.
-
-> **Incremental option (larger features):** when the plan's work breakdown has independent
-> modules, you may pipeline per-module: as the implementer finishes a module, have the guardian
-> verify *that module* while the implementer starts the next. The `Workflow` tool models this
-> directly (`pipeline(modules, implement, verify)`); prefer it when modules outnumber ~3 so a
-> late no-C violation is caught after one crate, not five.
 
 ## Phase 4: Synthesize & finish
 

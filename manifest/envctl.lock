@@ -104,8 +104,11 @@ requires = [
 resolved = ""
 
 [components.grit]
-content_hash = "30a41c0cf666f216"
-requires = ["rustup"]
+content_hash = "aac51bf425499e71"
+requires = [
+    "libssl-dev",
+    "rustup",
+]
 resolved = ""
 
 [components.group-ai-clis]
@@ -171,6 +174,11 @@ resolved = ""
 
 [components.kimi-cli]
 content_hash = "c9e0c4b4426df1c3"
+requires = []
+resolved = ""
+
+[components.libssl-dev]
+content_hash = "7dc5db4e9089f3cc"
 requires = []
 resolved = ""
 
