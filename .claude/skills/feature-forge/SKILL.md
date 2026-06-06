@@ -132,12 +132,19 @@ it commits/merges/PRs, only after that repo's guardian PASSes — never `grit do
    at `.worktrees/<slug>/<repo>/`, grit id `forge-<repo>`. Each runs the existing
    `rust-implementer` in its **Parallel mode** (claim → heartbeat → release → STOP at WORK; never
    `grit done`). They build in parallel and stop at green-and-released — they do not commit.
-5. **Per-repo guardian gate (orchestrator-owned).** Spawn one `invariant-guardian` per repo:
-   - **envctl** → the full gate: the 3 CI gates (`no-c`/`shape`/`enable`) **plus** `fmt` /
-     `clippy` / `test`.
-   - **non-envctl Rust repo** → no envctl gate set exists, so **degrade** to `fmt` / `clippy` /
-     `test` and flag the missing invariant contract (PR-1 demonstrated scope = envctl-style Rust
-     repos; portable per-repo gate descriptors are staged to PR-2).
+5. **Per-repo guardian gate (orchestrator-owned, descriptor-driven).** Spawn one `invariant-guardian`
+   per repo. The guardian reads that repo's **invariant-contract descriptor** to learn which gates to
+   run — gates are **data, not hardcoded**:
+   - **Descriptor present** (`<repo-root>/.forge/invariants.toml`) → run its `[[gate]]` list **in
+     order**; map results to the repo verdict per the descriptor's `required` flags (all pass → PASS;
+     a `required` gate fails/errors → FAIL, fail-closed; only advisory gates fail → PASS-WITH-NOTES).
+     envctl ships its own descriptor encoding exactly the 3 CI gates (`no-c`/`shape`/`enable`) **plus**
+     `fmt`/`clippy`/`test`, so its behavior is identical.
+   - **No descriptor** → run the **generic-Rust fallback** (`cargo fmt --all -- --check`,
+     `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, all required) and emit a
+     `NOTE: no .forge/invariants.toml — generic-Rust fallback used` (preserving the prior "flag the
+     missing invariant contract" behavior). A repo adopts the full contract by adding its own
+     `.forge/invariants.toml`; no edit to this harness or to other repos is needed.
 6. **Commit/merge/PR — harness-owned, gated.** Only after a repo's guardian PASSes does the
    orchestrator commit that repo (area-prefixed subject) → **N commits / N PRs** (meta keeps
    independent histories; there is no single cross-repo commit). **Never** call grit `done`.

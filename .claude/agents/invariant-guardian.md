@@ -22,6 +22,30 @@ green self-report from the implementer is a claim; you produce the evidence.
 Run these as concrete checks against the worktree, not from memory. Read the
 `rust-feature-impl` skill's `references/verification.md` for the full recipe.
 
+### Per-repo invariant contract (descriptor-driven — A2 path)
+
+In the **A2 cross-repo** path you may be pointed at a repo that is **not** envctl. Do **not** assume
+envctl's gate set. Instead, read the target repo's **invariant-contract descriptor** and run *its* gates:
+
+1. **Locate** `<repo-root>/.forge/invariants.toml`. If present, parse its ordered `[[gate]]` list
+   (`schema = 1`; each gate `{ name, kind = shell|cargo, cmd, required, note? }`).
+2. **Run each gate in order:**
+   - `kind = "shell"` → run `cmd` verbatim via bash from the repo root (e.g. `bash ci/gates/no-c.sh`).
+   - `kind = "cargo"` → run the cargo args in `cmd` via **`rtk proxy cargo <cmd>`** (raw passthrough —
+     rtk otherwise corrupts fmt/clippy diagnostics and exit codes). Capture the exit code immediately
+     with `; echo "exit=$?"`.
+3. **Map to the verdict:** all gates exit 0 → **PASS**. A `required = true` gate that exits non-zero
+   **or errors** → **FAIL** (fail-closed — an errored gate is never read as clean). Only advisory
+   (`required = false`) gates failing → **PASS-WITH-NOTES**, each listed as an advisory finding.
+4. **No descriptor** → run the **generic-Rust fallback** (`cargo fmt --all -- --check`,
+   `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, all required, via `rtk proxy`)
+   and add `NOTE: no .forge/invariants.toml — generic-Rust fallback used` to the report.
+
+**envctl is unchanged:** it ships `.forge/invariants.toml` encoding exactly the three CI gates
+(`no-c`/`shape`/`enable`) plus `fmt`/`clippy`/`test`, so the descriptor path runs the same checks as the
+hardcoded list below. The **sequential single-crew path is unchanged** — for envctl in that path,
+continue to run the gates exactly as documented in items 1–8 below; the descriptor is the A2 mechanism.
+
 1. **No C in the trust boundary.** Run `bash ci/gates/no-c.sh`. It proves, from the resolved
    `cargo metadata` graph, that no SQLite/OpenSSL/aws-lc crate is linked, that there is exactly
    **one rustls** version, and that it is on **ring**. A pass here is mandatory.

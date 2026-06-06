@@ -1,0 +1,52 @@
+# .forge/invariants.toml — Feature Forge per-repo invariant contract for envctl (schema v1).
+#
+# This file makes envctl's gate set DATA for the A2 cross-repo guardian (PR-2). It encodes
+# EXACTLY the gates the guardian ran for envctl before PR-2 (the three fail-closed CI gates plus
+# the standard cargo checks) — no behavior change. Each member repo owns its own .forge/invariants.toml;
+# a repo without one falls back to the generic-Rust contract (fmt --check / clippy -D warnings / test).
+#
+# Gate order is significant: gates run and report top-to-bottom (no-c → shape → enable → fmt → clippy → test).
+# kind="shell": cmd runs verbatim via bash from the repo root.
+# kind="cargo": cmd holds cargo args; the guardian runs them through `rtk proxy` (raw passthrough,
+#               so rtk does not corrupt fmt/clippy diagnostics or exit codes).
+# required=true: a non-zero exit is a blocking FAIL. required=false: advisory → PASS-WITH-NOTES.
+schema = 1
+
+[[gate]]
+name     = "no-c"
+kind     = "shell"
+cmd      = "bash ci/gates/no-c.sh"
+required = true
+note     = "Supply-chain: no C SQLite/OpenSSL/aws-lc in the trust boundary; exactly one ring-only rustls."
+
+[[gate]]
+name     = "shape"
+kind     = "shell"
+cmd      = "bash ci/gates/shape.sh"
+required = true
+note     = "Code-shape: no native-roots/accept-invalid TLS tokens in non-test source; edge module isolation."
+
+[[gate]]
+name     = "enable"
+kind     = "shell"
+cmd      = "bash ci/gates/enable.sh"
+required = true
+note     = "secretd systemd-unit enable invariant (manifest verify hook matches the source subcommand)."
+
+[[gate]]
+name     = "fmt"
+kind     = "cargo"
+cmd      = "fmt --all -- --check"
+required = true
+
+[[gate]]
+name     = "clippy"
+kind     = "cargo"
+cmd      = "clippy --workspace -- -D warnings"
+required = true
+
+[[gate]]
+name     = "test"
+kind     = "cargo"
+cmd      = "test --workspace"
+required = true
