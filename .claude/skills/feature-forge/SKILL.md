@@ -83,17 +83,29 @@ shape; the default is unchanged.
 - **1 repo & ≤3 modules → sequential single-crew (DEFAULT, unchanged).** Run Phase 2 once as
   today: one implementer, one guardian, in this worktree. This is the path for the overwhelming
   majority of features — nothing about it changes.
-- **1 repo & >3 independent modules → intra-repo pipeline.** Model it with the `Workflow` tool:
-  `pipeline(modules, implement, verify)` — as the implementer finishes a module the guardian
-  verifies *that module* while the next starts, so a late no-C violation is caught after one
-  crate, not five. grit AST-locks (`file::symbol`) only come into play if the modules share files.
+- **1 repo & >3 independent modules → intra-repo pipeline (or Option Y on shared files).** Split by
+  whether the modules **share files**:
+  - **Files disjoint** → existing intra-repo `Workflow.pipeline` (**Option X**, unchanged):
+    `pipeline(modules, implement, verify)` — as the implementer finishes a module the guardian
+    verifies *that module* while the next starts, so a late no-C violation is caught after one crate,
+    not five. (No file collision, so no AST lock is needed.)
+  - **Shared files + `FORGE_OPTION_Y=1`** → **Phase 2-Y** (intra-repo serialized merge, opt-in): real
+    multi-writer parallelism on shared files — grit does its serialized AST-lock rebase+merge, gated by
+    the guardian and `done`-called by the orchestrator (below).
+  - **Shared files + default (`FORGE_OPTION_Y` unset)** → today's behavior: writers serialize on grit's
+    AST `file::symbol` lock-queue under the single-crew / pipeline path (**Option X**) — unchanged.
 - **>1 target repo → A2 cross-repo fan-out (Phase 2-A2 below).** One coordinated worktree set,
-  one implementer per repo run concurrently, per-repo guardian gates.
+  one implementer per repo run concurrently, per-repo guardian gates. (Option Y is intra-repo only —
+  irrelevant cross-repo.)
 
 **Escape hatch:** `FORGE_PARALLEL=0` forces the sequential single-crew path regardless of scale
 (and `FORGE_PARALLEL` *unset* leaves today's behavior intact — there is no opt-*in* required for
 the default). If no `## Target repos` section is present, treat it as 1 repo ≤3 modules and run
 sequentially.
+
+**Precedence:** `FORGE_PARALLEL=0` **overrides** `FORGE_OPTION_Y` — no parallelism means no Option Y
+(it routes to sequential single-crew). `FORGE_OPTION_Y` is **unset by default**, so **Option Y is never
+auto-selected**; it is reachable only on the explicit opt-in above (shared files + `FORGE_OPTION_Y=1`).
 
 ## Phase 2: Build (rust-implementer)
 
@@ -155,7 +167,66 @@ it commits/merges/PRs, only after that repo's guardian PASSes — never `grit do
 8. **Synthesize per repo.** Summarize each repo's result and preserve every `_workspace/<repo>/`
    audit trail (don't delete on success).
 
-## Phase 3: Verify (invariant-guardian)
+## Phase 2-Y: intra-repo serialized merge (opt-in, Option Y)
+
+Run this **instead of** Phase 2 when Phase 1.5 routed to Option Y (**1 repo**, >3 modules that **share
+files**, `FORGE_OPTION_Y=1`, `FORGE_PARALLEL` not `0`). This is the only path that gives real intra-repo
+multi-writer parallelism on shared files.
+
+**The inversion (vs Option X).** grit owns the **serialized rebase+merge** itself — `grit done -a <id>`
+acquires `.grit/merge.lock` (serializes all merges; self-heals via `kill -0` + 30s mtime), rebases
+`agent/<id>` onto the current branch, and `merge --no-ff agent/<id>` into the checked-out task branch.
+So the **guardian gate is inverted to sit BETWEEN work and merge**: the orchestrator gates each
+writer's pre-merge `.grit/worktrees/<id>` checkout, and **only the orchestrator calls `grit done`**
+(after PASS) and then rewords the merge commit — **the implementer never calls `done`**.
+
+**The wave loop (5 steps):**
+
+1. **Init.** `grit init` (idempotent — a re-run just re-indexes, exit 0) + `grit gc` (reap dead claims).
+2. **Spawn N implementers, NO isolation.**
+   `Agent(general-purpose, model: opus, run_in_background: true)` — **without** `isolation: 'worktree'`
+   (Option Y and the meta-worktree shapes are mutually exclusive). Each has grit id
+   `forge-envctl-<module>`, claims its **disjoint** `file::symbol`s
+   (`grit claim -a forge-envctl-<module> -i "<goal>" <file::symbol>... --with-deps --queue`), then
+   **`cd .grit/worktrees/forge-envctl-<module>/`** (the `agent/<id>` branch grit created) and does all
+   edits + builds **there**. It heartbeats long steps, releases (`grit release -a forge-envctl-<module>`),
+   and **STOPs at WORK — it never calls `grit done`** (its Parallel-mode Option Y variant).
+3. **Per-writer guardian gate.** Each GREEN+released writer → spawn one `invariant-guardian` pointed at
+   that writer's `.grit/worktrees/forge-envctl-<module>/` checkout (it runs envctl's
+   `.forge/invariants.toml` gate list against that pre-merge tree).
+4. **PASS → assert branch → `grit done` → reword.** Before each merge, **assert the task branch is
+   checked out** in the main envctl worktree:
+   ```bash
+   test "$(git rev-parse --abbrev-ref HEAD)" = "<task-branch>" || { echo "ABORT: wrong branch for grit done"; exit 1; }
+   ```
+   (Never use `grit session` — it `checkout -b grit/<name>`.) Then merge and **reword** (the `--no-ff`
+   merge commit is HEAD after `done`):
+   ```bash
+   grit done -a forge-envctl-<module>
+   git commit --amend -m "<area>: <module subject>
+
+   Merged via grit Option Y (serialized AST-lock merge of agent/<id>).
+   <why>
+
+   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+   ```
+   The reword is **mandatory** (the inner `grit: agent <id>` / `grit: merge agent/<id>` commits stay as
+   audit). A guardian **FAIL** → do **not** `done`; route the module back to the implementer (fix only
+   the flagged surface) or BLOCK — the `agent/<id>` branch stays unmerged.
+5. **Final cumulative guardian.** After all writers are merged-or-BLOCKED, run a **full
+   `invariant-guardian` on the cumulative task branch** (the combined tree, not just one writer's
+   pre-merge checkout) to confirm the merged result still PASSes every gate.
+
+**Rules carried by this path:**
+- **Implementers edit in `.grit/worktrees/<id>`, spawned WITHOUT `isolation:'worktree'`** — the grit
+  worktree is the only working tree; do not create a meta worktree.
+- **Conflict ⇒ BLOCKED, never forced.** `grit done` on a conflict does `merge --abort`, then still
+  **reaps** the `agent/<id>` branch + worktree and releases the locks — so the agent's work survives
+  only as a **recoverable dangling commit** (find it via `git reflog` / `git fsck --lost-found`), NOT
+  as a live `agent/<id>` branch. **Detect** the conflict: the task-branch HEAD **did not advance** to a
+  `grit: merge agent/<id>` commit. On detection, surface **BLOCKED** and stop — there is **no force or
+  steal path**, and forcing would corrupt the serialized history. Recovery is re-claim + redo that
+  module (the dangling commit is salvage, not a resume point).
 
 Spawn `invariant-guardian` with the plan + implementer log. It runs the three CI gates,
 `fmt`/`clippy`/`test`, the engine-purity / parity / fail-closed / drift / lock checks, and writes

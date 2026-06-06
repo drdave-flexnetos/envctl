@@ -85,6 +85,32 @@ The discipline (Option X — grit is locks-only; the orchestrator owns every com
 5. **On abort.** Release your locks (`grit release -a forge-<repo>`) and report `BLOCKED` —
    leave no symbol stranded under a dead claim.
 
+### Option Y variant (intra-repo serialized merge) — edit INSIDE your grit worktree
+
+When the orchestrator runs an **Option-Y wave** (`FORGE_OPTION_Y=1`, opt-in, intra-repo only), the
+**only** change vs Option X is **WHERE you edit**. grit will perform the serialized AST-lock merge of
+your `agent/<id>` branch itself (the orchestrator gates it first and calls `done` after PASS), so you
+must edit the tree grit will merge:
+
+1. **Edit inside `.grit/worktrees/forge-envctl-<module>/`.** Your
+   `grit claim -a forge-envctl-<module> -i "<goal>" <file::symbol>... --with-deps --queue` creates
+   `.grit/worktrees/forge-envctl-<module>/` (grit always `git worktree add -b agent/<id>` — there is
+   no `--no-worktree`). **`cd` into it** and do **all** edits + builds there. That directory **is** the
+   `agent/<id>` branch grit will merge — editing anywhere else means `done` merges the wrong tree.
+2. **You are spawned WITHOUT `isolation:'worktree'` in this mode.** Do **not** create or use a separate
+   meta worktree (that's the Option X / A2 / pipeline shape) — Option Y and the meta-worktree shapes are
+   mutually exclusive. The `.grit/worktrees/<id>` checkout is your only working tree.
+3. **Everything else is unchanged.** Heartbeat long steps (`grit heartbeat -a forge-envctl-<module>
+   --ttl 600`), respect refusals (BLOCKED + not queued/granted ⇒ STOP that symbol, never force/steal),
+   and **STOP at WORK** — when your module is green, `grit release -a forge-envctl-<module>` and stop.
+4. **You STILL never call `grit done`/`grit session`/`grit worktree`.** The orchestrator gates your
+   `.grit/worktrees/<id>` checkout with the guardian and calls `grit done` itself **after PASS** — that
+   merge with no gate is exactly what you must not trigger.
+
+In `## Handoff notes`, list your **worktree path** (`.grit/worktrees/forge-envctl-<module>/`), the
+symbols you **claimed/released** (and any skipped/contested), and your **final build status**, so the
+orchestrator and guardian can confirm the right tree was gated and no lock was left stranded.
+
 ## Input / output protocol
 
 **Input:** `_workspace/01_architect_plan.md` (the spec) + the live worktree.

@@ -47,6 +47,14 @@ Gather from the worktree + loop state:
   `{repo, worktree dir, branch, sub-item/module, last-good commit, in-flight phase, open grit
   claims, verify-on-resume cmd}`. Confirm the set still exists with `meta git worktree list <slug>`.
   For a single-repo cycle, omit this entirely.
+- **Option-Y wave (intra-repo serialized merge, `FORGE_OPTION_Y=1` only)** — when the in-flight cycle
+  ran Option Y, capture a **per-agent table** so the successor can reconcile each writer:
+  `{agent id, claimed file::symbols, .grit/worktrees/<id> exists?, guardian verdict (PASS/FAIL/none),
+  merged-via-done?, next action}`. Read the **live claims** with `grit status` (don't infer from
+  memory). **Reap nothing yourself** — do not `grit gc`/`release`/`done`; you only record state.
+  Note that a stale `.grit/merge.lock` is **self-healed by grit** (it checks `kill -0` on the holder
+  PID + a 30s mtime), so the **successor must NOT delete it**. Omit this section entirely for
+  non-Option-Y cycles.
 
 ## Output protocol
 
@@ -64,6 +72,7 @@ Write `_workspace/HANDOFF.md` with this structure (keep it scannable — heading
 ## Decisions & dead ends — non-obvious choices; approaches ruled out
 ## Invariant watch  — anything touching the non-negotiables to re-verify (or "none")
 ## Per-repo vector — A2 only: meta set name + per-repo state table (repo, worktree, branch, sub-item/module, last-good commit, in-flight phase, open grit claims, verify-on-resume) (or "n/a — single-repo cycle")
+## Option-Y wave — Option Y only: per-agent table (agent id, claimed file::symbols, .grit/worktrees/<id> exists?, guardian verdict, merged-via-done?, next action) from `grit status` — reap nothing; stale `.grit/merge.lock` self-heals, don't delete (or "n/a — not an Option-Y cycle")
 ## Verify-on-resume — commands the successor runs first to confirm a clean baseline
 ```
 

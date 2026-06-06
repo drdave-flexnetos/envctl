@@ -89,6 +89,22 @@ Run these in order; each step is durable before the next, so a crash mid-handoff
 2. **Load the checkpoint.** Read `_workspace/HANDOFF.md` fully. Verify the worktree path + branch
    match and the tree is clean; run its **Verify-on-resume** commands to confirm a sane baseline
    (e.g. the 3 CI gates / a build) before mutating anything.
+2a. **Option-Y wave reconciliation** (only if the checkpoint has an **`## Option-Y wave`** table; skip
+   otherwise). The handed-off Option-Y cycle left N writers in grit's serialized-merge lifecycle; you
+   own the `grit done` calls the dead session never reached. First `grit gc` (reap the dead session's
+   dead claims) → `grit status` (live truth). Then, **per agent id** in the table:
+   - **Already-merged** (`merged-via-done? = yes`) → **verify** the reworded merge commit exists on the
+     task branch (area-prefixed subject, `Merged via grit Option Y`); nothing to redo.
+   - **Gated PASS but unmerged** (guardian `PASS`, `.grit/worktrees/<id>` present) → assert
+     `test "$(git rev-parse --abbrev-ref HEAD)" = "<task-branch>"`, then `grit done -a <id>`, then
+     **reword** the resulting merge commit (area-prefixed subject, per Phase 2-Y).
+   - **Work-incomplete / worktree gone / any guardian FAIL** → `grit release -a <id>`, **re-claim
+     fresh** from the table's `file::symbol`s, and **redo** the module (edit-in-`.grit/worktrees/<id>`
+     → gate → `done` → reword).
+   **Never restore live locks; never force a conflicting `done`** — if a `grit done` conflicts (the
+   task-branch HEAD does not advance to a `grit: merge agent/<id>` commit), surface it as **BLOCKED**
+   and stop, don't force (there is no force/steal path). A **stale `.grit/merge.lock` self-heals**
+   (grit checks `kill -0` + 30s mtime) — **don't delete it.**
 3. **Acknowledge.** Broadcast a heartbeat: `weave_send to: "all" subject: forge-relay:resumed` —
    `RESUMED @ <ts>, baseline verified, continuing at item <N>` (gives the mesh/operators a visible
    heartbeat). Use `weave_reply` only if a *cross-identity* peer sent a directly-addressed note.

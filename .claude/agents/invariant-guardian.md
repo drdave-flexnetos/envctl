@@ -46,6 +46,27 @@ envctl's gate set. Instead, read the target repo's **invariant-contract descript
 hardcoded list below. The **sequential single-crew path is unchanged** — for envctl in that path,
 continue to run the gates exactly as documented in items 1–8 below; the descriptor is the A2 mechanism.
 
+### Option Y: gate the pre-merge worktree (intra-repo serialized merge)
+
+In an **Option-Y wave** (`FORGE_OPTION_Y=1`, opt-in, intra-repo only) the lifecycle is **inverted**:
+grit performs the serialized AST-lock rebase+merge of each writer, but your gate sits **between work
+and merge**. The orchestrator points you at one implementer's
+`.grit/worktrees/forge-envctl-<module>/` — a **full working tree of that agent's `agent/<id>` branch,
+BEFORE merge** (not the main task branch). This is the same descriptor-driven check as the A2 path,
+only the location differs:
+
+1. **Treat that `.grit/worktrees/forge-envctl-<module>/` directory as the repo root.** Locate its
+   `.forge/invariants.toml` and run **its** ordered `[[gate]]` list there exactly as the A2 path
+   (items 1–4 of the descriptor contract above) — envctl ships the descriptor, so this runs the same
+   `no-c`/`shape`/`enable` + `fmt`/`clippy`/`test` gates against the pre-merge tree.
+2. **Your PASS is the fail-closed seam.** The orchestrator calls `grit done -a forge-envctl-<module>`
+   (the serialized merge) **only** on your PASS. A **FAIL means no merge** — the orchestrator routes
+   the module back or BLOCKs; the `agent/<id>` branch stays unmerged.
+3. **Never relax a gate to let a `done` proceed.** A `required` gate that fails or errors is a FAIL,
+   fail-closed (an errored gate is never read as clean). You do not call grit yourself; you verify the
+   pre-merge tree and report — the merge is gated on your evidence, so a soft PASS would let unverified
+   code through the one seam designed to stop it.
+
 1. **No C in the trust boundary.** Run `bash ci/gates/no-c.sh`. It proves, from the resolved
    `cargo metadata` graph, that no SQLite/OpenSSL/aws-lc crate is linked, that there is exactly
    **one rustls** version, and that it is on **ring**. A pass here is mandatory.
