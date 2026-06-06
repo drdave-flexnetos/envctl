@@ -1,34 +1,36 @@
 # Dashboard follow-up backlog — successor auto-loop
 
+> **STATUS: COMPLETE (2026-06-05).** All Gate / Wire-live / Follow-up items resolved by
+> intervening work (merges of #23+#24+#7, two follow-up commits, and a live install).
+> Only the interactive smoke test remains — HUMAN-ONLY, an unattended agent can't open the GUI.
+> No further forge-loop cycle is warranted on this backlog. (Separate open items — the
+> env-install-loop's `grit-harness-parallel` and the `node-via-bun` manifest follow-up below —
+> belong to OTHER tracks and are surfaced for a human, not auto-run by this loop.)
+
 Source of truth for the post-feature loop. Built from the Feature Forge synthesis +
 guardian notes. Ordered: merge-gated wire-live first, then follow-ups.
 
 Legend: `- [ ]` todo · `- [x]` done · `- [!]` blocked (reason).
 
-## Gate (human/review)
-- [!] MERGE PRs — blocked on review. envctl #23 -> develop; meta #7 -> main.
-      Auto-merge intentionally NOT enabled. The successor MUST confirm both merged
-      (`gh pr view 23 --repo FlexNetOS/envctl`, `gh pr view 7 --repo FlexNetOS/meta`)
-      before wiring live, OR work from the merged develop/main once available.
+## Gate (human/review) — CLEARED 2026-06-05
+- [x] MERGE PRs — BOTH MERGED. envctl #23 → develop, then develop → master via #24
+      (master @ fcf3d0c). meta #7 → main (mergedAt 2026-06-05T21:35:10Z, MERGED).
+      Dashboard code is on master: dashboard.rs + manifest/dashboard.toml + launcher.
 
-## 1. Wire it live (after merge)
-- [ ] `envctl install dashboard` — deploys launcher to ~/.local/bin + the zellij KDL
-      layout to ~/.config/yazelix/configs/zellij/layouts/mission-control.kdl.
-      (Or `envctl dashboard --deploy --apply` for the layout alone.) Fail-closed/dry-run
-      by default — install applies.
-- [ ] Verify: `envctl doctor` / `envctl auto-detect` shows the `dashboard` component
-      detected+healthy; layout file present; `envctl-dashboard-pane` on PATH.
-- [ ] Put `meta-dashboard` (the plugin binary) on PATH so `meta dashboard` resolves
-      (build meta_dashboard_cli + install to ~/.local/bin, or wire into the component).
-- [ ] Smoke: open yazelix with the mission-control layout; confirm tabs/panes render and
-      each pane launches an idle claude session on weave + repowire.
+## 1. Wire it live (after merge) — DONE (live deploy verified)
+- [x] `envctl install dashboard` — DEPLOYED. Launcher at ~/.local/bin/envctl-dashboard-pane;
+      zellij layout at ~/.config/yazelix/configs/zellij/layouts/mission-control.kdl (8.3K).
+- [x] Verify — `envctl auto-detect` shows `dashboard ✓ healthy wired`; layout present;
+      `envctl-dashboard-pane` on PATH. lock --check clean @ 49 components; gates green.
+- [x] `meta-dashboard` on PATH — present at ~/.local/bin/meta-dashboard (`meta dashboard` resolves).
+- [!] Smoke (open yazelix, eyeball panes) — HUMAN-ONLY. Interactive/visual; an unattended
+      agent cannot open the GUI and confirm panes render. Left for a human to eyeball.
 
-## 2. Follow-ups (feature)
-- [ ] Escalate panes from idle agents to autonomous loops via ENVCTL_DASHBOARD_PANE_CMD
-      (forge-loop / env-install-loop per repo) — opt-in, document the per-pane override.
-- [ ] Refine grouping of UNTAGGED repos: agent, claude-plugins, meta-plugins currently
-      fall into the synthetic "meta-core" tab. This is a `.meta.yaml` tag edit (add tags
-      so they group correctly) — no code change, no-drift holds.
+## 2. Follow-ups (feature) — DONE (already shipped by intervening commits)
+- [x] ENVCTL_DASHBOARD_PANE_CMD escalation — IMPLEMENTED. Launcher honors the per-pane
+      override (`exec bash -c "$ENVCTL_DASHBOARD_PANE_CMD"`), documented inline in the script.
+- [x] Refine grouping of UNTAGGED repos — DONE in meta `524af3d`: .meta.yaml now tags
+      agent→[ai], claude-plugins→[ai], meta-plugins→[tools]. Config-only, no-drift held.
 
 ## Dropped (handled elsewhere)
 - ~~Broker unification into the weave bus~~ — weave is already upgrading to merge
