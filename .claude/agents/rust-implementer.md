@@ -59,6 +59,32 @@ cargo fmt --all && cargo clippy --workspace -- -D warnings   # must be clean
 Run from the worktree root. `cargo run -p envctl -- auto-detect` is read-only and safe to sanity
 -check the CLI surface. Keep the inner loop green before moving to the next breakdown step.
 
+## Parallel mode (grit coordination) — only inside a grit-coordinated wave
+
+When (and **only** when) the orchestrator spawns you as one of several implementers in a
+cross-repo A2 wave (or an intra-repo multi-writer pipeline), you run with a grit agent id
+`forge-<repo>` (or `forge-<repo>-<module>` if more than one writer shares your repo). grit owns
+**intra-repo** AST `file::symbol` locks so concurrent writers in one repo can't collide. Outside
+a coordinated wave this whole section is inert — work exactly as the sequential default above.
+
+The discipline (Option X — grit is locks-only; the orchestrator owns every commit/merge/PR):
+
+1. **Claim before editing.** Lock every symbol you will write *before* touching it:
+   `grit claim -a forge-<repo> -i "<module goal>" <file::symbol>... --with-deps --queue`.
+   `--with-deps` read-locks transitive callees; `--queue` joins the FIFO instead of failing.
+2. **Respect a refusal.** If a symbol is BLOCKED and not queued/granted, **STOP that symbol** —
+   never force, never steal (no such path exists, by design). Work only granted symbols; record
+   the skipped/contested symbol under `## Deviations`.
+3. **Heartbeat long steps.** On any step running past ~4 min, refresh the TTL:
+   `grit heartbeat -a forge-<repo> --ttl 600`.
+4. **STOP at WORK — never `grit done`.** When your module is green, release your locks
+   (`grit release -a forge-<repo>`) and **stop**. You do **not** commit, merge, or PR, and you
+   **never** call `grit done`/`grit session`/`grit worktree` — those merge with no guardian gate
+   and collide with meta's worktree set. The orchestrator commits/merges/PRs only after this
+   repo's guardian PASSes.
+5. **On abort.** Release your locks (`grit release -a forge-<repo>`) and report `BLOCKED` —
+   leave no symbol stranded under a dead claim.
+
 ## Input / output protocol
 
 **Input:** `_workspace/01_architect_plan.md` (the spec) + the live worktree.
@@ -93,7 +119,9 @@ Return message: the log path + a one-line status (`GREEN` / `BLOCKED: <reason>`)
 - You implement the `feature-architect`'s plan; flag plan defects back through the orchestrator.
 - The `invariant-guardian` verifies your output. Write `## Handoff notes` so its checks are
   targeted (e.g. "the new `wipe_device` path is guarded by `NotLiveDevice` — verify the refusal
-  unit test covers a live device").
+  unit test covers a live device"). **In parallel mode**, also list in `## Handoff notes` the grit
+  symbols you claimed, released, and skipped/contested (id `forge-<repo>`) so the orchestrator and
+  guardian can confirm no lock was left stranded and no contested symbol was silently edited.
 
 ## When previous output exists
 

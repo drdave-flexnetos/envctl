@@ -43,6 +43,21 @@ Run these in order; each step is durable before the next, so a crash mid-handoff
 2. **Commit it.** `git add _workspace/ && git commit` (subject `loop: handoff checkpoint @ <ts>`).
    The successor resumes from committed state, so the checkpoint must be in git, not just on disk.
    Push if the loop runs against a shared remote.
+
+   > **Multi-repo (A2) checkpoint.** When the cycle being handed off ran A2 (>1 target repo), the
+   > meta-level checkpoint is still **one** committed `_workspace/HANDOFF.md`, but it carries a
+   > **per-repo state table** (the steward fills it; see `continuity-steward`):
+   >
+   > | repo | worktree dir | branch | sub-item/module | last-good commit | in-flight phase | open grit claims | verify-on-resume cmd |
+   > |------|--------------|--------|-----------------|------------------|-----------------|------------------|----------------------|
+   >
+   > Resume command in the prompt/checkpoint:
+   > `/forge-loop resume from _workspace/HANDOFF.md --repos <r1>,<r2>`.
+   >
+   > **PR-1 scope = the schema + a 2-repo demo.** Full N-branch resume correctness — live grit-lock
+   > reconciliation and dependency-ordered re-fan-out — is **staged to PR-4**. For PR-1, resume does
+   > **not** attempt to restore live locks: it runs `grit gc` per repo (reaping the dead session's
+   > claims) and **re-claims fresh** from the table's in-flight module, then continues.
 3. **Broadcast the heartbeat over weave.** `weave_send` `to: "all"` (cross-identity observers — do
    **not** address your own identity; it won't reach the successor's inbox):
    - `subject`: `forge-relay:handoff`
