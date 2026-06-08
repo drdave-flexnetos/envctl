@@ -30,22 +30,15 @@ If `_workspace/backlog.md` does not exist, create it first from the user's reque
 doc, or an explicit list), then start the loop. Keep items small and independent — one Engine
 capability or one component per item — so a cycle fits comfortably under the budget.
 
-## One iteration (the loop body)
-1. **Read state.** `_workspace/backlog.md` + `_workspace/loop_state.md`. Confirm the worktree is
-   clean (`git status`) and on the loop branch.
-2. **Stop checks (in order):**
-   - Backlog has no `- [ ]` items left → **DONE**: report completion, do not re-fire.
-   - `cycles_this_session >= cycle_budget` → **HAND OFF**: invoke the `session-relay` skill and stop
-     (do not re-fire from this session). This is the cycle-budget trigger.
-3. **Pick** the top unchecked backlog item.
-4. **Run one Feature Forge cycle** on it via the `feature-forge` orchestrator: architect → implementer
-   → guardian, with the same routing/loop caps and `_workspace/` artifacts. Commit on PASS /
-   PASS-WITH-NOTES (area-prefixed subject). On an unrecoverable guardian FAIL or a NEEDS-DECISION,
-   mark the item `- [!]` blocked with a one-line reason and move to the next item (don't thrash).
-5. **Write state back:** tick the item (`- [x]` done / `- [!]` blocked), increment
-   `cycles_this_session` and `cycles_total`, update `last_item` and `status` in `loop_state.md`,
-   and append a one-line progress note. Commit the `_workspace/` update.
-6. **Re-fire** to continue the loop (see Self-pacing).
+## Parallel mode (opt-in grit git-lock coordination)
+
+When looping over items that span multiple meta repos, activate with `USE_GRIT=1`:
+
+1. Before the first implementer: `for repo in $(meta list-projects --names); do cd /home/drdave/Desktop/meta/$repo && grit init -y; done` (idempotent).
+2. Each implementer claims symbols via `grit claim file::symbol --with-deps` before writing, `grit done` after commit.
+3. Contested symbols auto-queue (`grit claim --queue`).
+
+Parallel mode is **opt-in** — the default single-implementer path is unchanged. See `feature-forge/SKILL.md` for full details on the parallel protocol (claim→work→done, `--queue`, `--with-deps`, CLI-only constraints).
 
 ## Self-pacing (how the loop re-fires)
 - Default: **dynamic /loop** — use `ScheduleWakeup` to re-enter this skill for the next iteration,

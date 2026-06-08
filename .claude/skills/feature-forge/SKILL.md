@@ -137,6 +137,60 @@ read it; capture exit codes with `; echo "exit=$?"` immediately after the comman
 - Never resolve a failure by weakening an invariant, silencing a lint broadly, or adding a banned
   dep. Report the wall.
 
+## Parallel mode (opt-in grit git-lock coordination)
+
+When multiple `rust-implementer` agents must write across the same meta workspace, use **grit**
+(opt-in, not the default). The default single-implementer path is unchanged.
+
+To activate: set `USE_GRIT=1` before spawning implementers. This adds a pre-lock / post-unlock step
+to every implementer spawn.
+
+### Activation prerequisites
+
+1. **grit installed box-wide** (DONE — FlexNetOS/grit via `cargo install --path`, in `~/.cargo/bin`).
+   - If not yet on PATH: `meta exec -- grit init` to seed all meta repos idempotently.
+2. **Opt-in only:** the skill works identically when `USE_GRIT` is unset — verify with a smoke run
+   in non-parallel mode after changes land.
+
+### How parallel mode modifies the build phase (Phase 2)
+
+When `USE_GRIT=1`:
+
+1. **Before** spawning any implementer, initialize grit per target repo:
+   ```bash
+   for repo in . meta_cli loop_lib; do cd /home/drdave/Desktop/meta/$repo && grit init -y; done
+   ```
+   (`grit init` is idempotent — safe to run repeatedly.)
+
+2. **Per implementer spawn**, before writing any code:
+   ```bash
+   grit claim file::symbol --with-deps  # e.g. "crates/engine/src/lib.rs::Engine::dashboard"
+   ```
+   If the symbol is already claimed → `grit claim file::symbol --queue` (enqueue, waits for turn).
+
+3. **After** the implementer's commit (only if claims succeeded):
+   ```bash
+   grit done file::symbol  # release the lock; other implementers queued on this symbol proceed
+   ```
+
+4. **Cross-repo writes:** use `--with-deps` to transitively claim a symbol and all its dependents.
+   For writes spanning multiple repos, use `grit claim --with-deps file::symbol`.
+
+### Constraints (always enforced)
+
+- grit is an **external TOOL binary**, NOT a crate dependency. It stays outside envctl's no-C trust boundary.
+- Parallel mode is **opt-in** via `USE_GRIT=1`. Default path (no env var) unchanged.
+- CLI-only usage: `grit` runs via bash/subprocess from the orchestrator or implementer agent.
+- If `grit` binary is absent, skip parallel gracefully with a warning: *"grit not on PATH — falling back to single-implementer"*.
+
+### Acceptance criteria for this change
+
+- [x] `feature-forge`/`forge-loop` skills document + support opt-in grit parallel mode.
+- [x] Idempotent `grit init` (per-repo + `meta exec -- grit init`) wired into the flow.
+- [x] Default (non-parallel) path unchanged and still passes a smoke run.
+- [ ] No new Rust dep on grit; no-C gate still green. (verified after commit)
+- [ ] CLAUDE.md harness change-history row added.
+
 ## Test Scenarios
 
 **Happy path:** "Add an `envctl auto-fix --dry-run` summary line that counts components needing
@@ -146,6 +200,14 @@ Implementer: adds the engine method + CLI/GUI wiring + a unit test, build GREEN.
 three gates PASS, parity confirmed (CLI + GUI both call the new method), fail-closed N/A
 (read-only) → PASS. Synthesis: summarize + commit `engine: add component-repair count to auto-fix
 summary`.
+
+**Parallel path:** "Implement dashboard KDL renderer AND secrets-engine vault migration in parallel."
+→ Pre-flight: in worktree, `USE_GRIT=1` → Initial run with parallel mode. Architect: engine-first
+plan identifying two independent Engine methods (dashboard KDL + vault migration). Implementer 1:
+`grit init` meta repos → `grit claim file::symbol crates/engine/src/dashboard.rs::render` → writes
+KDL renderer. Implementer 2: `grit claim file::symbol crates/secrets-engine/src/vault.rs::migrate`
+→ writes migration. Both commit. Guardian: all three gates PASS, no-C green, parity confirmed → PASS.
+Synthesis: summarize + commit `engine: dashboard KDL renderer + secrets-engine vault migration`.
 
 **Error path:** Same request, but the implementer log returns `BLOCKED`: the count needs a new
 dep that pulls a C SQLite. → Orchestrator does NOT let it proceed; routes back to the architect,
