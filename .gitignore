@@ -4,5 +4,9 @@ Cargo.lock.bak
 *.swp
 .DS_Store
 
+# Agent harness output (generated, not committed)
+.agent/
+.archive/
+
 # envctl.lock IS committed — it is the content-hashed manifest-of-record and the
 # baseline for `envctl lock --check` (the CI drift gate). Do not ignore it.

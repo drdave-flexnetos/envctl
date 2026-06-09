@@ -98,6 +98,21 @@ card; strategy-aware Add-Repo screen; (logs/settings polish ongoing).
 
 ---
 
+## Secrets Stack Roadmap (docs/secrets/ROADMAP.md) — Full 8-Phase Arc
+
+The secrets stack has its own phased roadmap spanning **Phases 0–8** with the following key milestones:
+
+- **Phase 0:** Scaffold (secrets-engine lib, secrets-proto, secretd daemon, secretctl client) — ✅ COMPLETED
+- **Phase 1:** Vault core (AEAD + keyslots + canonical AAD) + libSQL remote store — ✅ COMPLETED
+- **Phase 2–5:** Keymgmt/unlock, broker/relay, certs/CA+MITM, gRPC daemon — IN PROGRESS
+- **Phase 6:** `env-ctl run` exec-wrapper (ephemeral bearer injection, fail-closed profile walk-up) — PENDING
+- **Phase 7:** **envctl MERGE** — drop secrets crates into envctl/crates/, fold CLI verbs (`envctl secret|vault|relay|ca|run`), ship secretd as manifest systemd component, unify workspace lockfile. See `docs/secrets/ROADMAP.md` §5 for full acceptance criteria.
+- **Phase 8:** SERVER-MODE remote relay edge (in-process TLS+DPoP listener, bounded jti replay store, streaming revocation, VPS Profile-B gates) — PENDING
+
+**Phases 6–8 are the most impactful remaining work:** they complete the secrets integration into envctl's core workspace and enable unattended daemon serving. See `docs/secrets/ARCHITECTURE.md` for design details and `docs/secrets/audits/AUDIT-server-mode.md` for the phased audit spec.
+
+---
+
 ## ✅ Post-v1 hardening + kasetto adoptions (graph · lock · doctor · audit)
 
 - **Graph intelligence** (`graph.rs` + `envctl graph`): DAG summary, `--impact`
@@ -111,3 +126,21 @@ card; strategy-aware Add-Repo screen; (logs/settings polish ongoing).
   injection); all fixed + regression-tested. See `docs/KASETTO-FEATURES.md` for the
   remaining ranked adoptions (sync modes `--locked/--update`, multi-host source
   resolver, `extends` composition, universal `--json`, completions [needs network]).
+
+---
+
+## Docs Status — Phantom References
+
+| Doc | Status | Notes |
+|-----|--------|-------|
+| `docs/ARCHITECTURE.md` | ✅ exists | Main architecture doc (37KB) |
+| `docs/ROADMAP.md` | ✅ exists | This file — now includes secrets stack phases 6-8 summary |
+| `docs/DESIGN-NOTES.md` | ✅ exists | Design notes (3.7KB) |
+| `docs/ADD-REPO.md` | ✅ exists | Add-repo design (5.6KB) |
+| `docs/HANDOFF-kasetto-env-and-phase8.md` | ✅ exists | Phase 8 handoff checkpoint (7.6KB) |
+| `docs/KASETTO-FEATURES.md` | ✅ exists | Kasetto feature list (34.6KB) |
+| `docs/PRD.md` | ✅ exists | Product requirements doc (38.4KB) |
+| `docs/secrets/ARCHITECTURE.md` | ✅ exists | Secrets stack architecture (22.4KB) |
+| `docs/secrets/ROADMAP.md` | ✅ exists | Full 8-phase secrets roadmap — source of truth for phases 0-8 |
+| `THREAT-MODEL.md` | ⏳ DEFERRED | Part of Phase 7 merge deliverable (secrets → envctl docs). Referenced from `docs/ops/02-envctl-component.md`, `docs/secrets/audits/AUDIT-server-mode.md`, and secrets roadmap §7 acceptance criteria. |
+| `SCAFFOLD-SPEC.md` | ⏳ DEFERRED | Part of Phase 7 merge deliverable. Referenced from ops component docs as a planning artifact. |
