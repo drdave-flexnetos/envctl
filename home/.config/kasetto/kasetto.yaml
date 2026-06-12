@@ -1,0 +1,36 @@
+# kasetto — GLOBAL personal baseline (follows you into every project).
+#
+# Layering: this is the agent layer that applies everywhere; per-project kasetto.yaml files
+# (e.g. envctl) layer repo-specific skills on top. The OS/toolchain layer is envctl.
+#
+# Source of truth = the canonical FlexNetOS/agent-skills repo (publish it first — see below).
+#
+# ⚠️ SAFETY — read before enabling `mcps:` below:
+#   Your global agent already has hand-configured MCP servers (broker, repowire, weave).
+#   A global `kasetto sync` MANAGES the global MCP destination; before enabling any `mcps:`
+#   here, run `kasetto sync --global --dry-run` and confirm it ADDS servers without REMOVING
+#   broker/repowire/weave. If it would remove them, list them here too (or keep mcps disabled
+#   and let kasetto manage skills only). Skills install additively into ~/.claude/skills and
+#   are safe.
+
+scope: global
+agent:
+  - claude-code
+  - codex
+
+# --- Skills: add GENERAL, cross-project skills here (NOT envctl-specific ones). ---
+# The current agent-skills are envctl-grounded, so they belong in envctl's project config,
+# not globally. Point this at the shared repo and curate which skills are global-worthy.
+# skills:
+#   - source: ~/.local/share/agent-skills
+#     skills:
+#       - <a-general-skill>
+
+# --- MCP baseline (general-purpose servers useful in every repo). ---
+# Enabled after dry-run confirmed kasetto ADDS these without touching broker/repowire/weave.
+mcps:
+  - source: https://github.com/FlexNetOS/agent-skills
+    mcps:
+      - context7
+      - exa
+      - sequential-thinking

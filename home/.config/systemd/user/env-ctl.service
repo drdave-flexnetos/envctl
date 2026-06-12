@@ -1,0 +1,41 @@
+[Unit]
+Description=env-ctl secrets vault + credential broker
+Documentation=file:///home/drdave/Desktop/meta/envctl/docs/ARCHITECTURE.md
+# No network ordering for the control/data planes (UDS + loopback). Only the relay HTTPS
+# edge needs the network, and that is operator-enabled, not a startup dependency.
+After=default.target
+# Durable store ordering: the loopback sqld must be up first (libSQL remote backend on
+# http://127.0.0.1:8080). Wants (not Requires) so a transient sqld blip auto-relocks rather than
+# hard-failing the daemon; the libSQL store retries the connection on use.
+Wants=sqld.service
+After=sqld.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=%h/.cargo/bin/secretd
+Restart=on-failure
+RestartSec=10
+# Fail-closed memory hygiene is enforced IN secretd (mlockall + RLIMIT_CORE=0 + MADV_DONTDUMP;
+# the daemon refuses to start if mlockall fails — FS-S4). The unit only RAISES the ceiling the
+# daemon needs; it never substitutes for the in-process refusal.
+LimitMEMLOCK=infinity
+LimitCORE=0
+# Defense-in-depth sandbox (does not weaken the in-process TCB story):
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/env-ctl %h/.local/state/env-ctl %t/env-ctl
+RuntimeDirectory=env-ctl
+RuntimeDirectoryMode=0700
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# Pulling the enrolled USB auto-relocks within the drain grace; stop must allow the daemon to
+# drain in-flight relays/streams.
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

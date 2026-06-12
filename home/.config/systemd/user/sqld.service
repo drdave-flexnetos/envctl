@@ -1,0 +1,23 @@
+[Unit]
+Description=sqld (libSQL server, loopback) — durable store backend for env-ctl secretd
+After=default.target
+
+[Service]
+Type=simple
+# Loopback-only (no remote exposure), open auth (acceptable for a single-user local box; secretd's
+# config.rs permits an empty auth token ONLY for a loopback URL). Data persists under the data dir.
+ExecStart=%h/.local/bin/sqld --http-listen-addr 127.0.0.1:8080 -d %h/.local/share/sqld
+Restart=on-failure
+RestartSec=5
+# Defense-in-depth sandbox (sqld is external; keep it boxed).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/sqld
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
