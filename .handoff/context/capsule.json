@@ -1,0 +1,10 @@
+{
+  "schema": "handoff.context_capsule.v1",
+  "project_name": "envctl",
+  "role": "Meta environment manager: env injection, secretd (phases 1-5 sanctioned), kasetto agent-env seam (manifest/agent-env.toml, sync --locked), USB secret-key vault.",
+  "plane": "env-control",
+  "tier": "B",
+  "northstar": "One env-control story: envctl injects/relays secrets, kasetto provisions agent assets; COGNITUM seeds the vault.",
+  "next_command": "W1: wire secret injection/relay into loop secrets; COGNITUM advanced setup (GAP #15)",
+  "source": "ARCHITECTURE-TRUTH.md census 2026-06-12"
+}
