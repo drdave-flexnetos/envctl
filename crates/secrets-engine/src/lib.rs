@@ -21,6 +21,8 @@ pub mod event; // SecretEvent, EventSink (std mpsc), Stream, AuditRecord
 pub mod guard; // SecGuard, check_sec_guards, UnlockContext (fail-closed)
 pub mod inject;
 pub mod keyslot; // Keyslot, Kdf, Argon2Params, wrap/unwrap (LUKS-style dual KEK) + header MAC
+#[cfg(feature = "provider-github")]
+pub mod mint_github; // GitHubAppMint: RS256 App-JWT → installation token (ProviderMint seam)
 pub mod paths; // Paths (XDG, env-ctl-namespaced)
 pub mod seam; // Clock, UsbProbe, ProviderMint, Upstream + SystemClock/RealUsbProbe + fakes
 pub mod vault; // Vault state machine + Store trait + crypto (seal/open) + canonical AAD + audit // ChildEnvPlan, ResolvedInjection, injection_template, run_wrapped
@@ -33,6 +35,11 @@ pub use error::{EngineError, VaultState};
 pub use event::{AuditRecord, EventSink, SecretEvent, Stream};
 pub use guard::{check_sec_guards, Destructiveness, SecGuard, UnlockContext};
 pub use keyslot::{Argon2Params, Factor, Kdf, Keyslot};
+#[cfg(feature = "provider-github")]
+pub use mint_github::{
+    build_app_jwt, GitHubAppMint, HttpRequest, HttpResponse, HttpTransport, TransportError,
+    MAX_JWT_TTL_SECS,
+};
 pub use seam::{Clock, ProviderMint, RealUsbProbe, SystemClock, Upstream, UsbProbe};
 
 use std::sync::{Arc, RwLock};

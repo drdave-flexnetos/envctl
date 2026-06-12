@@ -60,12 +60,18 @@ libsql = { version = "0.9.30", default-features = false, features = ["remote"] }
 chacha20poly1305 = { version = "0.10", features = ["alloc", "getrandom", "rand_core"] }
 argon2 = { version = "0.5", features = ["zeroize"] }
 hkdf = "0.12"
-sha2 = "0.10"
+# `oid` feature exposes `Sha256: AssociatedOid`, required by rsa's PKCS#1 v1.5 SigningKey<Sha256>
+# (the RS256 App-JWT path in secrets-engine `mint_github`). Pure-Rust; links no C.
+sha2 = { version = "0.10", features = ["oid"] }
 blake3 = "1.5"
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
 rand = "0.8"
 getrandom = "0.2"
+# GitHub App-JWT (RS256) for the `provider-github` mint seam — pure-Rust RustCrypto, no C linked
+# (banned-list in ci/gates/no-c.sh unaffected; proven by Gate 1's `--all-features` tree).
+rsa = { version = "0.9", default-features = false, features = ["std", "pem"] }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 # TLS / local CA: pin ONE rustls on the RING path (NOT aws-lc-rs)
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2.2"
