@@ -1,0 +1,18 @@
+# INCIDENT (2026-06-12): the repowire binary is ABSENT from ~/.local/bin — this unit crash-loops
+# (Restart=always, 268MB daemon.log). Carried here for the record; disabled on the box pending an
+# owner decision (KB: incidents/repowire-unit-crash-loop). Re-enable: systemctl --user enable --now repowire.service
+[Unit]
+Description=Repowire Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/drdave/.local/bin/repowire serve
+Environment=PATH=/home/drdave/.local/bin:/home/drdave/.cargo/bin:/home/drdave/.local/bin:/home/drdave/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/drdave/.repowire/daemon.log
+StandardError=append:/home/drdave/.repowire/daemon.log
+
+[Install]
+WantedBy=default.target

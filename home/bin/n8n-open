@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Open the local n8n editor in the default browser.
+# Prefer the clean lane HTTPS domain (n8n.test); fall back to localhost:5678.
+URL="http://localhost:5678"
+if curl -sk -o /dev/null -m 1 "https://n8n.test/healthz" 2>/dev/null; then
+  URL="https://n8n.test"
+fi
+exec xdg-open "$URL"
