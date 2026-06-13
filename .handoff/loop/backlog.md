@@ -28,15 +28,32 @@ Research: `meta/handoff` kernel vs `envctl/.handoff` (~30% Tier-B stub). Per-rep
 git-committed TEXT ONLY; events flow to the shared `meta/.handoff/ledger.db` (ADR-0004). Packets
 are **rendered by `hf`, never hand-written**.
 
-- [ ] **TASK-0001 (P0):** Build & install the `hf` kernel binary from `meta/handoff` (not on PATH
+- [x] **TASK-0001 (P0):** Build & install the `hf` kernel binary from `meta/handoff` (not on PATH
   today — keystone blocker). Relocate per Epic B procedure (symlink into meta). Verify
   `hf resume/claim/checkpoint/handoff` run from envctl against `meta/.handoff/ledger.db`.
+  - DONE 2026-06-13 (forge-loop cycle 1, `handoff-kernel-engineer` agent + `handoff-sync` Step 1).
+    Built `cargo build --release -p hf` (3.6 MB ELF); installed `~/.local/bin/hf` → SYMLINK into
+    `meta/handoff/target/release/hf` (meta convention; rebuilds propagate). `which hf` resolves the
+    meta symlink; `hf --help` runs (verbs: init|seed|status|session|claim|release|checkpoint|
+    sync-cards|done|task mint|ship|review|handoff|resume — no `hf drift`/`hf policy`). Residency
+    guard PASSES before+after: no per-repo `ledger.db` under any envctl tree; `hf status` from
+    `$META_ROOT` reads the shared `meta/.handoff/ledger.db` read-only (md5 unchanged).
   - GO-LIVE for the wired-but-DORMANT continuity hook: `.claude/settings.json` +
     `.claude/hooks/hf-checkpoint.sh` are already wired (Stop + PreCompact, fleet-ledger-resident,
     self-resolves `$META_ROOT`) but no-op until `hf` exists + supports `checkpoint --auto --quiet`.
     Acceptance: after `hf` lands, a Stop fires `hf checkpoint --auto` writing a witnessed event to
     `$META_ROOT/.handoff/ledger.db` (NOT a per-repo ledger), proving "auto-update .handoff after
     every task" (the `/verify` 2026-06-13 finding — currently FALSE, this makes it TRUE).
+    - HOOK NOW LIVE: fired the Stop hook with `CLAUDE_PROJECT_DIR`=envctl worktree → exit 0,
+      resolves `hf` via PATH, runs `hf checkpoint --auto --quiet` from `$META_ROOT`, creates NO
+      per-repo ledger. The witnessed-event WRITE is correctly a no-op today (`hf checkpoint --auto`
+      → "no task id … `--auto` with an active task"; 0 cards seeded). **End-to-end witnessed-event
+      proof therefore defers to TASK-0002** (which seeds + mints + claims a task) — correct
+      dependency ordering, not a regression. Hook go-live (resolve+run+residency-safe) = DONE here.
+  - NOTE (carried → Open findings / Epic A): the `hf` binary's `ledger` crate pulls
+    **`rusqlite`/`libsqlite3-sys` (bundled C SQLite, statically linked)**. Does NOT violate
+    envctl's `no-c.sh` (separate `meta/handoff` workspace, not an envctl crate), but is relevant to
+    Epic A's "pure-Rust, no C in the trust boundary" north star if the kernel itself must be C-free.
 - [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
