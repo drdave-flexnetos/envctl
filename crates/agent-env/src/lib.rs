@@ -10,8 +10,10 @@
 //! - This crate is a **library only**: non-printing, no `clap`, no UI, no `Engine`. It
 //!   returns `Result<T, AgentEnvError>` and typed data; callers (TASK-0013 Engine,
 //!   TASK-0014 CLI/GUI) drive it.
-//! - The `Agent` enum models the full 21-preset **shape** here; the per-agent native
-//!   path-mapping methods (skills/mcps/commands destinations) are deferred to TASK-0013.
+//! - The `Agent` enum models the full 21-preset **shape** plus the per-agent native
+//!   path-mapping methods (skills/mcps/commands destinations) and their MCP/command
+//!   format+target value types (see [`agent`] and [`report`]). The sync *engine* that
+//!   drives them — `commands/sync`, `commands/list` — is deferred to TASK-0013.
 //! - The agent-asset lock uses **SHA-256** and is a **separate** type from the engine's
 //!   FNV-1a component lock (`crates/engine/src/lock.rs`) — they do not share code.
 //!
@@ -19,12 +21,19 @@
 //! tar, sha2, reqwest→rustls→ring), fail-closed guards (tar-slip path-traversal refusal,
 //! `--locked` zero-network), and `#![forbid(unsafe_code)]` (set via `[lints]`).
 
+pub mod agent;
 pub mod config;
 pub mod extend;
 pub mod hash;
 pub mod lock;
+pub mod report;
 pub mod source;
 
+pub use agent::{
+    all_command_global_targets, all_command_project_targets, all_mcp_project_targets,
+    all_mcp_settings_targets, command_global_targets, command_project_targets, CommandFormat,
+    CommandTarget, McpSettingsFormat, McpSettingsTarget,
+};
 pub use config::{
     git_pin_of, Agent, AgentField, CommandEntry, CommandSourceSpec, CommandsField, Config, GitPin,
     McpEntry, McpSourceSpec, McpsField, Scope, SkillTarget, SkillsField, SourceSpec, AGENT_PRESETS,
@@ -34,6 +43,7 @@ pub use hash::{hash_dir, hash_file, hash_str};
 pub use lock::{
     AgentLockEntry, AgentLockFile, AssetEntry, LockMode, AGENT_ASSETS_KEY, LOCK_VERSION,
 };
+pub use report::{Action, InstalledSkill, Report, Summary, SyncFailure};
 pub use source::{
     archive_url, derive_browse_url, download_extract, parse_repo_url, rewrite_browse_to_raw_url,
     BrowseDerived, RepoUrl, UrlRequestAuth,

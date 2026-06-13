@@ -127,3 +127,27 @@ broker/repowire/weave regression fixture, 5 command-format transforms, the full 
 - **No-downgrade proof:** `tests/no_downgrade.rs::all_six_keys_plus_extends_round_trip` exercises all 6
   config keys + extends end-to-end; if any key drops, it fails.
 - The three plan-sanctioned defers above are TASK-0013 scope — not regressions.
+
+## rust-port cycle: model/* completion
+
+**Rows ported (parity ledger):**
+- **M-09 finish** — `Agent::global_path` / `project_path` for all 21 presets (seed had enum shape only).
+- **M-11** `Agent::global_path` · **M-12** `Agent::project_path` — exact per-preset SKILLS dirs (incl. divergences: amp|replit global `.config/agents/skills` vs project `.agents/skills`; goose global `.config/goose/skills` vs project `.goose/skills`; opencode global `.config/opencode/skills` vs project `.opencode/skills`; windsurf `.codeium/windsurf/skills` vs `.windsurf/skills`; cline|warp → `.agents/skills`).
+- **M-13** `Agent::mcp_settings_target` (global) · **M-14** `Agent::mcp_project_target` — per-preset native MCP path + `McpSettingsFormat`, incl. github-copilot VS Code **OS branch** (`vscode_user_mcp_json`: macOS `~/Library/Application Support/Code/User/mcp.json`, Windows `%APPDATA%/Code/User/mcp.json`, Linux `~/.config/Code/User/mcp.json`), codex→`.codex/config.toml` CodexToml, opencode→OpenCode, continue→`.continue/mcpServers/kasetto.json`, 7-preset project fallthrough → `.mcp.json` McpServers.
+- **M-15** `Agent::commands_global_path` (9 supported, 12 None) · **M-16** `Agent::commands_project_path` (13 supported, 8 None) — exact dirs + `CommandFormat` per preset.
+- **M-17** `all_mcp_settings_targets` / `all_mcp_project_targets` · **M-18** `all_command_global_targets` / `all_command_project_targets` · **M-19** `command_global_targets` / `command_project_targets` (scoped) — HashSet path-dedup + sort.
+- **M-20** private helpers `dedup_targets` / `dedup_command_targets` / `cmd` / `vscode_user_mcp_json` / `mcp_servers_target`.
+- **M-25** sync-result types `Summary{installed,updated,removed,unchanged,broken,failed}` / `Action{source,skill,status,error}` / `Report{run_id,config,destination,dry_run,summary,actions}` / `InstalledSkill` / `SyncFailure{name,source,reason}` (types + serde only; sync engine = TASK-0013).
+- **M-26** `McpSettingsFormat`(McpServers/VsCodeServers/OpenCode/CodexToml) + `McpSettingsTarget{path,format}`.
+- **M-27** `CommandFormat`(MarkdownFrontmatter/MarkdownPlain/PromptMd/PromptFile/GeminiToml) + `CommandTarget{path,format}`.
+
+**Files changed:**
+- NEW `crates/agent-env/src/agent.rs` — M-11..M-20, M-26, M-27 (impl Agent path methods + helpers + format/target types).
+- NEW `crates/agent-env/src/report.rs` — M-25 sync-result types.
+- `crates/agent-env/src/lib.rs` — declare+re-export `agent` and `report` modules; updated the scope-boundary doc (path-mapping is no longer deferred; only the sync *engine* is TASK-0013).
+
+**Test count delta:** lib tests 60 → 78 (**+18**). Ported kasetto's 3 inline `agent.rs` tests verbatim + added all-21-preset exact-mapping coverage (global/project paths, both MCP targets incl. copilot OS branch, both command sets incl. the 12-None / 8-None splits, dedup/sort + scoped-set + empty-set), plus 4 `report.rs` serde tests (field names, scope rename, null-error retained). Workspace total stays green; no other crate touched.
+
+**Gate results (raw via `rtk proxy`):** build=0 · test=78 lib + 1 integ + 0 doc, all pass · clippy -D warnings=0 · fmt --check=0 · no-c=PASS.
+
+**Verbatim-name note:** kasetto's `continue` preset writes its own merge-marker file `.continue/mcpServers/kasetto.json` (both global M-13 and project M-14). This is kasetto's SELF-named drop file inside the agent-native `.continue/mcpServers/` dir, not an agent-native path. Per the naming note it is kept **verbatim** (byte-for-byte parity for the differential verifier); the product-identity rename is TASK-0013 Engine-wiring's job. All agent-native paths (`.claude/skills`, `.codex/config.toml`, the VS Code user `mcp.json`, etc.) are unchanged. The `kasetto_config` arg on `mcp_settings_target`/`all_mcp_settings_targets` is threaded through verbatim (kasetto reserves it; unused by every preset today).
