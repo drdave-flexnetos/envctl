@@ -48,11 +48,11 @@ no C / no mimalloc / one rustls ring-only / no-c.sh green · non-printing librar
 ## Verify-on-resume baseline
 `rtk proxy cargo test -p envctl-agent-env` (expect 78+) · `bash ci/gates/no-c.sh` (PASS). If red → NEEDS-HUMAN.
 
-## Owner follow-up (NOT loop-auto; needs explicit go-ahead)
-**kasetto fork (FlexNetOS/env_manager_agent) `origin/main` reconciliation.** Owner authorized "sync
-with pivoshenko, accept all kasetto changes." The LOCAL source-up (the part the port needs) is DONE.
-The remaining piece is rewriting the FORK's `main` to match upstream v3.2.0 — a **force-push that
-drops 305 FlexNetOS-only commits** (history rewrite, GitHub blast radius). Deferred for an explicit
-owner OK on the destructive push (backup branch `flexnetos-divergence-backup-2026-06-13` exists; push
-it to origin first, then `git push --force-with-lease origin main`). Until done, the fork remote is
-stale vs the local checkout.
+## Owner follow-up — DONE 2026-06-13
+**kasetto fork reconciliation COMPLETE.** Owner: "run the force push; all original code used for the
+port, only our change was the agent builder." Executed: fork RENAMED `env_manager_agent` →
+**`FlexNetOS/kasetto`**; full-repo git bundle archived
+(`meta/.archives/kasetto-full-pre-v320-sync-2026-06-13.bundle`, verified complete); divergence-backup
+branch pushed to the remote; `origin/main` force-pushed (`--force-with-lease`) `f2a50b7...ec01cca` =
+upstream **v3.2.0** (now 0/0 in sync); v3.2.0 tag pushed; remote retargeted to the canonical URL;
+`.meta.yaml` updated via meta PR #31. Fork == upstream == local. Nothing pending here.

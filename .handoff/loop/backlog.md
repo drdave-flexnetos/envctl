@@ -180,9 +180,10 @@ preset; multi-host resolver; 5 cmd + 4 MCP-merge additive transforms; 3 lock mod
     / 0 verified `[x]`). Resume via `/harness:rust-port` (HANDOFF: `.handoff/loop/rust-port/HANDOFF.md`)
     — next: parity-verifier pass, then fsops/config_edit/MCP-merge/commands. NOT done until 100% parity.
     The ledger spans TASK-0012..0018 (Engine wiring = TASK-0013, CLI verbs = TASK-0014).
-  - **OWNER FOLLOW-UP (needs go-ahead):** the kasetto FORK (`FlexNetOS/env_manager_agent`) `origin/main`
-    is still v3.0.0+divergent; fully "syncing with pivoshenko" means a force-push rewriting 305 commits
-    on the fork — deferred for explicit owner OK (see `.handoff/loop/rust-port/HANDOFF.md`).
+  - **FORK SYNC DONE 2026-06-13** (owner ran the force push): kasetto fork RENAMED
+    `env_manager_agent` → `FlexNetOS/kasetto`; `origin/main` force-pushed (--force-with-lease) UP to
+    upstream v3.2.0 (`ec01cca`, 0/0 in sync); divergence preserved (remote backup branch + git bundle
+    in `.archives/`); `.meta.yaml` retargeted via meta PR #31. Fork == upstream == local.
 - [ ] **TASK-0013:** Engine `agent_env` module + Engine methods + Events (agent_sync/add/remove/lock);
   non-printing, front-end parity.
 - [ ] **TASK-0014:** CLI verbs `envctl agent {sync,add,remove,lock,list,clean}` (--dry-run/--json/--locked)
