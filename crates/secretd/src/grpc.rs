@@ -30,6 +30,12 @@ use crate::conv;
 pub struct DaemonState {
     /// Mirror of the last successful Unlock/Lock outcome. The engine is the true authority.
     pub unlocked: Arc<AtomicBool>,
+    /// Whether the current unlock was achieved via the **USB possession factor** (the Seed), as
+    /// opposed to the passphrase. Set on a successful USB unlock, cleared on passphrase unlock and
+    /// on lock. Surfaced as `Status.usb_possessed` — a cheap, non-blocking signal ("USB possession
+    /// was proven for the active session"); deliberately NOT a live re-probe, which would make
+    /// `status` block on a Seed round-trip (and hang when the Seed is absent).
+    pub usb_unlocked: Arc<AtomicBool>,
     /// The relay proxy's bound `127.0.0.1:<port>` loopback address, published ONCE by `main` after
     /// `serve_proxy` binds. PR-2b's `Relay.Mint` reads it to fill `MintResp.injection` so the child
     /// is repointed at the proxy. `None` until the proxy has bound (or if it failed to bind).
@@ -391,11 +397,12 @@ impl v1::lock_server::Lock for LockSvc {
         _request: Request<v1::StatusReq>,
     ) -> Result<Response<v1::StatusResp>, Status> {
         // PARTIAL within the public-API constraint: `unlocked` mirrors the last Unlock/Lock outcome
-        // (engine is the authority); `usb_possessed`/`active_relays`/`secret_count` have no public
-        // query path and are reported best-effort (false/0).
+        // and `usb_possessed` mirrors whether that unlock used the USB possession factor (cheap,
+        // non-blocking — see `DaemonState::usb_unlocked`); `active_relays`/`secret_count` still have
+        // no public query path and are reported best-effort (0). The engine is the authority.
         Ok(Response::new(v1::StatusResp {
             unlocked: self.state.unlocked.load(Ordering::SeqCst),
-            usb_possessed: false,
+            usb_possessed: self.state.usb_unlocked.load(Ordering::SeqCst),
             active_relays: 0,
             secret_count: 0,
         }))
@@ -411,11 +418,14 @@ impl v1::lock_server::Lock for LockSvc {
             Some(pp) => Unlock::Passphrase(Zeroizing::new(pp)),
             None => Unlock::Usb,
         };
+        let was_usb = matches!(unlock, Unlock::Usb);
         let flag = self.state.unlocked.clone();
+        let usb_flag = self.state.usb_unlocked.clone();
         let stream = run_streaming(self.engine.clone(), move |engine, sink: &EventSink| {
             let r = engine.unlock(unlock, sink);
             if r.is_ok() {
                 flag.store(true, Ordering::SeqCst);
+                usb_flag.store(was_usb, Ordering::SeqCst);
             }
             r.map(|_state| ())
         });
@@ -427,10 +437,12 @@ impl v1::lock_server::Lock for LockSvc {
         _request: Request<v1::LockReq>,
     ) -> Result<Response<Self::LockNowStream>, Status> {
         let flag = self.state.unlocked.clone();
+        let usb_flag = self.state.usb_unlocked.clone();
         let stream = run_streaming(self.engine.clone(), move |engine, sink: &EventSink| {
             let r = engine.lock(sink);
             if r.is_ok() {
                 flag.store(false, Ordering::SeqCst);
+                usb_flag.store(false, Ordering::SeqCst);
             }
             r
         });
