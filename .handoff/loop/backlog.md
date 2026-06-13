@@ -1,68 +1,114 @@
-# Loop backlog — env-ownership + Phase-2 tool relocation (runaway-containment mission)
+# Loop backlog — envctl agenticOS consolidation (2026-06-12)
 
-> Source: runaway-session containment mission (2026-06-12). The auto-loop ("deliver 2") works
-> this backlog. Prior loop (dashboard forge-loop, terminal-DONE) archived in `_done/`.
+> Source: owner directive (2026-06-12) — handoff full-sync + meta-portability + **kasetto
+> full-feature unification into envctl** (no downgrades, no feature lost, upgrade-only), plus the
+> follow-up work surfaced when consolidating all WIP branches into `develop`. Design + research
+> cross-references: `.handoff/decisions/ADR-0001-kasetto-handoff-portability-unification.md`.
+>
+> Workflow: `develop` is the integration branch; `master` is its protected mirror (auto-synced).
+> Each item below is picked up in a FRESH worktree off `develop` (`git worktree add … -b <slug> develop`).
 >
 > Legend: `- [ ]` todo · `- [x]` done · `- [!]` blocked (reason) · `- [?]` needs investigation
 > · `- [!!]` SUPERVISED/CRITICAL (never auto-run).
 
 ## North star
 
-`~/.local/bin` must hold ONLY symlinks into meta; every FlexNetOS-built tool resolves inside
-meta. Configs reference meta via PATH (bare names) or `$META_ROOT` (from the `.meta.yaml`
-marker) — never hardcoded paths. HEAL not harm · NEVER delete (archive) · NEVER downgrade
-(sync meta source UP first).
+envctl is the **agenticOS**: it owns the meta environment boundary (PATH, dotfiles, `~/.local`,
+the canonical `home/` tree), holds + auto-injects secrets, provisions the agent environment, and
+carries the handoff continuity kernel. Everything meta consumes resolves inside meta; user-global
+holds ONLY symlinks into meta; configs reference meta via PATH (bare names) or `$META_ROOT` (from
+the `.meta.yaml` marker) — never hardcoded paths. **HEAL not harm · NEVER delete (archive) ·
+NEVER downgrade (sync meta source UP first) · pure-Rust, no C in the trust boundary.**
 
-## Per-tool relocation procedure (every slice follows this)
+---
 
-1. Confirm provenance (maps to a meta repo/build).
-2. Build the meta source `--release`.
-3. Version-compare vs the installed copy. **If meta < installed → UPGRADE the meta source to
-   ≥ installed FIRST** (sync/port the newer code). Never relocate to an older binary.
-4. Smoke-test the meta build (`--version` / `--help` / a real exercise).
-5. Archive the installed real copy (timestamped, cold storage) — never delete.
-6. Replace `~/.local/bin/<tool>` with a symlink into the meta build.
-7. Re-verify via the symlink; **ROLLBACK** (restore the archived copy) on any failure.
-8. Verify env health (commands still run) before the next slice.
+## Epic A — Handoff continuity full-sync (bring `.handoff` to Tier-A)
 
-## Phase 0 — env-ownership build-out (prerequisite; unblocks `$META_ROOT` healing)
+Research: `meta/handoff` kernel vs `envctl/.handoff` (~30% Tier-B stub). Per-repo `.handoff` holds
+git-committed TEXT ONLY; events flow to the shared `meta/.handoff/ledger.db` (ADR-0004). Packets
+are **rendered by `hf`, never hand-written**.
 
-- [ ] envctl: add `envctl env` — discover meta-root via the `.meta.yaml` marker (reuse
-  `engine::dashboard::locate_meta_file`), emit `export META_ROOT=…` + meta tool dirs on PATH.
-  Respect envctl invariants (non-printing engine; print in CLI; clippy -D warnings; CI gates).
-- [ ] Wire `META_ROOT` into the env Claude inherits (login/session env that envctl owns).
-- [ ] Heal the 3 remaining hardcoded `settings.json` refs via `$META_ROOT` / per-machine
-  templating: statusline script + 2 plugin-marketplace dirs.
-- [ ] envctl boundary-refusal: `envctl doctor`/env refuses when a real FlexNetOS install is
-  found outside meta; idempotently regenerates `~/.local/bin` symlinks from `META_ROOT`.
+- [ ] **TASK-0001 (P0):** Build & install the `hf` kernel binary from `meta/handoff` (not on PATH
+  today — keystone blocker). Relocate per Epic B procedure (symlink into meta). Verify
+  `hf resume/claim/checkpoint/handoff` run from envctl against `meta/.handoff/ledger.db`.
+- [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
+  `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
+  `ledger.db`; do NOT hand-write packets.
+- [ ] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
+  `hf resume --json` succeeds + emits `handoff.packet.v2`).
 
-## Phase 2 — relocation slices (meta-built tools only)
+## Epic B — Meta-portability / env-ownership (`$META_ROOT`)
 
-- [ ] **meta-mcp** → `meta/meta_mcp`. Relocatable (meta-built; debug build exists). Build
-  release, verify equivalence to installed (Jun-2 copy, 1.7M), then relocate. LOWEST risk
-  (not on a universal hook path) — good first proof of the procedure.
-- [!] **kasetto + kst** → `meta/kasetto`. BLOCKED: meta source v3.0.0 < installed v3.1.0
-  (downgrade). Sync/upgrade `meta/kasetto` source to ≥ v3.1.0 FIRST, build, verify, then
-  relocate both (`kst` is the same binary / alias).
-- [!!] **rtk + rtk-monitor** → `meta/rtk-tokenkill`. SUPERVISED/CRITICAL — DO NOT auto-relocate:
-  (a) on the live `rtk hook claude` PreToolUse path — a broken rtk breaks EVERY command;
-  (b) meta source v0.42.0 < installed v0.42.2 (downgrade). Requires: sync rtk-tokenkill to
-  ≥0.42.2, build, verify, then swap with an immediate rollback test, ideally from a session
-  NOT dependent on the rtk hook. Owner-flagged critical.
+`~/.local/bin` must hold ONLY symlinks into meta. Per-tool relocation procedure: (1) confirm
+provenance, (2) build meta source `--release`, (3) **if meta < installed → UPGRADE meta source
+FIRST** (never relocate to older), (4) smoke-test, (5) archive installed copy (timestamped, never
+delete), (6) symlink `~/.local/bin/<tool>`→meta build, (7) re-verify + ROLLBACK on failure, (8)
+verify env health.
 
-## Not relocation targets (leave as-is)
+- [x] `envctl env` — discover meta-root via `.meta.yaml` marker (`engine::dashboard::locate_meta_file`),
+  emit `export META_ROOT=…` + meta tool dirs on PATH; `--toolchains`/`--materialize` (merged from
+  feat/envctl-env, 2026-06-12).
+- [ ] **TASK-0004 (P0):** Wire `META_ROOT` into the env Claude inherits (login/session env envctl owns).
+- [ ] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
+  per-machine templating: statusline script + 2 plugin-marketplace dirs (HIGH — live source-of-truth file).
+- [ ] **TASK-0006 (P2):** Point global `home/.config/kasetto/kasetto.yaml` mcps source at in-meta
+  agent-skills (not `github.com/FlexNetOS/agent-skills`); genericize MED shell/nushell hardcodes
+  (`shell_nu.nu`, `shell_bash.sh`, `config.nu`). Fix stale `Documentation=` URL in `manifest/env-ctl.toml`.
+- [ ] **TASK-0007 (P2):** `envctl doctor`/env boundary-refusal when a real FlexNetOS install is found
+  outside meta; idempotent `~/.local/bin` symlink regen from `META_ROOT`.
+- [ ] **TASK-0008 (P2):** Relocate **meta-mcp** → `meta/meta_mcp` (lowest risk; first proof of procedure).
+- [!] **TASK-0009 (P2):** Relocate **kasetto + kst** — superseded by Epic C (kasetto becomes built-in;
+  no external binary to relocate once absorbed). Until C lands: meta source v3.0.0 < installed v3.1.0.
+- [!!] **TASK-0010 (P2):** Relocate **rtk + rtk-monitor** — SUPERVISED/CRITICAL (live `rtk hook claude`
+  PreToolUse path; meta v0.42.0 < installed v0.42.2). Sync rtk-tokenkill ≥0.42.2 first; swap with
+  immediate rollback test from a session not dependent on the rtk hook. Owner-flagged.
 
-- **git-kb** (v0.2.10): GitKB tool from the upstream `gitkb` org — NOT a `.meta.yaml` project.
-  External until/unless a separate decision brings GitKB into meta as a project.
-- **forge** (v2.13.4): ForgeCode (forgecode.dev) — third-party commercial AI agent. Vendor.
-- Vendor toolchains: uv, uvx, mise, node, npm, npx, bat, fd, fzf, kimi, kimi-cli, claude,
-  devin, junie, sqld. Not FlexNetOS source.
-- `envctl-dashboard-pane`, `envctl-open-claude`: envctl's own scripts, installed as copies by
-  `manifest/dashboard.toml`. Align via the manifest (symlink-or-copy policy), not ad-hoc.
+## Epic C — Kasetto full-feature unification into envctl (no downgrade)
 
-## Key finding
+kasetto is already pure-Rust + passes no-c gate (only drop `mimalloc`). envctl already ported §2
+lock / §16 runtime / doctor / lock --check. Absorb the rest as a pure-Rust crate. NO-DOWNGRADE
+checklist in ADR-0001 (all 11 verbs incl v3.1 add/remove/lock; 6-key+extends schema; 21-agent
+preset; multi-host resolver; 5 cmd + 4 MCP-merge additive transforms; 3 lock modes).
+
+- [ ] **TASK-0011 (P1):** Refresh `docs/KASETTO-FEATURES.md` to v3.2.0 (full verb/schema inventory +
+  no-downgrade checklist; current doc is stale at v3.0.0).
+- [ ] **TASK-0012 (P0 of C):** New pure-Rust crate `crates/agent-env` — config model (6 keys +
+  `extends`), multi-host source resolver, SHA-256 hash, lock. Drop `mimalloc`. no-c gate clean.
+- [ ] **TASK-0013:** Engine `agent_env` module + Engine methods + Events (agent_sync/add/remove/lock);
+  non-printing, front-end parity.
+- [ ] **TASK-0014:** CLI verbs `envctl agent {sync,add,remove,lock,list,clean}` (--dry-run/--json/--locked)
+  + GUI parity.
+- [ ] **TASK-0015:** Provisioning fidelity — verbatim skill copy; 5 command-format transforms; 4
+  MCP-merge formats (ADDITIVE, never-clobber — must preserve global broker/repowire/weave servers).
+- [ ] **TASK-0016:** Lock unification — fold agent assets into `envctl.lock` (SHA-256 section) or keep
+  kasetto.lock owned by the subsystem; reframe `manifest/agent-env.toml` external-binary → built-in.
+- [ ] **TASK-0017:** Adopt kasetto `extends` config composition for envctl component manifests.
+- [ ] **TASK-0018:** Retire the external `kasetto` binary dependency — only after the no-downgrade
+  checklist passes end-to-end.
+
+## Epic D — Follow-ups surfaced from the WIP-branch consolidation (2026-06-12)
+
+All WIP branches were merged to develop + verified green (build, 197 tests, no-c/shape/enable,
+fmt, clippy). Remaining follow-ups extracted from each:
+
+- [ ] **TASK-0019 (fix-secretd):** U1 USB-unlock path needs a real `RealUsbProbe` (crash-loop +
+  durable store + passphrase path already fixed/merged). See `.handoff/loop/_done/secretd-provisioning-runbook.md`.
+- [ ] **TASK-0020 (github-app-mint):** Wire the GitHub-App token mint (`secrets-engine/mint_github.rs`,
+  merged) through the `ProviderMint` injection seam — secretctl/secretd phases + agent-env auto-inject.
+- [ ] **TASK-0021 (node-via-bun):** Manifest design follow-up — mark node not-applicable when a real
+  node in the n8n range is present, or add a `node-real` component + drop the group-ai-clis edge
+  (cosmetic detect-drift only; truth-telling fix already merged).
+- [ ] **TASK-0022 (agent-web-access):** Phases 2–3 of the agent web-access ladder (Phase 1 n8n-mcp +
+  kasetto wiring merged). `- [!]` n8n live smoke test is HUMAN-ONLY (see
+  `.handoff/loop/_done/n8n-live-smoke-runbook.md`).
+
+## Epic E — Workflow infrastructure
+
+- [ ] **TASK-0023:** develop→master auto-sync GitHub Action (ff master on develop push) +
+  enable branch protection on master (PR-only for humans; action token bypass). [in progress 2026-06-12]
+
+## Key finding (carried)
 
 Most meta-built tools' installed binaries are NEWER than their committed meta sources
-(kasetto 3.1.0>3.0.0, rtk 0.42.2>0.42.0) → meta is OUT OF SYNC with what's deployed. The
-loop's real work is **sync-meta-source-UP-then-relocate**, not a quick symlink sweep. This is
-the same "envctl underdeveloped / unsynced with meta" gap the owner flagged.
+(kasetto 3.1.0>3.0.0, rtk 0.42.2>0.42.0) → meta is OUT OF SYNC with what's deployed. The real
+work is **sync-meta-source-UP-then-relocate**, not a symlink sweep.
