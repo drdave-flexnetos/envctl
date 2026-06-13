@@ -29,13 +29,13 @@ every iteration; never hold the install plan only in your head.**
   `auto-fix <id>`, `lock --check`. Destructive verbs are **dry-run by default**; act only with
   `--apply`/`--build`.
 
-## Durable state (the loop's memory) — under the worktree's `_workspace/`
-- **`_workspace/backlog.md`** — the source of truth. Ordered checklist, one item per gap:
+## Durable state (the loop's memory) — under the worktree's `.handoff/loop/`
+- **`.handoff/loop/backlog.md`** — the source of truth. Ordered checklist, one item per gap:
   `- [ ] <id>: <what's missing/broken>` → `- [x]` healthy, `- [!] blocked: <reason>` if stuck.
   Research-discovered items live in their own section and carry a class prefix + owner:
   `harden:` / `fix:` / `upgrade:` (loop-fixable, declarative) and `feature:` (route to
   `feature-forge`) — see *Research*.
-- **`_workspace/loop_state.md`** — ledger: `cycle_budget` (default 3), `cycles_this_session`,
+- **`.handoff/loop/loop_state.md`** — ledger: `cycle_budget` (default 3), `cycles_this_session`,
   `cycles_total`, `last_item`, `status`, `session_started` (UTC — you supply it; scripts can't read
   the clock).
 
@@ -47,7 +47,7 @@ Before looping, in the worktree:
 3. Check each toolchain present at the right version (Rust per `rust-toolchain.toml`, bun/node, the
    CUDA/GPU stack + driver, ai-clis, nix-yazelix, secretd) and that required **PATH entries and env
    vars** are actually present/exported (inspect the components' `wiring`).
-4. Write `_workspace/backlog.md` (one item per gap, most foundational first — e.g. apt-base before
+4. Write `.handoff/loop/backlog.md` (one item per gap, most foundational first — e.g. apt-base before
    things that depend on it; follow the dependency graph, `envctl graph`) and seed `loop_state.md`.
 5. Kick off the **Research** pass (below) to append upgrade/hardening items. Install gaps are worked
    first (foundational); research items after.
@@ -134,22 +134,22 @@ install/repair attempt **completes** (healthy or blocked).
 ### External-runner (auto-provision) mode — write a sentinel, don't self-pace
 When launched by the **`auto-provision`** runner (a fresh `claude -p` process per cycle — the
 prompt will say so), do **not** ScheduleWakeup. Run up to one cycle-budget of work, commit each
-cycle, then write **exactly one** sentinel under `_workspace/` and exit so the runner decides
+cycle, then write **exactly one** sentinel under `.handoff/loop/` and exit so the runner decides
 whether to respawn a fresh-context process:
-- everything verified DONE → `_workspace/DONE` (with the DONE-criteria evidence);
-- privilege/reboot/hardware wall → `_workspace/NEEDS-HUMAN` (with the reason);
-- more work remains → write `_workspace/HANDOFF.md` (via `session-relay`/`continuity-steward`) and exit.
-Also honor `_workspace/STOP` as a kill switch: if present, stop immediately.
+- everything verified DONE → `.handoff/loop/DONE` (with the DONE-criteria evidence);
+- privilege/reboot/hardware wall → `.handoff/loop/NEEDS-HUMAN` (with the reason);
+- more work remains → write `.handoff/loop/HANDOFF.md` (via `session-relay`/`continuity-steward`) and exit.
+Also honor `.handoff/loop/STOP` as a kill switch: if present, stop immediately.
 
 ## Cycle budget (handoff trigger)
 Per-session budget is **cycles-only** (no token-meter guessing — there is no live meter): default
 **3** completed cycles per session unless the user sets `/env-install-loop budget=N …`. At the
 budget, invoke **`session-relay`** (which spawns `continuity-steward` to write
-`_workspace/HANDOFF.md`, commits it, broadcasts a weave heartbeat, and best-effort schedules a
+`.handoff/loop/HANDOFF.md`, commits it, broadcasts a weave heartbeat, and best-effort schedules a
 successor), then stop. The successor resets `cycles_this_session` and continues from the backlog.
 
 ## Resume (entering mid-loop from a handoff)
-If a `_workspace/HANDOFF.md` exists (or the prompt says "resume"): follow `session-relay`'s RESUME
+If a `.handoff/loop/HANDOFF.md` exists (or the prompt says "resume"): follow `session-relay`'s RESUME
 protocol — the **committed `HANDOFF.md` is the authoritative signal** (not the weave inbox; cron is
 best-effort). Read it, run its verify-on-resume baseline, broadcast `env-install:resumed`, reset
 `cycles_this_session`, then continue the iteration body at the backlog's current item.
@@ -180,7 +180,7 @@ returning nothing new is the signal the upgrade backlog is drained.
   hardware you can't drive, **STOP and ask the human** (suggest they run it via `! <command>`)
   rather than spinning the loop on an item you cannot complete. Mark it `- [!] needs-human` and move
   on if other items remain.
-- Keep `_workspace/` as the audit trail; commit every cycle so a fresh session resumes cold.
+- Keep `.handoff/loop/` as the audit trail; commit every cycle so a fresh session resumes cold.
 
 ## Stop conditions (end the loop — no re-fire)
 DONE (both tiers met — provisioned + upgrades resolved/routed) · cycle budget reached (hand off, then

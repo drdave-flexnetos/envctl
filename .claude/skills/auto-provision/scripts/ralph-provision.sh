@@ -6,10 +6,14 @@
 #
 # Each iteration spawns one fresh headless agent that runs one cycle-budget of install/repair
 # (install <-> reset remediation), commits per cycle, then writes EXACTLY ONE sentinel + exits:
-#   _workspace/HANDOFF.md  -> more work remains; this script spawns the next fresh process
-#   _workspace/DONE        -> doctor green + lock/kasetto clean + gates pass; this script exits 0
-#   _workspace/NEEDS-HUMAN -> hit a sudo/reboot/hardware wall; this script halts for you
-#   _workspace/STOP        -> kill switch (you `touch` it); this script halts
+#   .handoff/loop/HANDOFF.md  -> more work remains; this script spawns the next fresh process
+#   .handoff/loop/DONE        -> doctor green + lock/kasetto clean + gates pass; this script exits 0
+#   .handoff/loop/NEEDS-HUMAN -> hit a sudo/reboot/hardware wall; this script halts for you
+#   .handoff/loop/STOP        -> kill switch (you `touch` it); this script halts
+#
+# LEGACY FALLBACK (read-only): a pre-migration successor may still target the old _workspace/ path.
+# If a .handoff/loop/ sentinel is absent, the spawned agent may READ legacy _workspace/{HANDOFF.md,
+# DONE,NEEDS-HUMAN,STOP} only to recover an in-flight mission — it must NEVER write the legacy path.
 #
 # SAFETY: default is ATTENDED/SAFE — headless agents cannot answer permission prompts, so without
 # an explicit opt-in they will NOT perform destructive `--apply`/`--build`/`reset` actions. To run
@@ -25,7 +29,7 @@ MAX_ITERS="${RALPH_MAX_ITERS:-50}"              # hard backstop on process resta
 SLEEP_BETWEEN="${RALPH_SLEEP:-5}"               # seconds between iterations
 MODEL="${RALPH_MODEL:-opus}"
 RESEARCH="${RALPH_RESEARCH:-1}"                 # run the component-research/audit pass (1=on)
-WS="$WORKTREE/_workspace"
+WS="$WORKTREE/.handoff/loop"
 
 log() { printf '[ralph %s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { log "FATAL: $*"; exit 1; }
@@ -33,6 +37,7 @@ die() { log "FATAL: $*"; exit 1; }
 command -v claude >/dev/null || die "claude CLI not on PATH"
 [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ] || die "WORKTREE is not a git repo: $WORKTREE"
 mkdir -p "$WS"
+mkdir -p "$WS/cycle"
 
 # Apply-mode opt-in. SAFE by default: no permission bypass, so destructive steps are refused.
 APPLY_ARGS=()
@@ -59,18 +64,21 @@ fi
 read -r -d '' PROMPT <<EOF || true
 /env-install-loop resume (external Ralph runner, fresh context).
 Branch/worktree: $WORKTREE.
-1. If _workspace/HANDOFF.md exists, follow session-relay RESUME from it (it is the authoritative
-   signal); else DISCOVER gaps via envctl doctor + auto-detect and build _workspace/backlog.md.
+1. If .handoff/loop/HANDOFF.md exists, follow session-relay RESUME from it (it is the authoritative
+   signal); else DISCOVER gaps via envctl doctor + auto-detect and build .handoff/loop/backlog.md.
+   (Legacy fallback, READ-ONLY: if .handoff/loop/HANDOFF.md is absent, you MAY read a legacy
+   _workspace/HANDOFF.md to recover an in-flight pre-migration mission, but NEVER write _workspace/ —
+   re-emit all new state under .handoff/loop/.)
 $RESEARCH_LINE
 2. Run up to $BUDGET install/repair cycles. Remediation ladder per item: install (dry-run -> apply)
    -> if detected-but-unhealthy and auto-fix won't resolve, reset --apply then install --apply ->
    verify on PATH + env vars in a FRESH shell -> commit per cycle. Destructive ops are fail-closed.
-3. Then write EXACTLY ONE sentinel under _workspace/ and stop (do not ScheduleWakeup):
+3. Then write EXACTLY ONE sentinel under .handoff/loop/ and stop (do not ScheduleWakeup):
    - DONE (with evidence: doctor green, auto-detect all healthy/zero drift, lock --check + kasetto
-     sync --locked clean, build + no-c/shape/enable gates pass) -> create _workspace/DONE
+     sync --locked clean, build + no-c/shape/enable gates pass) -> create .handoff/loop/DONE
    - hit a sudo / interactive-auth / reboot / hardware wall you cannot clear -> create
-     _workspace/NEEDS-HUMAN with the reason
-   - otherwise write _workspace/HANDOFF.md (spawn continuity-steward) and exit.
+     .handoff/loop/NEEDS-HUMAN with the reason
+   - otherwise write .handoff/loop/HANDOFF.md (spawn continuity-steward) and exit.
 Commit every cycle so the next fresh process resumes cold. Never weaken a fail-closed guard.
 EOF
 
@@ -79,7 +87,7 @@ i=0
 while :; do
   i=$((i + 1))
   if [ "$i" -gt "$MAX_ITERS" ]; then
-    log "reached MAX_ITERS=$MAX_ITERS without DONE — halting (backstop). Inspect _workspace/."
+    log "reached MAX_ITERS=$MAX_ITERS without DONE — halting (backstop). Inspect .handoff/loop/."
     exit 3
   fi
   # Pre-flight sentinel checks (kill switch + terminal states win before spawning).

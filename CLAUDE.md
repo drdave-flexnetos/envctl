@@ -145,14 +145,17 @@ To **provision the whole box / install all toolchains, PATH, and env vars in a l
 `auto-fix` verbs + `env-toolchain-install`). For **fully unattended, self-restarting** provisioning
 with a fresh context every cycle ("run it overnight / set-and-forget", "auto-provision", "cycle
 install and reset until done") use **`auto-provision`** — the external Ralph runner that spawns a
-fresh `claude -p` per cycle (the `/new` effect) wrapping `env-install-loop`. Simple questions and
+fresh `claude -p` per cycle (the `/new` effect) wrapping `env-install-loop`. To **build/install the
+`hf` continuity kernel and bring `.handoff` to Tier-A** ("build hf", "sync the handoff layer",
+"make .handoff tier-A", "resume handoff full-sync") use **`handoff-sync`** (Epic A; distinct from
+`session-relay`, which is the per-loop checkpoint). Simple questions and
 trivial edits may be answered/done directly. (A SINGLE component install → `env-toolchain-install`;
 drift/lock/doctor → `env-stabilize`; conventions → `agent-env-config`.)
 
 **Placement:** the harness is **hand-authored and git-tracked**, intentionally *outside* the
 kasetto pipeline. Agent definitions live in `.claude/agents/*.md` and the harness skills
 (`feature-forge`, `rust-feature-impl`, `forge-loop`, `session-relay`, `env-install-loop`,
-`auto-provision`) live directly in `.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
+`auto-provision`, `handoff-sync`) live directly in `.claude/skills/` — edit those files in place and commit them. They are **not** sourced from `agent-skills/`, not in `kasetto.yaml` /
 `kasetto.lock`, and not produced by `kasetto sync`. (Note: this is a deliberate exception to the
 general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-managed skills remain
 `agent-env-config`, `env-stabilize`, `env-toolchain-install`.)
@@ -171,3 +174,4 @@ general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-ma
 | 2026-06-05 | Add A2 cross-repo parallel build (default-OFF, scale auto-trigger) | skills/{feature-forge,forge-loop,session-relay}; agents/{rust-implementer,continuity-steward} | Cross-repo parallelism via the three-owner split — **meta** owns the coordinated worktree set (one independent branch per repo → no cross-repo conflict by construction) + aggregation (`meta --json git worktree exec --parallel`), **grit** owns intra-repo `file::symbol` locks only (Option X: `init/claim/release/heartbeat/gc/status/queue`, never `done`/`session`/`worktree`), the **orchestrator** owns the guardian gate (only it commits/merges/PRs, only after that repo's guardian PASSes). Auto-trigger by scale (1 repo ≤3 mod → sequential DEFAULT; 1 repo >3 mod → `Workflow.pipeline`; >1 repo → A2) with `FORGE_PARALLEL=0` escape hatch; sequential single-crew unchanged when no >1-repo trigger fires. PR-1 = minimal-coherent foundation (envctl-style gate scope + schema/2-repo continuity demo); per-repo gate contracts, grit-lifecycle inversion, full N-branch resume, dep-ordered fan-out staged to PR-2..5 |
 | 2026-06-08 | Add grit-harness-parallel opt-in mode | skills/{feature-forge,forge-loop} | Adopt grit's claim→work→done AST git-lock coordination into the harness for parallel multi-repo implementations: `grit init` (idempotent), file::symbol claims, --queue for contested symbols, --with-deps for dependency-aware locks. Opt-in via USE_GRIT=1; default single-implementer path unchanged. |
 | 2026-06-12 | Dashboard panes default to shell; require human opt-in for Claude | assets/scripts/envctl-dashboard-pane; assets/scripts/envctl-open-claude; manifest/dashboard.toml | Prevent auto-spawn of idle Claude sessions in every zellij mission-control pane. A human must run `envctl-open-claude` to start a session. See incident audit `CLAUDE-SESSION-AUDIT-2026-06-12.md` §10.4. |
+| 2026-06-12 | Migrate harness durable state `_workspace/`→`.handoff/loop/`; add kasetto-absorption capability + handoff-sync skill + hf-aware continuity | skills/{forge-loop,feature-forge,session-relay,env-install-loop,auto-provision,handoff-sync,rust-feature-impl}; agents/{feature-architect,rust-implementer,invariant-guardian,continuity-steward}; ci/gates/no-c.sh; .gitignore | Wire the harness to the real `.handoff/loop/` continuity surface (ADR-0004), carry the no-downgrade kasetto absorption playbook (Epic C, references/kasetto-absorption.md), and make checkpoints hf-kernel-aware (Epic A). P0 safeguards: legacy `_workspace/` read-only fallback for in-flight successors; hf ledger-residency guard ($META_ROOT, no per-repo ledger.db); `hf done` terminal verb; `- [!!]` SUPERVISED auto-run refusal; no-c gate extended for mimalloc. Meta-CLI fixes: `meta project list --json` (not `list-projects --names`), `meta git worktree status <slug>`. See `.handoff/decisions/ADR-0001`. |
