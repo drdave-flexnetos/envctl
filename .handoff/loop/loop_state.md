@@ -6,14 +6,16 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 2
-cycles_total: 2
-last_item: TASK-0002 (seed Tier-A) — BLOCKED/NEEDS-DECISION 2026-06-13 (cycle 2); TASK-0003 blocked w/ it
-status: STOPPED 2026-06-13 @ 2/3 (deliberate early stop, not budget-exhaustion) — cycle 1 TASK-0001
-  DONE (landed 7dd2443); cycle 2 TASK-0002+0003 BLOCKED (FINDING-0002). Epic A stalls pending an
-  OWNER/KERNEL decision; stopped & reported rather than start the large fresh-context TASK-0012 at
-  session tail. Resume via `/forge-loop resume from .handoff/loop/HANDOFF.md`; reset cycles to 0.
-  Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
+cycles_this_session: 1   # RESUME 2026-06-13: counter reset to 0 on resume; cycle 3 (TASK-0004) ran
+cycles_total: 3
+last_item: TASK-0004 (wire META_ROOT into the env Claude inherits) — DONE 2026-06-13 (cycle 3, resume)
+status: ACTIVE (resumed) 2026-06-13 — cycle 3 TASK-0004 DONE. On resume (owner "check now") confirmed
+  the Epic A blocker FINDING-0002 is RESOLVED (Option A): the kernel built the fleet verbs in
+  meta/handoff PR #17 (hf fleet status/render, hf sync), verified live → TASK-0002/0003 UNBLOCKED.
+  Then ran the owner-chosen item TASK-0004: env block in settings.json.tmpl + drift-guard test;
+  gate green. PR → develop (auto-promotes to master). Next pick: Epic A TASK-0002 (now executable:
+  seed OPTIONAL hooks/policies/skills + hf fleet render envctl + hf sync inside a worktree cycle),
+  or Epic C TASK-0012 (crates/agent-env, large). Resume via `/forge-loop resume`; reset cycles to 0.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
@@ -32,15 +34,26 @@ status: STOPPED 2026-06-13 @ 2/3 (deliberate early stop, not budget-exhaustion) 
   scope). Wrote `.handoff/decisions/FINDING-0002-...md` (3 options, A recommended). TASK-0003
   blocked with it (depends on a seeded layer). Epic A stalls pending the owner/kernel decision.
 
+- cycle 3 (2026-06-13, TASK-0004, DONE — resume session): FIRST re-checked FINDING-0002 per owner
+  "check now" → RESOLVED. The installed `hf` now exposes `fleet status`, `fleet render MEMBER`, and
+  standalone `sync [--auto] [--dry-run]` (kernel meta/handoff PR #17, HEAD 1adbb13; binary rebuilt
+  04:29). Verified live from $META_ROOT: `hf fleet status` (fleet ledger present, 64 members),
+  `hf fleet render envctl` (wrote packets/latest.md — probe artifact removed), `hf sync --dry-run`.
+  Marked TASK-0002/0003 UNBLOCKED. Then implemented TASK-0004: top-level `env` block
+  (META_ROOT/META_FILE) in `home/.claude/settings.json.tmpl`, re-rendered `settings.json`, added the
+  `settings_json_matches_rendered_tmpl_no_drift` Rust drift guard. Gate: build 395 crates,
+  `cargo test -p envctl` 7 pass, no-c/shape/enable PASS. (Pre-existing, out-of-scope: clippy
+  `items_after_test_module` on crates/cli/src/main.rs — present on develop, not gated by CI.)
+
 ## Next safe step
-- Epic A is BLOCKED (TASK-0002/0003 → FINDING-0002, needs owner/kernel decision). Per the
-  dependency-aware order, the next UNBLOCKED pick is **Epic C TASK-0012 (P0)**: new pure-Rust crate
-  `crates/agent-env` (6-key+extends model, multi-host resolver, SHA-256, lock; drop `mimalloc`;
-  no-c gate clean). It gates TASK-0013..0018. Large cycle → route via `feature-architect` →
-  `rust-implementer` → `invariant-guardian` (the standard envctl crew), benefits from fresh context.
-- Alt smaller unblocked picks if budget is tight: TASK-0004 (P0, wire META_ROOT into Claude's
-  inherited env via the settings.json.tmpl per-machine render path) or TASK-0011 (P1, refresh
-  docs/KASETTO-FEATURES.md to v3.2.0 — research-heavy, supports Epic C no-downgrade checklist).
+- **Epic A is now UNBLOCKED** (FINDING-0002 resolved). Next pick = **TASK-0002 (P0, Epic A)**:
+  seed envctl's OPTIONAL `hooks/policies/skills` text + run `hf fleet render envctl` and `hf sync`
+  inside a worktree cycle and commit the rendered artifacts (no per-repo `ledger.db`; packets
+  rendered, never hand-written). Then TASK-0003 (p7-conformance gate). Route via the envctl crew or
+  `handoff-kernel-engineer` where kernel verbs are exercised.
+- Alt: **Epic C TASK-0012 (P0)** — new pure-Rust crate `crates/agent-env` (6-key+extends model,
+  multi-host resolver, SHA-256, lock; drop `mimalloc`; no-c clean). Large; gates TASK-0013..0018.
+  Route `feature-architect` → `rust-implementer` → `invariant-guardian`. Benefits from fresh context.
 
 ## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
 Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).

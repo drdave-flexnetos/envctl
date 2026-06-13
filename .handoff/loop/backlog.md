@@ -54,7 +54,7 @@ are **rendered by `hf`, never hand-written**.
     **`rusqlite`/`libsqlite3-sys` (bundled C SQLite, statically linked)**. Does NOT violate
     envctl's `no-c.sh` (separate `meta/handoff` workspace, not an envctl crate), but is relevant to
     Epic A's "pure-Rust, no C in the trust boundary" north star if the kernel itself must be C-free.
-- [!] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
+- [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
   - **BLOCKED 2026-06-13 (cycle 2, REVISED): installed `hf` is the S1 spike, missing the fleet
@@ -73,13 +73,20 @@ are **rendered by `hf`, never hand-written**.
     (A: build kernel fleet verbs [recommended]; B: seed the text subset now, defer the rest;
     C: rescope to required-text-core + central `hf fleet` render) →
     `.handoff/decisions/FINDING-0002-hf-ledger-residency-vs-repo-tier-a.md`.
+  - **UNBLOCKED 2026-06-13 (resume, owner "check now"): FINDING-0002 RESOLVED via Option A.** The
+    kernel built the fleet verbs — `meta/handoff` PR **#17** (`feat: fleet verbs hf fleet
+    status/render, hf sync`); installed `hf` rebuilt 2026-06-13 04:29. Verified live from `$META_ROOT`:
+    `hf fleet status` (fleet ledger present, 64 members enumerated), `hf fleet render envctl` (wrote
+    `packets/latest.md`), `hf sync --dry-run` (one-way `.kb` mirror). TASK-0002 is now executable as
+    written. Next Epic A cycle: seed the OPTIONAL `hooks/policies/skills` text + run
+    `hf fleet render envctl` / `hf sync` properly inside a worktree cycle and commit the artifacts.
   - GO-LIVE for `.handoff`↔`.kb` auto-sync: land/verify the kernel's `hf sync` (one-way `.kb`
     write-back, ADR-0003 HFTASK-0011) so the loop's `.handoff` cards/checkpoints sync to GitKB.
     NOTE: the broken `.kb` SessionStart hook was already FIXED (`meta/.claude/settings.json`:
     `git kb service` → guarded background `git kb serve`, meta main bf68d57) — code-intelligence
     indexing is independent and already live. Acceptance: `hf sync` reflects a checkpoint into `.kb`,
     making "auto-sync to .handoff and .kb" TRUE (the `/verify` finding).
-- [!] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
+- [ ] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
   `hf resume --json` succeeds + emits `handoff.packet.v2`).
   - **BLOCKED 2026-06-13 (cycle 2): depends on TASK-0002.** The schema/packet portion needs a seeded
     Tier-A layer (blocked above). The residency-invariant portion (assert no per-repo `ledger.db`
@@ -97,7 +104,15 @@ verify env health.
 - [x] `envctl env` — discover meta-root via `.meta.yaml` marker (`engine::dashboard::locate_meta_file`),
   emit `export META_ROOT=…` + meta tool dirs on PATH; `--toolchains`/`--materialize` (merged from
   feat/envctl-env, 2026-06-12).
-- [ ] **TASK-0004 (P0):** Wire `META_ROOT` into the env Claude inherits (login/session env envctl owns).
+- [x] **TASK-0004 (P0):** Wire `META_ROOT` into the env Claude inherits (login/session env envctl owns).
+  - DONE 2026-06-13 (resume cycle): added a top-level `"env": { "META_ROOT", "META_FILE" }` block to
+    `home/.claude/settings.json.tmpl` (rendered per-machine to absolute paths by the existing
+    `claude-global-links` `sed` render — the same path TASK-0005 uses); re-rendered the committed
+    `settings.json`. Claude Code applies settings `env` to every session, so every repo+meta session
+    now inherits `META_ROOT`/`META_FILE` with no hardcoding. Added a Rust drift-guard test
+    (`settings_json_matches_rendered_tmpl_no_drift`) asserting `settings.json == render(tmpl, root)`
+    + the env-block wiring (host-independent via the statusline anchor) — a guard that did not exist
+    before. Gate green: build (395 crates), `cargo test -p envctl` 7 pass, no-c/shape/enable PASS.
 - [x] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
   per-machine templating: statusline script + 2 plugin-marketplace dirs (HIGH — live source-of-truth file).
   - DONE 2026-06-13: `home/.claude/settings.json.tmpl` + `claude-global-links` per-machine render

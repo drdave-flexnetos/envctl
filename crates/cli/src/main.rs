@@ -487,6 +487,52 @@ mod env_cmd_tests {
         // embedded single quote: close, escaped quote, reopen
         assert_eq!(sh_single_quote("a'b"), "'a'\\''b'");
     }
+
+    /// Drift guard (TASK-0004 / TASK-0005): the live `home/.claude/settings.json` MUST
+    /// be exactly `settings.json.tmpl` rendered with `${META_ROOT}` -> this machine's
+    /// meta root — the `claude-global-links` component's `sed` render. Editing
+    /// settings.json directly, or changing the tmpl without re-rendering, breaks this.
+    /// Also pins the TASK-0004 env block that wires META_ROOT into the env Claude inherits.
+    #[test]
+    fn settings_json_matches_rendered_tmpl_no_drift() {
+        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../home/.claude/");
+        let tmpl = std::fs::read_to_string(format!("{base}settings.json.tmpl"))
+            .expect("read settings.json.tmpl");
+        let live =
+            std::fs::read_to_string(format!("{base}settings.json")).expect("read settings.json");
+
+        // Derive this machine's META_ROOT from the rendered statusline anchor so the
+        // test is host-independent (CI vs dev box have different absolute roots).
+        const SUFFIX: &str = "/.claude/statusline-command.sh\"";
+        let anchor = live
+            .lines()
+            .find(|l| l.contains(SUFFIX))
+            .expect("settings.json has a statusline command line");
+        let root = anchor
+            .rsplit_once("bash ")
+            .and_then(|(_, rest)| rest.strip_suffix(SUFFIX))
+            .expect("statusline anchor shape: \"bash <META_ROOT>/.claude/statusline-command.sh\"");
+
+        assert_eq!(
+            super::render_meta_root(&tmpl, root),
+            live,
+            "settings.json drifted from settings.json.tmpl — re-render it \
+             (sed 's|${{META_ROOT}}|<root>|g' settings.json.tmpl > settings.json)"
+        );
+        assert!(
+            !live.contains("${META_ROOT}") && !live.contains("$META_ROOT"),
+            "settings.json still has an unrendered META_ROOT token"
+        );
+        // TASK-0004: env block wires META_ROOT (+ META_FILE) into the env Claude inherits.
+        assert!(
+            tmpl.contains("\"META_ROOT\": \"${META_ROOT}\""),
+            "settings.json.tmpl must export META_ROOT via the env block (TASK-0004)"
+        );
+        assert!(
+            live.contains(&format!("\"META_ROOT\": \"{root}\"")),
+            "rendered settings.json must carry the absolute META_ROOT in its env block"
+        );
+    }
 }
 
 /// Mutating verbs: run on a worker thread, drain+print events on the main thread

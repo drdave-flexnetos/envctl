@@ -1,6 +1,12 @@
 # FINDING-0002 — TASK-0002 blocked: installed `hf` is the S1 spike, missing the fleet verbs
 
-- **Status:** NEEDS-DECISION (owner / kernel team) — blocks backlog **TASK-0002** (Epic A).
+- **Status:** **RESOLVED 2026-06-13 (Option A) — UNBLOCKS TASK-0002/0003.** The kernel built the
+  missing fleet verbs in `meta/handoff` PR **#17** (`feat: fleet verbs hf fleet status/render, hf
+  sync` + handoff-loop harness; handoff HEAD `1adbb13`); installed `hf` rebuilt 2026-06-13 04:29.
+  Verified live from `$META_ROOT` on resume (owner "check now"): `hf fleet status` (fleet ledger
+  present, 64 members enumerated), `hf fleet render envctl` (wrote `packets/latest.md`),
+  `hf sync --dry-run` (one-way `.kb` mirror). The S1-spike gap is closed; TASK-0002 is executable as
+  written. (Was: NEEDS-DECISION (owner / kernel team) — blocked TASK-0002, Epic A.)
 - **Date:** 2026-06-13 · **Surfaced by:** forge-loop agenticOS-consolidation cycle 2.
 - **REVISED 2026-06-13** after reading the authoritative design corpus (`~/Downloads/tmp/handoff` =
   Ark Handoff Ledger PRD v2 + schemas/templates) and `meta/handoff/docs/adr-0004-fleet-handoff-rollout.md`
