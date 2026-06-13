@@ -1,6 +1,6 @@
 [Unit]
 Description=env-ctl secrets vault + credential broker
-Documentation=file:///home/drdave/Desktop/meta/envctl/docs/ARCHITECTURE.md
+Documentation=https://github.com/FlexNetOS/envctl/blob/main/docs/ARCHITECTURE.md
 # No network ordering for the control/data planes (UDS + loopback). Only the relay HTTPS
 # edge needs the network, and that is operator-enabled, not a startup dependency.
 After=default.target

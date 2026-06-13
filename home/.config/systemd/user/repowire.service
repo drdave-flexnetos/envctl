@@ -7,12 +7,12 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/drdave/.local/bin/repowire serve
-Environment=PATH=/home/drdave/.local/bin:/home/drdave/.cargo/bin:/home/drdave/.local/bin:/home/drdave/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin
+ExecStart=%h/.local/bin/repowire serve
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 Restart=always
 RestartSec=5
-StandardOutput=append:/home/drdave/.repowire/daemon.log
-StandardError=append:/home/drdave/.repowire/daemon.log
+StandardOutput=append:%h/.repowire/daemon.log
+StandardError=append:%h/.repowire/daemon.log
 
 [Install]
 WantedBy=default.target
