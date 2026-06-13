@@ -19,3 +19,7 @@ Cargo.lock.bak
 # ADR-0004 fail-safe: a per-repo .handoff is git-committed TEXT ONLY — the witnessed ledger lives
 # at $META_ROOT/.handoff/ledger.db, never here. Never commit a binary ledger into this repo.
 .handoff/**/ledger.db
+
+# rust-port harness loop run logs (state files ARE tracked; logs are not)
+.handoff/loop/*.log
+.handoff/loop/ralph-run-*.log
