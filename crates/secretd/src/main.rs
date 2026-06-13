@@ -140,8 +140,12 @@ async fn serve() -> anyhow::Result<()> {
     let owner_uid = peercred::owner_uid();
     tracing::info!(socket = %sock.display(), owner_uid, "secretd listening");
 
-    // Graceful shutdown on SIGINT / SIGTERM.
-    let shutdown = async {
+    // Graceful shutdown on SIGINT / SIGTERM, FANNED OUT to both servers (gRPC control plane + relay
+    // proxy) via a broadcast: a single signal task fires once, and each server awaits its own
+    // receiver so neither steals the signal from the other.
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+    let signal_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
         let mut sigterm =
             match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
                 Ok(s) => s,
@@ -153,6 +157,34 @@ async fn serve() -> anyhow::Result<()> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT received; shutting down"),
             _ = sigterm.recv() => tracing::info!("SIGTERM received; shutting down"),
+        }
+        let _ = signal_tx.send(());
+    });
+    let recv_shutdown = |mut rx: tokio::sync::broadcast::Receiver<()>| async move {
+        let _ = rx.recv().await;
+    };
+    let grpc_shutdown = recv_shutdown(shutdown_tx.subscribe());
+
+    // Relay data-plane proxy (PR-2a): bind an ephemeral loopback port and serve it under the SAME
+    // graceful shutdown, alongside the gRPC control plane. Publish the bound 127.0.0.1:<port> into
+    // the shared DaemonState so PR-2b's Relay.Mint can repoint the child at it. A bind failure is
+    // logged but NOT fatal — the control plane still serves (the proxy is opt-in via `env-ctl run`).
+    let state = envctl_secretd::grpc::DaemonState::default();
+    let proxy_handle = match envctl_secretd::proxy::serve_proxy(
+        engine.clone(),
+        owner_uid,
+        recv_shutdown(shutdown_tx.subscribe()),
+    )
+    .await
+    {
+        Ok((addr, handle)) => {
+            let _ = state.proxy_addr.set(addr);
+            tracing::info!(proxy = %addr, "relay proxy listening (loopback)");
+            Some(handle)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "relay proxy failed to bind (control plane continues)");
+            None
         }
     };
 
@@ -166,12 +198,17 @@ async fn serve() -> anyhow::Result<()> {
         tracing::warn!(error = %e, "sd_notify READY failed (continuing to serve)");
     }
 
-    let result = server::serve(engine, owner_uid, listener, shutdown).await;
+    let result = server::serve_with_state(engine, owner_uid, listener, state, grpc_shutdown).await;
 
     // STOPPING=1 on graceful shutdown so systemd does not race the teardown against a restart. No-op
     // without `$NOTIFY_SOCKET`; best-effort.
     if let Err(e) = sd_notify::notify(&[sd_notify::NotifyState::Stopping]) {
         tracing::warn!(error = %e, "sd_notify STOPPING failed");
+    }
+
+    // Wait for the relay proxy task to wind down under the shared shutdown before exiting.
+    if let Some(handle) = proxy_handle {
+        let _ = handle.await;
     }
 
     // Best-effort cleanup of the socket on graceful exit.
@@ -191,7 +228,8 @@ async fn build_engine(paths: Paths, cfg: config::StoreConfig) -> anyhow::Result<
             tracing::info!(
                 "store backend = in-memory (ephemeral; set [store] in secretd.toml for durability)"
             );
-            Engine::open(paths).context("opening the engine on the in-memory store")
+            engine_with_daemon_seams(paths, Box::new(envctl_secrets::vault::InMemStore::new()))
+                .context("opening the engine on the in-memory store")
         }
         config::Backend::LibSql => {
             let url = cfg
@@ -206,13 +244,31 @@ async fn build_engine(paths: Paths, cfg: config::StoreConfig) -> anyhow::Result<
                 )
                 .build()
                 .context("opening the libSQL remote store (is sqld reachable?)")?;
-                Engine::open_with_store(paths, Box::new(store))
+                engine_with_daemon_seams(paths, Box::new(store))
                     .context("opening the engine on the libSQL store")
             })
             .await
             .context("the libSQL store-construction task panicked")?
         }
     }
+}
+
+/// Open the engine with the DAEMON's real seams: `SystemClock`, `RealUsbProbe`, `NoMint`, and — the
+/// PR-2a addition — the [`proxy::DaemonUpstream`] egress sender (webpki-roots TLS, FS-S7) in place of
+/// the engine's default `NullUpstream`. This is the ONLY place the live egress seam is installed; the
+/// engine API is untouched (the seam is injected through the public `Engine::with_seams`).
+fn engine_with_daemon_seams(
+    paths: Paths,
+    store: Box<dyn envctl_secrets::vault::Store>,
+) -> anyhow::Result<Engine> {
+    Engine::with_seams(
+        paths,
+        store,
+        Box::new(envctl_secrets::seam::SystemClock),
+        Box::new(envctl_secrets::seam::RealUsbProbe),
+        Box::new(envctl_secrets::seam::NoMint),
+        Box::new(envctl_secretd::proxy::DaemonUpstream::new()),
+    )
 }
 
 /// `RLIMIT_CORE=0` (no core dumps that could leak key material) + raise `RLIMIT_MEMLOCK` so a

@@ -30,6 +30,10 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 webpki-roots = { workspace = true }   # frozen upstream root store (FS-S7)
+# proxy.rs impls the engine's `Upstream` trait, declared with #[async_trait]. Already in the resolved
+# workspace graph (the engine depends on it); promoting it to a normal dep adds NO new crate to the
+# lockfile and is pure-Rust proc-macro (no C / no rustls — the no-c gate is unaffected).
+async-trait = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
