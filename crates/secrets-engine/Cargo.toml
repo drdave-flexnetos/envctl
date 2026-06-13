@@ -15,6 +15,7 @@ inmem-store = []                       # RAM-only vault for tests/CI (envctl Dry
 mitm-ca = ["dep:rcgen", "dep:x509-parser", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types"]
 provider-github = ["dep:rsa", "dep:base64"]   # RS256 App-JWT → installation token (src/mint_github.rs)
 provider-openai = []
+seed-factor = []                       # Cognitum Seed USB possession factor (opt-in; shells to system `ssh`, no linked dep — no-C gate stays green). See PLAN-cognitum-seed-envctl-vault-factor.md
 
 [dependencies]
 serde = { workspace = true }
