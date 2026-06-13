@@ -111,6 +111,21 @@ conventions (camelCase, `*.test.ts`, JS imports) — those are **wrong for this 
 - The manifest dir defaults to `./manifest` (override with `ENVCTL_MANIFEST_DIR`).
 - Logging: `RUST_LOG` (e.g. `RUST_LOG=envctl_engine=debug`).
 
+## meta mission-control dashboard (zellij layout)
+
+The `dashboard` component (`manifest/dashboard.toml`) installs two launchers on `~/.local/bin`:
+- `envctl-dashboard-pane <repo>` — called by every pane in the generated zellij
+  `mission-control.kdl` layout.
+- `envctl-open-claude` — run by a human inside a pane when they actually want a
+  Claude session.
+
+**Default behavior:** dashboard panes open a plain shell, not an idle Claude session.
+`envctl-dashboard-pane` only starts `claude` when `ENVCTL_DASHBOARD_AUTO_CLAUDE=1`
+is set. This prevents accidental background Claude sessions and auto-spawn loops.
+To start Claude in a pane, run `envctl-open-claude` (which sets the opt-in env var
+and preserves the pane's mesh identity: `META_REPO`, `MESH_IDENTITY`, `WEAVE_*`,
+`REPOWIRE_*`).
+
 ## Harness: Feature Forge (the construction crew)
 
 **Goal:** turn a feature / upgrade / design request into invariant-verified working Rust, fast —
@@ -155,3 +170,4 @@ general "`.claude/skills/*` are kasetto-generated" rule above — the kasetto-ma
 | 2026-06-05 | Add component-research/audit phase (auto-append upgrades to backlog) | skills/env-install-loop; skills/auto-provision (+scripts/ralph-provision.sh) | Generalize the manual pytorch deep-dive (shallow gate, no-CUDA-assert, verify side-effect, toolkit↔driver skew) into a loop phase: subagents deep-probe each component past detect/verify (real exercise, gate quality, version currency+advisories, cross-component skew, hook hygiene, wiring reach) and append evidence-based, owner-classified items (`harden:`/`fix:`/`upgrade:` loop-fixable; `feature:` routed to feature-forge). Two-tier DONE (Tier-1 provisioned vs Tier-2 upgrades-resolved/routed). `research=` arg + `RALPH_RESEARCH` toggle (default on) |
 | 2026-06-05 | Add A2 cross-repo parallel build (default-OFF, scale auto-trigger) | skills/{feature-forge,forge-loop,session-relay}; agents/{rust-implementer,continuity-steward} | Cross-repo parallelism via the three-owner split — **meta** owns the coordinated worktree set (one independent branch per repo → no cross-repo conflict by construction) + aggregation (`meta --json git worktree exec --parallel`), **grit** owns intra-repo `file::symbol` locks only (Option X: `init/claim/release/heartbeat/gc/status/queue`, never `done`/`session`/`worktree`), the **orchestrator** owns the guardian gate (only it commits/merges/PRs, only after that repo's guardian PASSes). Auto-trigger by scale (1 repo ≤3 mod → sequential DEFAULT; 1 repo >3 mod → `Workflow.pipeline`; >1 repo → A2) with `FORGE_PARALLEL=0` escape hatch; sequential single-crew unchanged when no >1-repo trigger fires. PR-1 = minimal-coherent foundation (envctl-style gate scope + schema/2-repo continuity demo); per-repo gate contracts, grit-lifecycle inversion, full N-branch resume, dep-ordered fan-out staged to PR-2..5 |
 | 2026-06-08 | Add grit-harness-parallel opt-in mode | skills/{feature-forge,forge-loop} | Adopt grit's claim→work→done AST git-lock coordination into the harness for parallel multi-repo implementations: `grit init` (idempotent), file::symbol claims, --queue for contested symbols, --with-deps for dependency-aware locks. Opt-in via USE_GRIT=1; default single-implementer path unchanged. |
+| 2026-06-12 | Dashboard panes default to shell; require human opt-in for Claude | assets/scripts/envctl-dashboard-pane; assets/scripts/envctl-open-claude; manifest/dashboard.toml | Prevent auto-spawn of idle Claude sessions in every zellij mission-control pane. A human must run `envctl-open-claude` to start a session. See incident audit `CLAUDE-SESSION-AUDIT-2026-06-12.md` §10.4. |

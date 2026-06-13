@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# envctl-open-claude — human-triggered Claude launcher for a dashboard pane.
+#
+# The zellij mission-control layout now defaults every repo pane to a plain
+# shell (envctl-dashboard-pane no longer auto-starts claude). Run this wrapper
+# from inside a pane when you actually want an idle Claude session. It re-uses
+# the mesh identity env vars already exported by envctl-dashboard-pane
+# (META_REPO, MESH_IDENTITY, WEAVE_*, REPOWIRE_*) so the session registers the
+# correct per-repo peer.
+#
+# Usage:
+#   envctl-open-claude
+#
+# Equivalent to:
+#   ENVCTL_DASHBOARD_AUTO_CLAUDE=1 exec claude
+
+set -euo pipefail
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "envctl-open-claude: 'claude' not found on PATH" >&2
+  exit 1
+fi
+
+export ENVCTL_DASHBOARD_AUTO_CLAUDE=1
+export DASHBOARD_PANE=1
+exec claude

@@ -4,10 +4,12 @@
 # `command=` at this script with the repo id as its single argument.
 #
 # Responsibility: establish the per-repo MESH IDENTITY environment (weave +
-# repowire), then `exec` an IDLE agent session for that repo. It does NOT start an
-# autonomous loop — opening a pane drops you into an idle `claude` you can drive by
-# hand (escalatable to forge-loop / env-install-loop later via
-# $ENVCTL_DASHBOARD_PANE_CMD).
+# repowire), then either `exec` an IDLE agent session for that repo or drop to a
+# shell. It does NOT start an autonomous loop. By default a pane now drops to a
+# plain shell; a human must explicitly opt in to start `claude` by setting
+# $ENVCTL_DASHBOARD_AUTO_CLAUDE=1 (or by running the `envctl-open-claude`
+# wrapper). The legacy $ENVCTL_DASHBOARD_PANE_CMD override still works for
+# escalating to forge-loop / env-install-loop.
 #
 # Config asset (not engine logic): pure shell, sanctioned like the other
 # assets/scripts/*.sh wrappers. No language drift — the GENERATOR is Rust.
@@ -61,16 +63,18 @@ if [ "$REPO_ID" = "overview" ]; then
 fi
 
 # --- the per-pane command (overridable to escalate) ---
-# Default: an idle interactive `claude` session in this repo. Override with
-# ENVCTL_DASHBOARD_PANE_CMD to run e.g. a forge-loop or env-install-loop instead.
-# The override inherits the mesh identity env exported above.
+# Priority:
+#   1. $ENVCTL_DASHBOARD_PANE_CMD (legacy escape hatch to forge-loop etc.)
+#   2. $ENVCTL_DASHBOARD_AUTO_CLAUDE=1 + claude on PATH -> start idle claude
+#   3. otherwise -> drop to a plain shell (human must explicitly start claude)
 if [ -n "${ENVCTL_DASHBOARD_PANE_CMD:-}" ]; then
   exec bash -c "$ENVCTL_DASHBOARD_PANE_CMD"
 fi
 
-if command -v claude >/dev/null 2>&1; then
+if [ "${ENVCTL_DASHBOARD_AUTO_CLAUDE:-0}" = "1" ] && command -v claude >/dev/null 2>&1; then
   exec claude
-else
-  echo "envctl-dashboard-pane: 'claude' not found on PATH for $REPO_ID — dropping to a shell." >&2
-  exec "${SHELL:-/usr/bin/env bash}"
 fi
+
+# Default: idle shell. The mesh identity env vars remain exported so a later
+# `envctl-open-claude` invocation in this pane still registers the correct peer.
+exec "${SHELL:-/usr/bin/env bash}"

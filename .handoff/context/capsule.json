@@ -1,10 +1,12 @@
 {
   "schema": "handoff.context_capsule.v1",
   "project_name": "envctl",
-  "role": "Meta environment manager: env injection, secretd (phases 1-5 sanctioned), kasetto agent-env seam (manifest/agent-env.toml, sync --locked), USB secret-key vault.",
+  "role": "Pure-Rust Cargo workspace (8 crates) that declaratively manages this dual-RTX-5090 box: env-manager (engine+cli+gui — TOML components; verbs auto-detect/install/auto-fix/reset/doctor/dashboard) + secrets stack (secrets-engine pure-Rust vault, secretd/secretctl gRPC, libSQL remote). It owns the meta environment boundary — PATH, dotfiles, ~/.local, and the canonical home tree (envctl/home, ADR-0006) that ~/.claude/{settings.json,CLAUDE.md,RTK.md} and meta/settings.json symlink into; it holds secrets and auto-injects them on demand.",
   "plane": "env-control",
   "tier": "B",
-  "northstar": "One env-control story: envctl injects/relays secrets, kasetto provisions agent assets; COGNITUM seeds the vault.",
-  "next_command": "W1: wire secret injection/relay into loop secrets; COGNITUM advanced setup (GAP #15)",
-  "source": "ARCHITECTURE-TRUTH.md census 2026-06-12"
+  "northstar": "envctl owns and contains the meta environment: every FlexNetOS tool/dotfile/.local/bin resolves inside meta; user-global ($HOME/.local, ~/.claude) holds ONLY symlinks into meta; envctl exports META_ROOT (resolved from the .meta.yaml marker, like meta_core's META_DATA_DIR) so no config hardcodes paths; secrets are held and auto-injected. Heal not harm; never downgrade; never delete (archive).",
+  "next_command": "Plan in kb first (git kb board); mint execution cards via hf (ADR-0003). CURRENT MISSION = runaway-session containment (2026-06-12). NEXT UNIT: env-ownership build-out — add `envctl env` to export META_ROOT from the .meta.yaml marker (reuse engine::dashboard::locate_meta_file), own PATH to meta tool dirs, idempotently regenerate ~/.local/bin symlinks from META_ROOT, and heal the 3 remaining hardcoded settings.json refs (statusline + 2 marketplace dirs). THEN Phase-2 tool relocation, never-downgrade (sync meta source up to the installed version FIRST: kasetto 3.0.0<3.1.0, rtk 0.42.0<0.42.2; git-kb/forge provenance unresolved; rtk is hook-critical = supervised).",
+  "source": "ARCHITECTURE-TRUTH.md census 2026-06-12 + runaway-session containment mission",
+  "loop": ".handoff/loop/ — ACTIVE loop = env-ownership + Phase-2 tool relocation (backlog.md, loop_state.md); the auto-loop delivers from this witnessed backlog. The prior dashboard forge-loop (terminal-DONE 2026-06-05, migrated from deprecated _workspace/ per HARNESS-UPGRADE-KIT v2 / ADR-0004) is archived in loop/_done/.",
+  "done_this_mission": "ICM recursion root-cause fixed + live (icm 9da001d, 232 tests); SessionEnd hook re-enabled safely (envctl 757707c); settings tool-hooks de-hardcoded to bare-name-via-PATH (envctl 2bf6a28)."
 }

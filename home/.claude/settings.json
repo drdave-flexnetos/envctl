@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook post"
+            "command": "icm hook post"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook compact"
+            "command": "icm hook compact"
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook pre"
+            "command": "icm hook pre"
           }
         ]
       }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook end"
+            "command": "icm hook end"
           }
         ]
       }
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/home/drdave/Desktop/meta/weave/target/release/weave' hook session"
+            "command": "weave hook session"
           }
         ]
       },
@@ -102,7 +102,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook start"
+            "command": "icm hook start"
           }
         ]
       }
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/home/drdave/Desktop/meta/weave/target/release/weave' hook wake"
+            "command": "weave hook wake"
           }
         ]
       },
@@ -159,7 +159,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/home/drdave/Desktop/meta/weave/target/release/weave' hook prompt"
+            "command": "weave hook prompt"
           }
         ]
       },
@@ -167,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook prompt"
+            "command": "icm hook prompt"
           }
         ]
       }
@@ -178,7 +178,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/home/drdave/Desktop/meta/weave/target/release/weave' hook wake"
+            "command": "weave hook wake"
           }
         ]
       }
