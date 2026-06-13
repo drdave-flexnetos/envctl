@@ -12,7 +12,7 @@ path = "src/lib.rs"
 [features]
 default = ["inmem-store", "mitm-ca"]   # default store is inmem until OI-1 is ruled (no C dep ships)
 inmem-store = []                       # RAM-only vault for tests/CI (envctl DryRunRunner analogue)
-mitm-ca = ["dep:rcgen", "dep:x509-parser", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types"]
+mitm-ca = ["dep:rcgen", "dep:x509-parser", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types", "dep:time"]
 provider-github = ["dep:rsa", "dep:base64"]   # RS256 App-JWT → installation token (src/mint_github.rs)
 provider-openai = []
 seed-factor = ["dep:ring"]             # Cognitum Seed USB possession factor (opt-in; shells to system `ssh` + ring Ed25519 verify for Profile S — ring is the sanctioned pure-Rust verifier, no-C gate stays green). See PLAN-cognitum-seed-envctl-vault-factor.md
@@ -42,6 +42,9 @@ rustls-pemfile = { workspace = true, optional = true }
 rustls-pki-types = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 x509-parser = { workspace = true, optional = true }
+# Sub-day (hours-granular) cert validity windows for mitm-ca leaves. Pure-Rust, no C; already in the
+# resolved graph transitively (via x509-parser's asn1-rs). default-features=false drops std/macros.
+time = { version = "0.3", optional = true, default-features = false }
 # GitHub App-JWT mint (provider-github) — pure-Rust RustCrypto; no C in the trust boundary
 rsa = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
