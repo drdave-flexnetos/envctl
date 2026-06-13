@@ -64,7 +64,7 @@ impl UsbProbe for RealUsbProbe {
 /// none of it. See `PLAN-cognitum-seed-envctl-vault-factor.md` (meta root) for the design + spike
 /// evidence.
 #[cfg(feature = "seed-factor")]
-mod seed_factor {
+pub(crate) mod seed_factor {
     use zeroize::Zeroizing;
 
     /// SSH target for the Seed; overridable for mDNS / WiFi addressing. Default is the USB
@@ -82,7 +82,7 @@ mod seed_factor {
 
     /// Decode a 128-char hex Ed25519 signature into 64 bytes. `None` on any malformed input
     /// (wrong length / non-hex) — fail-closed.
-    pub(super) fn parse_sig_hex(s: &str) -> Option<[u8; 64]> {
+    pub(crate) fn parse_sig_hex(s: &str) -> Option<[u8; 64]> {
         let s = s.trim();
         if s.len() != 128 {
             return None;
@@ -113,16 +113,14 @@ printf '%s' "$S" | grep -oE '"signature"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]+"'
         )
     }
 
-    /// Resolve the USB keyslot keyfile from the Seed. `partition_uuid` binds the derived KEK to the
-    /// specific slot. Returns `None` on any failure (Seed unreachable, unpaired, malformed) so the
-    /// engine fails closed.
-    ///
-    // HARDENING (follow-up): verify the returned signature against the Seed's pinned Ed25519 device
-    // public key before use, for a clean possession error instead of a downstream KEK mismatch.
-    pub(super) fn keyfile_for(partition_uuid: &str) -> Option<Zeroizing<Vec<u8>>> {
+    /// Sign arbitrary `data` with the Seed's Ed25519 device key over the documented SSH path and
+    /// return the 128-char hex signature. `None` on any failure (Seed unreachable / unpaired /
+    /// empty). Single SSH+sign implementation shared by the KEK probe and the presence gate
+    /// (Profile S).
+    pub(crate) fn sign_hex(data: &str) -> Option<String> {
         use std::io::Write;
         let target = ssh_target();
-        let script = device_script(&kek_context(partition_uuid));
+        let script = device_script(data);
         let mut child = std::process::Command::new("ssh")
             .args([
                 "-o",
@@ -142,7 +140,22 @@ printf '%s' "$S" | grep -oE '"signature"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]+"'
         if !out.status.success() {
             return None;
         }
-        let sig = parse_sig_hex(&String::from_utf8_lossy(&out.stdout))?;
+        let hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if hex.is_empty() {
+            None
+        } else {
+            Some(hex)
+        }
+    }
+
+    /// Resolve the USB keyslot keyfile from the Seed: the deterministic signature over the
+    /// PARTUUID-bound KEK context, as 64 raw bytes. `partition_uuid` binds the derived KEK to the
+    /// specific slot. Returns `None` on any failure so the engine fails closed.
+    ///
+    // HARDENING (follow-up): verify the returned signature against the Seed's pinned Ed25519 device
+    // public key before use, for a clean possession error instead of a downstream KEK mismatch.
+    pub(super) fn keyfile_for(partition_uuid: &str) -> Option<Zeroizing<Vec<u8>>> {
+        let sig = parse_sig_hex(&sign_hex(&kek_context(partition_uuid))?)?;
         Some(Zeroizing::new(sig.to_vec()))
     }
 
