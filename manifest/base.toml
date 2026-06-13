@@ -69,9 +69,10 @@ requires = ["bun"]
 [component.detect]
 kind = "command"
 command = "bash"
-# Check the symlink directly (robust regardless of PATH: ~/.bun/bin is only on
-# PATH via the ~/.bashrc block, which login shells like `bash -lc` don't source).
-args = ["-lc", "{ command -v node || echo \"$HOME/.bun/bin/node\"; } | { read n; [ -x \"$n\" ] && readlink -f \"$n\" 2>/dev/null | grep -q bun; }"]
+# Truthful: node-compat is satisfied if EITHER ~/.bun/bin/node points at bun
+# (the bun node shim) OR a real `node` resolves on PATH. On an n8n box the real
+# node (~/.local/bin/node) precedes the inert bun symlink — that still counts.
+args = ["-lc", "{ [ -x \"$HOME/.bun/bin/node\" ] && readlink -f \"$HOME/.bun/bin/node\" 2>/dev/null | grep -q bun; } || command -v node >/dev/null"]
 [component.install]
 kind = "command"
 command = "bash"
@@ -79,7 +80,10 @@ args = ["-lc", "ln -sf \"$(command -v bun || echo \"$HOME/.bun/bin/bun\")\" \"$H
 [component.verify]
 kind = "command"
 command = "bash"
-args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; node --version"]
+# Bun's node shim runs `node <script>` but NOT `node --version`. A real node also
+# runs `node -e`. So `node -e` is the honest node-compat smoke test for BOTH
+# runtimes. Prefer a real node if one is on PATH; else fall back to the bun shim.
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$PATH\"; node -e 'process.exit(0)'"]
 [component.fix]
 kind = "command"
 command = "bash"
@@ -88,6 +92,48 @@ args = ["-lc", "ln -sf \"$HOME/.bun/bin/bun\" \"$HOME/.bun/bin/node\""]
 kind = "command"
 command = "bash"
 args = ["-lc", "rm -f \"$HOME/.bun/bin/node\""]
+
+
+[[component]]
+id = "node-real"
+name = "Real Node.js (n8n V8 runtime)"
+description = "Real Node 20-24 for tools that need V8 (n8n's isolated-vm). Bun (JSC) cannot satisfy these; this is the narrow non-bun carve-out. Bun remains the default JS runtime."
+[component.detect]
+kind = "command"
+command = "bash"
+# A REAL node (not the bun shim) in n8n's supported range 20-24.
+args = ["-lc", "command -v node >/dev/null && ! readlink -f \"$(command -v node)\" 2>/dev/null | grep -q bun && node -e 'const m=+process.versions.node.split(\".\")[0]; process.exit(m>=20 && m<=24 ? 0 : 1)'"]
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "node -e 'const m=+process.versions.node.split(\".\")[0]; process.exit(m>=20 && m<=24 ? 0 : 1)'"]
+[component.install]
+kind = "script"
+# Install a real Node 22 LTS into ~/.local without touching bun. nvm-free, no sudo.
+script = '''
+set -e
+VER=v22.22.3
+ARCH="$(uname -m)"; case "$ARCH" in x86_64) A=x64;; aarch64) A=arm64;; *) A="$ARCH";; esac
+cd "$(mktemp -d)"
+curl -fsSL -o node.tar.xz "https://nodejs.org/dist/$VER/node-$VER-linux-$A.tar.xz"
+mkdir -p "$HOME/.local"
+tar -xJf node.tar.xz --strip-components=1 -C "$HOME/.local"
+'''
+[component.fix]
+kind = "script"
+script = '''
+set -e
+VER=v22.22.3
+ARCH="$(uname -m)"; case "$ARCH" in x86_64) A=x64;; aarch64) A=arm64;; *) A="$ARCH";; esac
+cd "$(mktemp -d)"
+curl -fsSL -o node.tar.xz "https://nodejs.org/dist/$VER/node-$VER-linux-$A.tar.xz"
+mkdir -p "$HOME/.local"
+tar -xJf node.tar.xz --strip-components=1 -C "$HOME/.local"
+'''
+# NOTE: no `remove` hook by design — n8n depends on real node; removal is not a
+# managed operation here (avoids a footgun that would break n8n).
+[component.wiring]
+path_entries = ["~/.local/bin"]
 
 
 [[component]]

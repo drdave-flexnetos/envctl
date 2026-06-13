@@ -112,8 +112,8 @@ script = "curl -fsSL https://cli.devin.ai/install.sh | bash"
 [[component]]
 id = "group-ai-clis"
 name = "All AI CLIs"
-description = "Meta: claude + codex + gemini + kimi + devin (+ node-via-bun)."
-requires = ["node-via-bun", "claude-code-cli", "codex-cli", "gemini-cli", "kimi-cli", "devin-cli"]
+description = "Meta: claude + codex + gemini + kimi + devin (codex/gemini via bun)."
+requires = ["claude-code-cli", "codex-cli", "gemini-cli", "kimi-cli", "devin-cli"]
 [component.detect]
 kind = "command"
 command = "bash"
