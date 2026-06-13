@@ -235,6 +235,7 @@ impl v1::vault_server::Vault for VaultSvc {
 #[derive(Clone)]
 pub struct RelaySvc {
     pub engine: Engine,
+    pub state: DaemonState,
 }
 
 #[tonic::async_trait]
@@ -324,6 +325,10 @@ impl v1::relay_server::Relay for RelaySvc {
         // Phase 6: no public policy load, so synthesize the policy from the request. `relay_mint`
         // persists it as a side effect and mints a <=24h, USB-gated, peer-bound bearer against it.
         let spec = conv::mint_req_to_policy(&req);
+        // Capture the provider + data-plane mode BEFORE the spec is moved into the blocking closure;
+        // they shape the child env injection built once the bearer is minted.
+        let provider = spec.provider;
+        let mode = conv::dataplane_mode_from_swap(&spec.swap);
         let engine = self.engine.clone();
 
         let bearer = tokio::task::spawn_blocking(move || {
@@ -334,11 +339,33 @@ impl v1::relay_server::Relay for RelaySvc {
         .map_err(join_err)?
         .map_err(|e| Status::permission_denied(e.to_string()))?;
 
+        // PR-2b: build the child env injection so `env-ctl run` repoints the child at the loopback
+        // relay proxy and overlays the BEARER (never the real key). FAIL-CLOSED: if the proxy has not
+        // bound (no `proxy_addr`), we ship `injection: None` rather than fabricating an address — the
+        // client then refuses to spawn rather than hand the child a half-built env.
+        let injection = match self.state.proxy_addr.get() {
+            Some(addr) => {
+                let proxy_url = format!("http://{addr}");
+                // `ca_pem_path` is empty for the BaseUrlRepoint plane (no MITM CA); a future MITM plane
+                // (PR-3) supplies the engine-minted CA path here.
+                let ca_pem_path = "";
+                let resolved = envctl_secrets::inject::injection_template(
+                    provider,
+                    &bearer.raw,
+                    &proxy_url,
+                    ca_pem_path,
+                    mode,
+                );
+                Some(conv::injection_to_proto(&resolved))
+            }
+            None => None,
+        };
+
         // The raw bearer goes to the OWNER only (peercred-gated UDS); the REAL key is NEVER here.
         Ok(Response::new(v1::MintResp {
             bearer: bearer.raw.to_string(),
             expires_at: bearer.expires_at,
-            injection: None, // injection_template is not wired in Phase 6
+            injection,
             token_id: bearer.token_id,
         }))
     }
