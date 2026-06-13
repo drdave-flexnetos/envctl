@@ -23,21 +23,30 @@ without changing the agent definitions.
 
 | Phase | Agent | Type | Mutates? | Produces |
 |-------|-------|------|----------|----------|
-| Design | `feature-architect` | Plan | no | `_workspace/01_architect_plan.md` |
-| Build | `rust-implementer` | general-purpose | **yes** | code + `_workspace/02_implementer_log.md` |
-| Verify | `invariant-guardian` | general-purpose | no | `_workspace/03_guardian_report.md` |
-| Continuity | `continuity-steward` | general-purpose | no (writes checkpoint) | `_workspace/HANDOFF.md` |
+| Design | `feature-architect` | Plan | no | `.handoff/loop/cycle/01_architect_plan.md` |
+| Build | `rust-implementer` | general-purpose | **yes** | code + `.handoff/loop/cycle/02_implementer_log.md` |
+| Verify | `invariant-guardian` | general-purpose | no | `.handoff/loop/cycle/03_guardian_report.md` |
+| Continuity | `continuity-steward` | general-purpose | no (writes checkpoint) | `.handoff/loop/HANDOFF.md` |
 
 The implementer follows the **`rust-feature-impl`** skill; the guardian runs that skill's
 `references/verification.md` recipe. Conventions come from **`agent-env-config`**. The
 `continuity-steward` is used only in **continuous mode** at a session handoff (see below).
+
+**Epic C routing (kasetto absorption / agent-env).** When the item's scope is the agent-env crate
+or kasetto absorption (backlog Epic C, TASK-0011…0018), route **all three** crew members at
+`rust-feature-impl`'s `references/kasetto-absorption.md` — the no-downgrade playbook (11 kasetto
+verbs incl. v3.1 add/remove/lock; the 11→6 verb mapping; drop-mimalloc; SHA-256 agent-asset lock
+alongside the untouched FNV-1a component lock; additive/never-clobber MCP merge that preserves
+global broker/repowire/weave). The architect plans against it, the implementer builds against it,
+and the guardian asserts the no-downgrade checklist. Skipping it silently drops v3.1+ kasetto
+features.
 
 ## Single feature vs. continuous loop
 - **One feature** (default): run Phases 0–4 below once and stop.
 - **Continuous / autonomous over a backlog:** drive this same pipeline in a loop via the
   **`forge-loop`** skill (the Ralph loop) — each iteration runs one full cycle on the next backlog
   item, checkpoints, and self-paces. At a per-session **cycle budget**, `forge-loop` invokes
-  **`session-relay`**, which spawns `continuity-steward` to write `_workspace/HANDOFF.md`, announces
+  **`session-relay`**, which spawns `continuity-steward` to write `.handoff/loop/HANDOFF.md`, announces
   the transfer over **weave**, and schedules a **durable-cron** successor session to continue —
   keeping every session short and cheap (the defense against context rot + token burn). When asked
   to "keep building"/"loop"/"run unattended", start with `forge-loop`, not this skill directly.
@@ -48,26 +57,32 @@ The implementer follows the **`rust-feature-impl`** skill; the guardian runs tha
    on a clean branch (`git status`), not a stale/dirty `master`. If not, create one
    (`meta git worktree create <slug> --all`, or `git worktree add ../envctl-<slug> -b <slug>`)
    before any mutation.
-2. **Context check** — decide the run mode from `_workspace/`:
-   - **`_workspace/HANDOFF.md` exists, or the request says "resume"/came from a relay cron/weave
+2. **Context check** — decide the run mode from `.handoff/loop/`:
+   - **`.handoff/loop/HANDOFF.md` exists, or the request says "resume"/came from a relay cron/weave
      nudge → Resume:** hand control to the `session-relay` skill's RESUME protocol (read the
      checkpoint + weave inbox, verify baseline, ack, reset the per-session cycle counter), then
      continue the loop via `forge-loop`. Do not start a fresh pipeline.
-   - No `_workspace/` → **Initial run** (full pipeline).
-   - `_workspace/` exists + user asks for a *partial* change ("redo just the implementation",
+   - No `.handoff/loop/cycle/` → **Initial run** (full pipeline).
+   - `.handoff/loop/cycle/` exists + user asks for a *partial* change ("redo just the implementation",
      "fix the guardian's findings") → **Partial re-run**: re-invoke only the relevant agent(s),
      feeding them the existing artifacts.
-   - `_workspace/` exists + a *new, unrelated* feature → **New run**: move the old `_workspace/`
-     to `_workspace_prev/`, then start fresh.
+   - `.handoff/loop/cycle/` exists + a *new, unrelated* feature → **New run**: archive the old loop
+     artifacts to `.handoff/loop/_done/<slug>.<UTC-date>.*` via `git mv` (preserves history, matches
+     the existing `_done/` convention), then start fresh.
 3. **Scope the request.** If it's a one-line question or a trivial typo, answer/do it directly —
    don't spin up the crew for something that doesn't need it.
+
+**hf-aware context check.** When `hf` is on PATH, the context check is hf-aware: pick the next item
+via `hf resume --json` (its dep-DAG `next_task_id`/`next_command` picker) rather than re-deriving
+order from the markdown backlog; the markdown-checkbox read is the fallback only when `hf` is
+absent. (Per-cycle hf verb details are owned by `forge-loop` — do not duplicate them here.)
 
 ## Phase 1: Design (feature-architect)
 
 Spawn `feature-architect` with the verbatim request. It reads the code (code-intelligence, not
 grep), the relevant `docs/`, and verifies external APIs against primary sources. The `Plan` agent
 type is **read-only and cannot Write**, so the architect **returns** the plan as text and **you
-(the orchestrator) persist it** to `_workspace/01_architect_plan.md`. Read its leading
+(the orchestrator) persist it** to `.handoff/loop/cycle/01_architect_plan.md`. Read its leading
 **VERDICT: GO / NEEDS-DECISION**.
 
 - **NEEDS-DECISION** → surface the architect's open questions to the user and stop; resume when
@@ -95,10 +110,18 @@ shape; the default is unchanged.
 the default). If no `## Target repos` section is present, treat it as 1 repo ≤3 modules and run
 sequentially.
 
+**hf-aware routing + the kasetto meta-source-up-then-absorb case (Epic C).** Phase-1.5 routing is
+hf-aware: when `hf` is present, honor the dep order it reports. The kasetto absorption case that
+spans envctl + `meta/kasetto` (sync the meta kasetto source UP first) is an **intra-cycle ORDERED
+A2** — not concurrent: sync the meta/kasetto **source up to ≥3.1.0 FIRST, guardian-gated**, and only
+then does envctl absorb (the envctl-absorb sub-item is `blocked_by` the source-up sub-item).
+Namespace the per-repo artifacts under `.handoff/loop/{kasetto,envctl}/`. (The forge-loop owns the
+per-cycle verb sequence — do not duplicate it here.)
+
 ## Phase 2: Build (rust-implementer)
 
 Spawn `rust-implementer` with the plan path. It implements engine-first, wires CLI+GUI to parity,
-adds tests, keeps the inner build loop green, and writes `_workspace/02_implementer_log.md` with
+adds tests, keeps the inner build loop green, and writes `.handoff/loop/cycle/02_implementer_log.md` with
 status `GREEN` / `BLOCKED`.
 
 - **BLOCKED: plan defect** → route back to Phase 1 (architect revises the plan file), then
@@ -117,7 +140,7 @@ it commits/merges/PRs, only after that repo's guardian PASSes — never `grit do
    `meta git worktree create <slug> --repo <r1> --repo <r2> [--ephemeral --ttl 2d]`
    (repos are meta **aliases**, one `--repo` per repo; `--ephemeral --ttl 2d` self-cleans). The
    set lands at `.worktrees/<slug>/<repo>/`, one branch per repo.
-2. **Namespace the artifacts per repo.** Use `_workspace/<repo>/` for each repo's
+2. **Namespace the artifacts per repo.** Use `.handoff/loop/<repo>/` for each repo's
    `01_architect_plan.md` / `02_implementer_log.md` / `03_guardian_report.md` — the only
    structural change to the artifact protocol (it is flat in the sequential path).
 3. **Init grit per repo (locks only).** Seed the whole worktree set in one shot with
@@ -145,14 +168,14 @@ it commits/merges/PRs, only after that repo's guardian PASSes — never `grit do
    `meta --json git worktree exec <slug> --parallel --include <r1,r2> -- <verify>`
    returns structured per-repo `{directory, exit_code, stdout, summary}`; reduce the N exit codes
    to a pass/fail roll-up.
-8. **Synthesize per repo.** Summarize each repo's result and preserve every `_workspace/<repo>/`
+8. **Synthesize per repo.** Summarize each repo's result and preserve every `.handoff/loop/<repo>/`
    audit trail (don't delete on success).
 
 ## Phase 3: Verify (invariant-guardian)
 
 Spawn `invariant-guardian` with the plan + implementer log. It runs the three CI gates,
 `fmt`/`clippy`/`test`, the engine-purity / parity / fail-closed / drift / lock checks, and writes
-`_workspace/03_guardian_report.md` with verdict **PASS / PASS-WITH-NOTES / FAIL**.
+`.handoff/loop/cycle/03_guardian_report.md` with verdict **PASS / PASS-WITH-NOTES / FAIL**.
 
 - **FAIL** → route blocking findings to the right agent: code-level findings → `rust-implementer`
   (fix only the flagged surface), plan-level findings → `feature-architect`. Re-run Phase 3 after
@@ -170,13 +193,13 @@ Spawn `invariant-guardian` with the plan + implementer log. It runs the three CI
 
 ## Data transfer protocol
 
-**File-based** via a `_workspace/` folder at the worktree root, naming `NN_agent_artifact.md`
+**File-based** via the `.handoff/loop/cycle/` folder at the worktree root, naming `NN_agent_artifact.md`
 (`01_architect_plan.md`, `02_implementer_log.md`, `03_guardian_report.md`). Pass artifact **paths**
 to each agent, not their full contents. The code itself is the implementer's primary output (in
-the worktree); `_workspace/` is the audit trail — preserve it, don't delete it on success.
+the worktree); `.handoff/loop/` is the audit trail — preserve it, don't delete it on success.
 **Return-value-based** for each agent's headline verdict (the one-line status it returns to you) —
 and note that the **architect (`Plan` type) is read-only**, so it returns its plan as text and you
-persist `01_architect_plan.md` for it; the implementer and guardian (`general-purpose`) write their
+persist `.handoff/loop/cycle/01_architect_plan.md` for it; the implementer and guardian (`general-purpose`) write their
 own artifacts.
 
 **Environment gotcha (envctl):** the shell hook rewrites `cargo`/`git` to **rtk**, which
@@ -252,7 +275,7 @@ When `USE_GRIT=1`:
 ## Test Scenarios
 
 **Happy path:** "Add an `envctl auto-fix --dry-run` summary line that counts components needing
-repair." → Pre-flight: in worktree, no `_workspace/` → Initial run. Architect: engine-first plan
+repair." → Pre-flight: in worktree, no `.handoff/loop/cycle/` → Initial run. Architect: engine-first plan
 adding an `Engine` count method + `Event`, both front-ends render it, no invariant at risk → GO.
 Implementer: adds the engine method + CLI/GUI wiring + a unit test, build GREEN. Guardian: all
 three gates PASS, parity confirmed (CLI + GUI both call the new method), fail-closed N/A
@@ -260,7 +283,7 @@ three gates PASS, parity confirmed (CLI + GUI both call the new method), fail-cl
 summary`.
 
 **Parallel path:** "Implement dashboard KDL renderer AND secrets-engine vault migration in parallel."
-→ Pre-flight: in worktree, `USE_GRIT=1` → Initial run with parallel mode. Architect: engine-first
+→ Pre-flight: in worktree, `USE_GRIT=1`, no `.handoff/loop/cycle/` → Initial run with parallel mode. Architect: engine-first
 plan identifying two independent Engine methods (dashboard KDL + vault migration). Implementer 1:
 `grit init` meta repos → `grit claim file::symbol crates/engine/src/dashboard.rs::render` → writes
 KDL renderer. Implementer 2: `grit claim file::symbol crates/secrets-engine/src/vault.rs::migrate`

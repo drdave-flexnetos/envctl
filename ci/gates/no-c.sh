@@ -49,6 +49,16 @@ if cargo metadata --no-deps --format-version 1 | grep -q '"name":"envctl-secrets
   echo "note: store-crate 'embedded' (in-process C-SQLite) is an unbuilt placeholder; remote-only ships"
 fi
 
+# --- Gate 3.5: agent-env crate (kasetto absorption, Epic C) stays C-free — incl. NO mimalloc allocator. ---
+# Auto-arms when crates/agent-env exists. kasetto upstream links the mimalloc C allocator; the absorb
+# MUST drop mimalloc/libmimalloc-sys (see .claude/skills/rust-feature-impl/references/kasetto-absorption.md).
+if cargo metadata --no-deps --format-version 1 | grep -q '"name":"envctl-agent-env"'; then
+  AGENTENV_TREE=$(cargo tree -p envctl-agent-env --all-features --edges normal,build)
+  if grep -Eq 'libsql-ffi|sqlite3-sys|rusqlite|openssl-sys|aws-lc-sys|aws-lc-rs|mimalloc|libmimalloc-sys' <<<"$AGENTENV_TREE"; then
+    fail "C dependency (incl. mimalloc allocator) linked into envctl-agent-env — drop it per the no-downgrade absorption playbook"
+  fi
+fi
+
 # --- Gate 4: exactly one ring-only rustls; zero aws-lc/openssl/C-SQLite ANYWHERE. DESIGN-NOTES R7, CF-2 ---
 # Authoritative resolved graph (`cargo metadata` .resolve.nodes), parsed with python3.
 cargo metadata --format-version 1 | python3 -c '

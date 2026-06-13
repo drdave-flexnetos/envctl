@@ -10,3 +10,12 @@ Cargo.lock.bak
 
 # envctl.lock IS committed — it is the content-hashed manifest-of-record and the
 # baseline for `envctl lock --check` (the CI drift gate). Do not ignore it.
+
+# .handoff loop control sentinels — transient, NOT committed. The durable audit trail
+# (backlog.md / loop_state.md / HANDOFF.md / cycle/) IS committed so a fresh session resumes cold.
+.handoff/loop/DONE
+.handoff/loop/NEEDS-HUMAN
+.handoff/loop/STOP
+# ADR-0004 fail-safe: a per-repo .handoff is git-committed TEXT ONLY — the witnessed ledger lives
+# at $META_ROOT/.handoff/ledger.db, never here. Never commit a binary ledger into this repo.
+.handoff/**/ledger.db

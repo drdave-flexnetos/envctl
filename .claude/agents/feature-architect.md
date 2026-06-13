@@ -51,11 +51,11 @@ Given a feature / upgrade / design request, produce a plan that answers:
 ## Input / output protocol
 
 **Input:** the user's feature request (verbatim) plus, if this is a follow-up, the prior plan
-at `_workspace/01_architect_plan.md`.
+at `.handoff/loop/cycle/01_architect_plan.md`.
 
 **Output:** the `Plan` agent type is **read-only and cannot Write files** — so you do not write
 the plan file yourself. **Return the full plan markdown as your final message**; the orchestrator
-persists it to `_workspace/01_architect_plan.md`. (If a follow-up gave you the prior plan path,
+persists it to `.handoff/loop/cycle/01_architect_plan.md`. (If a follow-up gave you the prior plan path,
 read it for context, but still return the amended plan as text.) Structure the plan with these
 sections:
 
@@ -84,7 +84,7 @@ a 3-line executive summary, then the full plan markdown (which the orchestrator 
 
 ## Collaboration
 
-- The `rust-implementer` consumes your `_workspace/01_architect_plan.md` as its spec.
+- The `rust-implementer` consumes your `.handoff/loop/cycle/01_architect_plan.md` as its spec.
 - The `invariant-guardian` checks the delivered code against your **Invariant check** and
   **Verification plan** sections — write them so they are directly checkable.
 - If the implementer reports your plan is infeasible, revise the plan file (don't start over)
@@ -92,6 +92,6 @@ a 3-line executive summary, then the full plan markdown (which the orchestrator 
 
 ## When previous output exists
 
-If `_workspace/01_architect_plan.md` already exists and the user asks to refine/revise, **read
+If `.handoff/loop/cycle/01_architect_plan.md` already exists and the user asks to refine/revise, **read
 it first** and amend only the affected sections, preserving the rest and appending a short
 `## Revision note` explaining what changed.

@@ -23,14 +23,14 @@ checkpoints + commits), so every restart resumes cold with zero loss.
 
 ## The runner
 Bundled at `scripts/ralph-provision.sh`. It is a bounded `while` loop that, each iteration:
-1. checks sentinels (kill switch / terminal states) under `_workspace/`,
+1. checks sentinels (kill switch / terminal states) under `.handoff/loop/`,
 2. spawns one fresh `claude -p "<resume prompt>"` (clean context) in the worktree,
 3. respawns until a terminal sentinel or the max-iterations backstop.
 
 The spawned agent writes **exactly one** sentinel per run, which the runner reads:
 
-| Sentinel (`_workspace/…`) | Meaning | Runner action |
-|---------------------------|---------|---------------|
+| Sentinel (`.handoff/loop/…`) | Meaning | Runner action |
+|------------------------------|---------|---------------|
 | `HANDOFF.md` | more work remains | spawn the next fresh process |
 | `DONE` | provisioned + verified | exit 0 |
 | `NEEDS-HUMAN` | sudo/reboot/hardware wall | halt for you (reason inside) |
@@ -51,7 +51,7 @@ RALPH_APPLY=1 bash .claude/skills/auto-provision/scripts/ralph-provision.sh
 Tunables (env): `RALPH_WORKTREE` (default cwd), `RALPH_BUDGET` (cycles/process, default 3),
 `RALPH_MAX_ITERS` (restart backstop, default 50), `RALPH_SLEEP` (default 5s), `RALPH_MODEL`
 (default `opus`), `RALPH_RESEARCH` (run the component-research/audit pass, default `1`). Kill switch
-any time: `touch _workspace/STOP`.
+any time: `touch .handoff/loop/STOP`.
 
 ## Research is inherited from env-install-loop
 Each spawned agent also runs `env-install-loop`'s **Research** pass: it deep-probes every declared
@@ -78,12 +78,12 @@ A rung that needs privilege/reboot/hardware → write `NEEDS-HUMAN` and stop (do
 ## DONE — the runner exits 0 only when the spawned agent proves ALL:
 `envctl doctor` green · `auto-detect` all detected+healthy, zero drift · `lock --check` +
 `kasetto sync --locked` clean · `cargo build -p envctl-engine -p envctl` + `no-c`/`shape`/`enable`
-gates pass. The agent writes `_workspace/DONE` with this evidence.
+gates pass. The agent writes `.handoff/loop/DONE` with this evidence.
 
 ## Safety (this modifies a live workstation — non-negotiable)
 - **Safe by default.** Without `RALPH_APPLY=1`, headless runs cannot perform destructive applies —
   use a safe pass first to see the plan/backlog the loop builds before letting it act.
-- **Bounded.** `RALPH_MAX_ITERS` backstops runaway restarts; `_workspace/STOP` is an always-checked
+- **Bounded.** `RALPH_MAX_ITERS` backstops runaway restarts; `.handoff/loop/STOP` is an always-checked
   kill switch.
 - **Fail-closed + rust-native.** Never weaken a guard; treat foreign-language drift as a defect to
   fix. Destructive `reset` is dry-run-first and guard-gated.
@@ -94,9 +94,9 @@ gates pass. The agent writes `_workspace/DONE` with this evidence.
 **Happy path:** `RALPH_APPLY=1 bash …/ralph-provision.sh` in a clean worktree. Iter 1: fresh agent
 DISCOVERs gaps, installs 3 components, writes `HANDOFF.md`, exits. Iter 2: fresh agent resumes from
 the committed checkpoint, resets+reinstalls one wedged component, installs the rest, re-runs doctor
-→ green, lock+kasetto+gates clean → writes `_workspace/DONE`. Runner exits 0.
+→ green, lock+kasetto+gates clean → writes `.handoff/loop/DONE`. Runner exits 0.
 
 **Error path:** A component needs a reboot after a kernel-module install. The spawned agent runs the
-dry-run, can't complete unattended, writes `_workspace/NEEDS-HUMAN: reboot required after nvidia-open`
+dry-run, can't complete unattended, writes `.handoff/loop/NEEDS-HUMAN: reboot required after nvidia-open`
 and stops. The runner halts (exit 2) and surfaces the reason instead of spinning. You reboot, then
 relaunch the runner — it resumes from the committed checkpoint.

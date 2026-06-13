@@ -47,6 +47,11 @@ For the exact verification commands and what each proves, read
 `references/verification.md` — load it before you claim a change is done, and the
 `invariant-guardian` runs the same recipe independently.
 
+When the task scope is the **agent-env / kasetto absorption** (backlog Epic C, TASK-0011…0018),
+also read `references/kasetto-absorption.md` first — the no-downgrade absorption playbook (all 11
+kasetto verbs, the 11→6 verb mapping, drop-mimalloc, the SHA-256-alongside-FNV-1a lock, and the
+additive/never-clobber MCP merge). Absorbing kasetto without it will silently drop v3.1+ features.
+
 ## Build / test / lint (run from the worktree root)
 
 ```bash

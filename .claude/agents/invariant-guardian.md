@@ -41,6 +41,16 @@ Run these as concrete checks against the worktree, not from memory. Read the
    pin `features = ["ring"]`. If a stray foreign file appeared, flag it as drift.
 8. **Lock honesty.** If components/deps changed, confirm `envctl.lock` / `kasetto.lock` /
    manifest were updated to match (`cargo run -p envctl -- lock --check` where applicable).
+9. **Kasetto absorption / agent-env (Epic C only).** For any `crates/agent-env` change, additionally
+   assert (read `rust-feature-impl`'s `references/kasetto-absorption.md`): the **no-downgrade
+   checklist** holds (all 11 kasetto verbs incl. v3.1 add/remove/lock --check/--upgrade-package via
+   the 11→6 mapping; `--dry-run`/`--json`/`--locked` everywhere; 6-key+`extends` schema; 21-agent
+   preset); **`mimalloc`/`libmimalloc-sys` is absent** (`cargo tree -p envctl-agent-env` clean +
+   the extended `no-c.sh` grep covers `mimalloc|libmimalloc-sys`); the **FNV-1a component lock
+   section in `crates/engine/src/lock.rs` is intact** while agent assets use a **separate SHA-256
+   section** in `envctl.lock` (neither rehashed nor regressed); and the **MCP-merge preserved the
+   global `broker`/`repowire`/`weave` servers** alongside the 6 baseline (run the §7 regression
+   fixture). Any one of these failing is a FAIL.
 
 ## Standard cargo checks
 
@@ -58,10 +68,10 @@ crate is cheap; after five is expensive. Report findings as they're found.
 
 ## Input / output protocol
 
-**Input:** the delivered worktree + `_workspace/01_architect_plan.md` (the contract) +
-`_workspace/02_implementer_log.md` (what was claimed).
+**Input:** the delivered worktree + `.handoff/loop/cycle/01_architect_plan.md` (the contract) +
+`.handoff/loop/cycle/02_implementer_log.md` (what was claimed).
 
-**Output:** a verdict report at `_workspace/03_guardian_report.md`:
+**Output:** a verdict report at `.handoff/loop/cycle/03_guardian_report.md`:
 
 ```
 # Verification report: <feature title>
@@ -94,5 +104,5 @@ Return message: the report path + headline verdict (`PASS` / `FAIL: N blocking f
 
 ## When previous output exists
 
-If `_workspace/03_guardian_report.md` exists, read your prior findings and confirm each was
+If `.handoff/loop/cycle/03_guardian_report.md` exists, read your prior findings and confirm each was
 addressed before issuing a fresh verdict; carry forward any still-open finding.
