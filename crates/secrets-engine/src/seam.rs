@@ -188,6 +188,28 @@ pub(crate) mod seed_factor {
         Some(out)
     }
 
+    /// Decode a 64-char hex Ed25519 public key into 32 bytes. `None` on any malformed input.
+    fn parse_pubkey_hex(s: &str) -> Option<[u8; 32]> {
+        let s = s.trim();
+        if s.len() != 64 {
+            return None;
+        }
+        let mut out = [0u8; 32];
+        for (i, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+            let hi = (chunk[0] as char).to_digit(16)?;
+            let lo = (chunk[1] as char).to_digit(16)?;
+            out[i] = ((hi << 4) | lo) as u8;
+        }
+        Some(out)
+    }
+
+    /// The operator-pinned Seed device public key (`ENVCTL_SEED_PUBKEY`, 64-hex), if configured.
+    /// Same knob the presence gate (Profile S) pins on — when set, the KEK probe authenticates the
+    /// signature too; when unset, neither path can verify (backward-compatible).
+    fn pinned_pubkey() -> Option<[u8; 32]> {
+        parse_pubkey_hex(&std::env::var("ENVCTL_SEED_PUBKEY").ok()?)
+    }
+
     /// Build the pinned-CA, ring-only rustls client config. Loads ONLY the Cognitum CA as the trust
     /// root (frozen-roots; NOT the OS store). `None` if the CA is missing / unreadable / empty.
     fn tls_config() -> Option<Arc<rustls::ClientConfig>> {
@@ -365,16 +387,27 @@ pub(crate) mod seed_factor {
     /// PARTUUID-bound KEK context, as 64 raw bytes. `partition_uuid` binds the derived KEK to the
     /// specific slot. Returns `None` on any failure so the engine fails closed.
     ///
-    // HARDENING (follow-up): verify the returned signature against the Seed's pinned Ed25519 device
-    // public key before use, for a clean possession error instead of a downstream KEK mismatch.
+    /// HARDENING: when a device public key is pinned (`ENVCTL_SEED_PUBKEY` — the same knob the
+    /// presence gate authenticates with), the signature is **verified with `ring` Ed25519 against
+    /// that key before it is trusted as KEK material**. A forged/mismatched responder is rejected
+    /// here as a clean possession denial (`None`), instead of silently producing wrong key bytes
+    /// that surface only as a downstream KEK-unwrap failure. With no pinned key the behavior is
+    /// unchanged (the operator hasn't given us anything to authenticate against).
     pub(super) fn keyfile_for(partition_uuid: &str) -> Option<Zeroizing<Vec<u8>>> {
-        let sig = parse_sig_hex(&sign_hex(&kek_context(partition_uuid))?)?;
+        let ctx = kek_context(partition_uuid);
+        let sig = parse_sig_hex(&sign_hex(&ctx)?)?;
+        if let Some(pubkey) = pinned_pubkey() {
+            let key = ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &pubkey);
+            if key.verify(ctx.as_bytes(), &sig).is_err() {
+                return None; // responder not authenticated by the pinned key — fail closed
+            }
+        }
         Some(Zeroizing::new(sig.to_vec()))
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{extract_field, host_port, parse_sig_hex, parse_status};
+        use super::{extract_field, host_port, parse_pubkey_hex, parse_sig_hex, parse_status};
 
         #[test]
         fn parse_sig_hex_roundtrips_64_bytes() {
@@ -394,6 +427,27 @@ pub(crate) mod seed_factor {
                 parse_sig_hex(&"00".repeat(63)).is_none(),
                 "126 hex = wrong length"
             );
+        }
+
+        #[test]
+        fn parse_pubkey_hex_roundtrips_32_bytes() {
+            // A real 64-hex Ed25519 device public key (Seed `/api/v1/identity`, 2026-06-13).
+            let hex = "804781357690631a9f98e3ccd91b5e2df2cca8d2be8ac94ea525ceaf82b3470a";
+            let b = parse_pubkey_hex(hex).expect("valid 64-hex parses");
+            assert_eq!(b.len(), 32);
+            assert_eq!(b[0], 0x80);
+            assert_eq!(b[31], 0x0a);
+            assert!(parse_pubkey_hex("dead").is_none(), "too short");
+            assert!(parse_pubkey_hex(&"zz".repeat(32)).is_none(), "non-hex");
+            assert!(
+                parse_pubkey_hex(&"00".repeat(32)).is_some(),
+                "64 hex = valid"
+            );
+            assert!(
+                parse_pubkey_hex(&"00".repeat(64)).is_none(),
+                "128 hex = sig length, not a pubkey"
+            );
+            assert!(parse_pubkey_hex(&"00".repeat(31)).is_none(), "62 hex");
         }
 
         #[test]
