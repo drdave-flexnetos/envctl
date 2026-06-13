@@ -1,0 +1,42 @@
+name: sync-master
+
+# Keep `master` as a protected mirror of `develop`: every push to develop
+# fast-forwards master. develop is the integration/working branch; master is
+# the protected release mirror. The workflow's GITHUB_TOKEN is granted a
+# branch-protection bypass for master (see repo branch-protection config), so
+# this sync succeeds while humans remain PR-gated on master.
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-master
+  cancel-in-progress: false
+
+jobs:
+  ff-master:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fast-forward master to develop
+        run: |
+          set -euo pipefail
+          git config user.name  "flexnetos-sync[bot]"
+          git config user.email "sync@flexnetos.local"
+          # develop must be a strict descendant of master (no-downgrade invariant).
+          if git merge-base --is-ancestor origin/master origin/develop; then
+            git push origin "origin/develop:refs/heads/master"
+            echo "master fast-forwarded to $(git rev-parse --short origin/develop)"
+          else
+            echo "::error::develop is not a fast-forward of master — refusing to sync (would not be a clean promotion)."
+            exit 1
+          fi
