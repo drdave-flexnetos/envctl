@@ -56,6 +56,16 @@ capability or one component per item — so a cycle fits comfortably under the b
    and append a one-line progress note. Commit the `_workspace/` update.
 6. **Re-fire** to continue the loop (see Self-pacing).
 
+## Parallel mode (opt-in grit git-lock coordination)
+
+When looping over items that span multiple meta repos, activate with `USE_GRIT=1`:
+
+1. Before the first implementer: `for repo in $(meta list-projects --names); do cd /home/drdave/Desktop/meta/$repo && grit init -y; done` (idempotent).
+2. Each implementer claims symbols via `grit claim file::symbol --with-deps` before writing, `grit done` after commit.
+3. Contested symbols auto-queue (`grit claim --queue`).
+
+Parallel mode is **opt-in** — the default single-implementer path is unchanged. See `feature-forge/SKILL.md` for full details on the parallel protocol (claim→work→done, `--queue`, `--with-deps`, CLI-only constraints).
+
 ## Self-pacing (how the loop re-fires)
 - Default: **dynamic /loop** — use `ScheduleWakeup` to re-enter this skill for the next iteration,
   passing the same `/forge-loop …` prompt verbatim so the next firing repeats the body. Pick the

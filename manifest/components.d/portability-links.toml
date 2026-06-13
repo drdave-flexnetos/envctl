@@ -1,0 +1,221 @@
+# portability-links.toml — ADR-0006 (meta portability): wire $HOME into the canonical home/ tree.
+#
+# Three components, ordered by blast radius:
+#   home-config-links   : config files + systemd units + home/bin scripts  (safe, no live consumers)
+#   meta-tool-links     : ~/.local/bin + ~/.cargo/bin copies -> symlinks into meta target/release
+#                         (VERSION-GUARDED: links only when the repo build exists and --version
+#                          matches the installed copy — never downgrades, skips + reports otherwise)
+#   claude-global-links : ~/.claude settings/CLAUDE.md/RTK.md/commands — applied LAST; the live
+#                         agent session consumes these (HOME-DIR SAFETY: archive-first + smoke test)
+#
+# All installers archive displaced real files to ~/Desktop/_archives/home-links-<date>/ and are
+# idempotent (re-running converges). remove = unlink + restore the newest archived original if any.
+# Interim wiring is script-kind (the wrap-proven-bash pattern); the engine-native `wiring.symlink`
+# kind is the follow-up envctl feature (Feature Forge).
+
+[[component]]
+id = "home-config-links"
+name = "home tree config links"
+description = "Symlinks $HOME config files (gitconfig, ghostty, nushell, kasetto global, yazelix user config, systemd user units, home/bin scripts) into envctl/home/. Archive-first, idempotent."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "T=\"${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}\"; [ \"$(readlink -f \"$HOME/.gitconfig\" 2>/dev/null)\" = \"$(readlink -f \"$T/.gitconfig\")\" ]"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"
+ARCH="$HOME/Desktop/_archives/home-links-$(date +%Y-%m-%d)"
+link() {
+  src="$T/$1"; dst="$HOME/$1"
+  [ -e "$src" ] || { echo "SKIP (missing source): $1"; return 0; }
+  if [ "$(readlink -f "$dst" 2>/dev/null)" = "$(readlink -f "$src")" ]; then return 0; fi
+  mkdir -p "$(dirname "$dst")"
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    mkdir -p "$ARCH/$(dirname "$1")"; mv "$dst" "$ARCH/$1"; echo "archived: $1"
+  elif [ -L "$dst" ]; then rm "$dst"; fi
+  ln -s "$src" "$dst"; echo "linked: $1"
+}
+link .gitconfig
+link .config/ghostty/config.ghostty
+link .config/nushell/config.nu
+link .config/nushell/rtk-wrappers.nu
+link .config/kasetto/kasetto.yaml
+link .config/yazelix/settings.jsonc
+link .config/yazelix/shell_bash.sh
+link .config/yazelix/shell_nu.nu
+link .config/yazelix/terminal_ghostty.conf
+link .config/yazelix/tombi.toml
+link .config/yazelix/helix/steel_plugins/README.md
+link .config/yazelix/configs/zellij/layouts/mission-control.kdl
+link .config/systemd/user/env-ctl.service
+link .config/systemd/user/sqld.service
+link .config/systemd/user/repowire.service
+systemctl --user daemon-reload 2>/dev/null || true
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", '''T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"; ok=1; for p in .gitconfig .config/nushell/config.nu .config/nushell/rtk-wrappers.nu .config/kasetto/kasetto.yaml .config/yazelix/settings.jsonc .config/systemd/user/env-ctl.service .config/systemd/user/sqld.service; do [ "$(readlink -f "$HOME/$p" 2>/dev/null)" = "$(readlink -f "$T/$p")" ] || { echo "NOT LINKED: $p"; ok=0; }; done; [ $ok = 1 ]''']
+[component.remove]
+kind = "script"
+script = '''
+T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"
+for p in .gitconfig .config/ghostty/config.ghostty .config/nushell/config.nu .config/nushell/rtk-wrappers.nu .config/kasetto/kasetto.yaml .config/yazelix/settings.jsonc .config/yazelix/shell_bash.sh .config/yazelix/shell_nu.nu .config/yazelix/terminal_ghostty.conf .config/yazelix/tombi.toml .config/systemd/user/env-ctl.service .config/systemd/user/sqld.service .config/systemd/user/repowire.service; do
+  if [ -L "$HOME/$p" ]; then
+    rm "$HOME/$p"
+    last=$(ls -d "$HOME/Desktop/_archives/home-links-"* 2>/dev/null | sort | tail -1)
+    [ -n "$last" ] && [ -e "$last/$p" ] && cp -a "$last/$p" "$HOME/$p" && echo "restored: $p"
+  fi
+done
+systemctl --user daemon-reload 2>/dev/null || true
+'''
+
+[[component]]
+id = "home-bin-links"
+name = "home/bin user scripts"
+description = "Symlinks orphan user scripts (n8n-open, yazelix-gpu-verify*) from ~/.local/bin into envctl/home/bin/."
+requires = ["home-config-links"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "T=\"${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}\"; [ \"$(readlink -f \"$HOME/.local/bin/n8n-open\" 2>/dev/null)\" = \"$(readlink -f \"$T/bin/n8n-open\")\" ]"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"
+ARCH="$HOME/Desktop/_archives/home-links-$(date +%Y-%m-%d)"
+for b in n8n-open yazelix-gpu-verify.sh yazelix-gpu-verify-launch.sh; do
+  src="$T/bin/$b"; dst="$HOME/.local/bin/$b"
+  [ -e "$src" ] || continue
+  chmod +x "$src"
+  [ "$(readlink -f "$dst" 2>/dev/null)" = "$(readlink -f "$src")" ] && continue
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then mkdir -p "$ARCH/.local/bin"; mv "$dst" "$ARCH/.local/bin/$b"; fi
+  [ -L "$dst" ] && rm "$dst"
+  ln -s "$src" "$dst"; echo "linked: .local/bin/$b"
+done
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "T=\"${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}\"; [ -L \"$HOME/.local/bin/n8n-open\" ]"]
+
+[[component]]
+id = "meta-tool-links"
+name = "meta tool binaries -> workspace builds"
+description = "Replaces ~/.local/bin (and ~/.cargo/bin duplicate) COPIES of meta-member tools with symlinks into the owning repo's target/release. Version-guarded: never downgrades; skips and reports when the repo build is missing or version-mismatched."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -L \"$HOME/.local/bin/meta\" ]"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+M="$HOME/Desktop/meta"
+ARCH="$HOME/Desktop/_archives/home-links-$(date +%Y-%m-%d)"
+# pairs: <dest-name> <repo-relative build path>
+pairs="
+meta            target/release/meta
+meta-git        target/release/meta-git
+meta-mcp        target/release/meta-mcp
+meta-project    target/release/meta-project
+loop            target/release/loop
+lane            lane/target/release/lane
+vox             vox/target/release/vox
+icm             icm/target/release/icm
+rtk             target/release/rtk
+kasetto         kasetto/target/release/kasetto
+kst             kasetto/target/release/kst
+grit            grit/target/release/grit
+envctl          envctl/target/release/envctl
+envctl-gui      envctl/target/release/envctl-gui
+meta-dashboard  meta_dashboard_cli/target/release/meta-dashboard
+"
+echo "$pairs" | while read -r name rel; do
+  [ -n "$name" ] || continue
+  src="$M/$rel"; dst="$HOME/.local/bin/$name"
+  if [ ! -x "$src" ]; then echo "SKIP $name: no build at $rel (cargo build --release first)"; continue; fi
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    vsrc=$("$src" --version 2>/dev/null | head -1 || true)
+    vdst=$("$dst" --version 2>/dev/null | head -1 || true)
+    if [ -n "$vdst" ] && [ "$vsrc" != "$vdst" ]; then echo "SKIP $name: version mismatch (installed '$vdst' vs build '$vsrc') — never downgrade"; continue; fi
+    mkdir -p "$ARCH/.local/bin"; mv "$dst" "$ARCH/.local/bin/$name"; echo "archived copy: $name"
+  elif [ -L "$dst" ] && [ "$(readlink -f "$dst")" = "$(readlink -f "$src")" ]; then continue
+  elif [ -L "$dst" ]; then rm "$dst"; fi
+  ln -s "$src" "$dst"; echo "linked: $name"
+done
+# ~/.cargo/bin duplicate generations -> same treatment (kasetto kst weave grit secretctl secretd)
+cpairs="
+weave      weave/target/release/weave
+kasetto    kasetto/target/release/kasetto
+kst        kasetto/target/release/kst
+grit       grit/target/release/grit
+secretctl  envctl/target/release/secretctl
+secretd    envctl/target/release/secretd
+"
+echo "$cpairs" | while read -r name rel; do
+  [ -n "$name" ] || continue
+  src="$M/$rel"; dst="$HOME/.cargo/bin/$name"
+  [ -x "$src" ] || { echo "SKIP cargo-bin $name: no build"; continue; }
+  [ -e "$dst" ] || continue
+  if [ ! -L "$dst" ]; then mkdir -p "$ARCH/.cargo/bin"; mv "$dst" "$ARCH/.cargo/bin/$name"; echo "archived cargo copy: $name"; else rm "$dst"; fi
+  ln -s "$src" "$dst"; echo "linked cargo-bin: $name"
+done
+echo "NOTE: rtk and icm are live-session hooks — verify each immediately after install."
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "fail=0; for b in meta loop lane; do [ -L \"$HOME/.local/bin/$b\" ] || { echo \"copy remains: $b\"; fail=1; }; done; [ $fail = 0 ]"]
+
+[[component]]
+id = "claude-global-links"
+name = "claude user-global settings links (apply LAST)"
+description = "Symlinks ~/.claude/{settings.json,CLAUDE.md,RTK.md,commands/*} into envctl/home/.claude/. The LIVE agent session consumes these files — archive-first, and run the smoke test in verify immediately."
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "T=\"${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}\"; [ \"$(readlink -f \"$HOME/.claude/settings.json\" 2>/dev/null)\" = \"$(readlink -f \"$T/.claude/settings.json\")\" ]"]
+[component.install]
+kind = "script"
+script = '''
+set -e
+T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"
+ARCH="$HOME/Desktop/_archives/home-links-$(date +%Y-%m-%d)"
+for p in .claude/settings.json .claude/CLAUDE.md .claude/RTK.md .claude/commands/recall.md .claude/commands/remember.md .claude/commands/speak.md; do
+  src="$T/$p"; dst="$HOME/$p"
+  [ -e "$src" ] || { echo "SKIP missing source: $p"; continue; }
+  [ "$(readlink -f "$dst" 2>/dev/null)" = "$(readlink -f "$src")" ] && continue
+  mkdir -p "$(dirname "$dst")"
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then mkdir -p "$ARCH/$(dirname "$p")"; mv "$dst" "$ARCH/$p"; echo "archived: $p"; fi
+  [ -L "$dst" ] && rm "$dst"
+  ln -s "$src" "$dst"; echo "linked: $p"
+done
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -L \"$HOME/.claude/settings.json\" ] && claude --version >/dev/null 2>&1 && echo claude-binary-ok"]
+[component.remove]
+kind = "script"
+script = '''
+for p in .claude/settings.json .claude/CLAUDE.md .claude/RTK.md .claude/commands/recall.md .claude/commands/remember.md .claude/commands/speak.md; do
+  if [ -L "$HOME/$p" ]; then
+    rm "$HOME/$p"
+    last=$(ls -d "$HOME/Desktop/_archives/home-links-"* 2>/dev/null | sort | tail -1)
+    [ -n "$last" ] && [ -e "$last/$p" ] && cp -a "$last/$p" "$HOME/$p" && echo "restored: $p"
+  fi
+done
+'''
+
+[[component]]
+id = "group-portability"
+name = "Portability link layer (ADR-0006)"
+requires = ["home-config-links", "home-bin-links", "meta-tool-links", "claude-global-links"]
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "[ -L \"$HOME/.gitconfig\" ] && [ -L \"$HOME/.local/bin/meta\" ] && [ -L \"$HOME/.claude/settings.json\" ]"]

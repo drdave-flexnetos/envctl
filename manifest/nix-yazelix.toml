@@ -93,7 +93,7 @@ script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/nul
 [[component]]
 id = "yazelix"
 name = "yazelix (Ghostty variant)"
-description = "nix profile github:luccahuguet/yazelix#yazelix; bundles nushell+mise."
+description = "nix profile github:FlexNetOS/yazelix#yazelix; bundles nushell+mise."
 requires = ["nix", "nix-yazelix-cache", "home-manager", "ghostty"]
 [component.detect]
 kind = "command"
@@ -101,14 +101,14 @@ command = "bash"
 args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; command -v yzx"]
 [component.install]
 kind = "script"
-script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile add --refresh github:luccahuguet/yazelix#yazelix"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile add --refresh github:FlexNetOS/yazelix#yazelix"
 [component.verify]
 kind = "command"
 command = "bash"
 args = ["-lc", ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; yzx --version 2>/dev/null || command -v yzx"]
 [component.fix]
 kind = "script"
-script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; nix profile upgrade yazelix 2>/dev/null || nix profile add --refresh github:luccahuguet/yazelix#yazelix; yzx doctor || true"
+script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; export PATH=\"$HOME/.nix-profile/bin:$PATH\"; nix profile upgrade yazelix 2>/dev/null || nix profile add --refresh github:FlexNetOS/yazelix#yazelix; yzx doctor || true"
 [component.remove]
 kind = "script"
 script = ". /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh 2>/dev/null; nix profile remove yazelix"
