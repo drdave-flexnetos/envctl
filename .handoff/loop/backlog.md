@@ -189,8 +189,52 @@ fmt, clippy). Remaining follow-ups extracted from each:
 
 - [ ] **TASK-0019 (fix-secretd):** U1 USB-unlock path needs a real `RealUsbProbe` (crash-loop +
   durable store + passphrase path already fixed/merged). See `.handoff/loop/_done/secretd-provisioning-runbook.md`.
-- [ ] **TASK-0020 (github-app-mint):** Wire the GitHub-App token mint (`secrets-engine/mint_github.rs`,
-  merged) through the `ProviderMint` injection seam — secretctl/secretd phases + agent-env auto-inject.
+- [ ] **TASK-0020 (github-app-mint, P0 — unblocks the `flexnetos_github_app` e2e crown slice):** Expose
+  the completed `provider-github` `ProviderMint` (`secrets-engine/src/mint_github.rs`, PR #35, fully
+  unit-tested via `FakeTransport`) through `secretd` + `secretctl` so the trusted-writer App can mint
+  short-lived installation tokens from the vault-sealed key. **The minting impl is DONE — this is the
+  daemon plumbing + CLI surface only.** (Authored as a build-ready card by the cross-repo session that
+  created+installed+sealed the live App, 2026-06-13.)
+  - **Consumer contract (FROZEN — `flexnetos_github_app` already depends on it):** `app-core::mint::
+    SecretctlInvoker` shells `secretctl mint-github --installation-id <N> [--repository-ids a,b]
+    [--permissions name:access,...] --ttl-secs <T> --output json` and parses stdout exactly as
+    `{"token":"<installation-token>","expires_at_unix":<i64>}`. Permission access maps Read→`"read"`,
+    Write→`"write"`. Today this **404s** (no such subcommand) → the e2e token write-back (post
+    check-run / merge-gate) is blocked. Do not change the flag/JSON shape.
+  - **Build:**
+    1. **Real `HttpTransport`** (the `mint_github::HttpTransport` seam): REUSE the PR #58 relay-proxy
+       client — `reqwest` pinned to **`webpki-roots`, rustls-on-ring** (FS-S7), NOT native-tls/OS roots
+       (else `no-c.sh` fails). Wrap it as the sync `execute(&HttpRequest)->HttpResponse`.
+    2. **Internal unseal path:** the daemon reads `github-app-private-key` (**broker-only** — use the
+       same internal key-extraction the relay proxy uses, NOT the `get --reveal` API, which refuses
+       broker-only) + `github-app-id` from the unlocked vault, then
+       `GitHubAppMint::new(app_id, installation_id, Zeroizing(pem), RealClock, RealTransport)`.
+       Fail-closed when the vault is locked / key absent / the `provider-github` feature is off.
+    3. **proto (`secrets-proto/proto/control.proto`):** add `rpc MintGithub(MintGithubReq) returns
+       (MintGithubResp)` to `service Vault`. `MintGithubReq{ uint64 installation_id; repeated string
+       repository_ids; repeated string permissions; int64 ttl_secs; }` ·
+       `MintGithubResp{ string token; int64 expires_at_unix; }`.
+    4. **secretd handler:** build `MintRequest{ provider: Github, repos, perms, ttl_secs }`, call
+       `mint_scoped`, map `ScopedToken{token, expires_at}` → resp; emit a witnessed mint event but
+       **NEVER log the token**.
+    5. **secretctl `mint-github` subcommand:** flags per the frozen contract; `--output json` prints
+       the JSON to stdout only.
+    6. **Feature:** enable `provider-github` in the `secretd` build (cargo feature, same pattern as
+       `seed-factor`); wire it through `secrets-engine`.
+  - **Gates/tests:** `no-c.sh` (reqwest MUST stay `webpki-roots`/rustls-ring — already clean post #58),
+    `shape.sh`, `enable.sh`; `cargo fmt` + `clippy -D warnings`; add a `secretd` RPC test + a CLI smoke
+    (the JWT/request/parse logic is already unit-tested in `mint_github.rs`).
+  - **Acceptance (LIVE — the App is already created+installed+sealed):** with the vault unlocked (Seed)
+    and these secrets sealed — `github-app-private-key` (broker-only), `github-app-id`=**4044997**,
+    `github-app-installation-id`=**140063898** (org **FlexNetOS**, app slug `flexnetos-github-app`) —
+    `secretctl mint-github --installation-id 140063898 --output json` returns a real installation token
+    from `POST /app/installations/140063898/access_tokens`, and `fxapp mint-token` (flexnetos_github_app
+    app-core P1) then succeeds end to end. This completes the crown slice's token write-back; the
+    webhook→dispatch→fork-gate half was already proven LIVE through a public tunnel (2026-06-13).
+  - **Cross-refs:** ADR-0007/0008; `mint_github.rs` (PR #35); `seam.rs::ProviderMint`; **PR #58**
+    (relay-proxy `reqwest`/`webpki-roots` transport to reuse); `flexnetos_github_app/crates/app-core/
+    src/mint.rs` (`build_argv` contract) + `app-cli` `MintToken`. Sibling of TASK-0019 (RealUsbProbe,
+    done via #61) — both are Epic-D secrets-egress.
 - [ ] **TASK-0021 (node-via-bun):** Manifest design follow-up — mark node not-applicable when a real
   node in the n8n range is present, or add a `node-real` component + drop the group-ai-clis edge
   (cosmetic detect-drift only; truth-telling fix already merged).
