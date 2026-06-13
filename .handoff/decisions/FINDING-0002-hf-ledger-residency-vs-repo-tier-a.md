@@ -1,88 +1,109 @@
-# FINDING-0002 — `hf` cannot seed a per-repo Tier-A `.handoff` against the shared ledger (TASK-0002 blocker)
+# FINDING-0002 — TASK-0002 blocked: installed `hf` is the S1 spike, missing the fleet verbs
 
 - **Status:** NEEDS-DECISION (owner / kernel team) — blocks backlog **TASK-0002** (Epic A).
 - **Date:** 2026-06-13 · **Surfaced by:** forge-loop agenticOS-consolidation cycle 2.
-- **Cross-refs:** ADR-0001 (kasetto-handoff-portability-unification), ADR-0004 (single shared
-  ledger), backlog `.handoff/loop/backlog.md` TASK-0002/0003, skill `handoff-sync` (P0 residency
-  guard), `meta/handoff/hf/src/{main.rs,kb.rs}`.
+- **REVISED 2026-06-13** after reading the authoritative design corpus (`~/Downloads/tmp/handoff` =
+  Ark Handoff Ledger PRD v2 + schemas/templates) and `meta/handoff/docs/adr-0004-fleet-handoff-rollout.md`
+  + envctl ADR-0001 §22/§23. **The v1 framing ("shipped `hf` needs a `--ledger`/`HANDOFF_DIR` flag")
+  was WRONG and is retracted** — see "Correction" below.
+- **Cross-refs:** ADR-0004 (`meta/handoff/docs/adr-0004-fleet-handoff-rollout.md`, accepted
+  2026-06-12), ADR-0001 §22/§23 (envctl), PRD v2 §2/§4.1–4.4 + §4 layout (`~/Downloads/tmp/handoff/
+  handoff/docs/Ark_Handoff_Ledger_PRD_v2.md`), design-bundle templates
+  (`~/Downloads/tmp/handoff/handoff/templates/.handoff/`), kernel cards HFTASK-0007/0011,
+  `meta/handoff/hf/src/{main.rs,kb.rs}`, backlog TASK-0002/0003.
 
 ## Context
 
-TASK-0002 asks: *"Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
-`policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
-`ledger.db`; do NOT hand-write packets."* i.e. envctl gets an hf-**rendered** Tier-A text/packet
-layer, while the witnessed events live only in the **shared** `$META_ROOT/.handoff/ledger.db`
-(ADR-0004). TASK-0001 (build+install `hf`) is DONE; this is the next Epic-A pick.
+TASK-0002 asks: seed envctl's Tier-A `.handoff` via `hf` — render `active.md` + `packets/latest.md`,
+mint `handoff.task.v1` cards, land `hf sync` (.kb write-back) — with **no per-repo `ledger.db`** and
+**no hand-written packets**. TASK-0001 (build+install `hf`) is DONE.
 
-## The blocker (source-proven against the shipped binary)
+## The design is SETTLED (not ambiguous) — ADR-0004 + PRD v2
 
-The shipped `hf` (`meta/handoff`, built cycle 1) is **strictly CWD-relative** — there is **no
-`--ledger` flag and no `HANDOFF_DIR`/`HANDOFF_LEDGER` env override** (`const HF=".handoff"`):
+The residency model I initially read as an "open ambiguity" is in fact **decided**:
 
-| fn (`hf/src/main.rs`) | resolves to |
-|---|---|
-| `ledger_path()` | `<CWD>/.handoff/ledger.db` |
-| `tasks_dir()` | `<CWD>/.handoff/tasks/` |
-| `packet_path()` | `<CWD>/.handoff/packets/latest.md` |
+- **PRD v2 §4.1–4.4:** the repo is the memory; **Git + ledger + task cards are authoritative; the
+  handoff packet is a compiled, non-authoritative VIEW.**
+- **ADR-0004 §2 (Tiered contents, policy P7):** a repo's `.handoff/` Tier-A layer = `context/
+  capsule.json` (REQUIRED), `tasks/` (minted cards), `packets/` (resume packets), `README.md`;
+  **OPTIONAL** `hooks/hooks.toml` + `policies/rules.toml` when the repo runs autonomous loops.
+- **ADR-0004 §3 (Ledger residency, settles open-question #13):** **one witnessed ledger per
+  orchestration home**; **per-repo `.handoff/` carries NO `ledger.db` / no binary state — git
+  text only.** Events are checkpointed into the fleet ledger.
+- **ADR-0004 §4:** cross-repo aggregation = **`hf fleet status`** (enumerate `../.meta.yaml`
+  members, read each repo's capsule+cards, join with fleet-ledger events; Git is the sync transport).
 
-Three constraints then collide and are **mutually exclusive** with the shipped binary:
+So TASK-0002's "no per-repo ledger, packets are compiled not hand-written" is **correct by design**.
 
-1. **Ledger-residency (ADR-0004, the #1 non-negotiable gate)** → every ledger-touching verb must
-   run from `$META_ROOT` so the ledger is `meta/.handoff/ledger.db`. Running any mutating verb from
-   the envctl worktree creates `envctl/.handoff/ledger.db` — FORBIDDEN.
-2. **`hf task mint --from-kb` (`kb.rs::cmd_mint_from_kb`)** resolves the KB as
-   `current_dir().parent()/.kb`. It therefore only finds `meta/.kb` when `hf` is run **from a child
-   repo** (e.g. `envctl`) — which is exactly the run that creates the forbidden per-repo ledger. Run
-   from `$META_ROOT`, `parent()` = `Desktop`, `Desktop/.kb` is absent → *"no meta `.kb/` found —
-   cannot mint."*
-3. **`hf seed` (`main.rs::cmd_seed`)** does **not** seed an "envctl Tier-A" layer — it writes the
-   **kernel's own 22 `HFTASK-####` cards** (its `spike/**`,`handoff/**` self-buildout backlog) into
-   `<CWD>/.handoff/tasks/`. `hf handoff` likewise renders packets into `<CWD>/.handoff`.
+### Ledger location — reconciled, NO discrepancy
+envctl **ADR-0001 §23** reconciles ADR-0004's wording: there are two orchestration homes —
+`meta/.handoff/ledger.db` = **FLEET** (what envctl writes to) and `meta/handoff/.handoff/ledger.db`
+= **KERNEL** (the kernel's own self-dev). Verified live: the fleet ledger is empty (`hf status` from
+`meta` → 0 tasks); the kernel ledger holds the 23 `HFTASK-####` cards (`hf status` from
+`meta/handoff` → 23 tasks). **Cycle-1's residency target (`meta/.handoff/ledger.db`) was correct.**
 
-**Net:** there is no shipped mechanism to render envctl's Tier-A text/packet layer **while** the
-ledger resides at the meta root. You either (a) run from envctl and create a forbidden per-repo
-ledger, or (b) run from meta root and operate on the *kernel's* ledger/packets (not envctl's), with
-`mint --from-kb` unable to find `.kb`. The envctl backlog (`TASK-0001..`) also is not present as
-`.kb` task docs to mint from.
+## The actual blocker — the installed `hf` is the S1 spike, missing the fleet verbs
 
-## Why this is a real blocker, not thrash
+envctl **ADR-0001 §22** documents the kernel's `hf` verb set as
+`init/seed/status/claim/release/checkpoint/handoff/resume/ship/review/**policy**/**session**/**sync**/**fleet**/**drift**`.
+The **installed binary** (built cycle 1 from `meta/handoff`, the S1 spike) exposes only
+`init|seed|status|session|claim|release|checkpoint|sync-cards|done|task mint|ship|review|handoff|resume`.
+**It has no `fleet`, no `policy`, no `drift`, and no standalone `sync` (only `sync-cards`).**
 
-The residency invariant is the highest-priority non-negotiable gate (a wrong ledger is worse than no
-ledger). No envctl-side change can satisfy TASK-0002 without violating it. The capability gap lives
-in the **kernel** (`meta/handoff`), which is a separate `.meta.yaml` project, out of envctl's scope
-and out of the loop's auto-fixable surface.
+TASK-0002 needs exactly the **unbuilt** verbs:
+1. **`hf fleet status` + fleet-aware packet rendering** — to compile envctl's `packets/latest.md` +
+   `active.md` from the **fleet** ledger's envctl-scoped events (the shipped `hf handoff` compiles
+   from the *CWD-relative* ledger, so per ADR-0004's "no per-repo ledger" it would compile from
+   nothing). ADR-0004 §76 lists `fleet status` as a verb **"to implement."**
+2. **`hf sync`** — the one-way `.handoff`→`.kb` write-back (ADR-0001 §6 / **HFTASK-0011**). The
+   shipped binary has `sync-cards` (ledger→cards) but not `sync` (cards/ledger→`.kb`).
+3. **`hf task mint`** writes a card to the **CWD** `.handoff/tasks/` and resolves `.kb` as
+   `current_dir().parent()/.kb` — so minting envctl cards into the **fleet** ledger/text without a
+   per-repo ledger also needs the fleet-aware path (or HFTASK-0007's `session` + `.handoff/policy.toml`).
+
+These are **carded kernel work** in `meta/handoff` (HFTASK-0007 `session start|end` + `policy.toml`;
+HFTASK-0011 `hf sync` `.kb` mirror; plus `hf fleet status` per ADR-0004 §4/§76) — **out of envctl's
+scope**. The kernel ledger shows HFTASK-0007/0011 still `Backlog` (not Done).
+
+## Correction (what v1 of this finding got wrong)
+- ❌ v1: "shipped `hf` is strictly CWD-relative and needs a `--ledger`/`HANDOFF_DIR` flag." → The
+  model **deliberately** has no per-repo ledger and no flag; a repo's packets are compiled centrally
+  by the (unbuilt) fleet verbs from the fleet ledger. A `--ledger` flag is **not** the fix.
+- ❌ v1 implied the design was an open ambiguity. → It is **decided** (ADR-0004, PRD v2).
+- ✅ Correct blocker: the **installed `hf` is the S1 spike**; the **fleet/sync verbs are unbuilt**.
+
+## What is ALREADY unblocked / done
+envctl's **REQUIRED** Tier-A text core already exists and is git-committed: `context/capsule.json`,
+`README.md`, `tasks/` + `packets/` dirs. The only residency-safe text gap is the **OPTIONAL**
+`hooks/hooks.toml` + `policies/rules.toml` + `skills/` (design-bundle templates at
+`~/Downloads/tmp/handoff/handoff/templates/.handoff/`) — static declarative text needing **no ledger
+and no kernel change**, so they can be seeded now if desired.
 
 ## Decision required (owner / kernel team)
 
-Pick the path for Epic A to proceed:
-
-- **Option A — add a ledger/dir split to `hf` (recommended).** Kernel feature in `meta/handoff`: a
-  `--ledger <path>` flag and/or `HANDOFF_LEDGER`/`HANDOFF_DIR` env so a repo's text/packet layer
-  (`<repo>/.handoff/...`) can be rendered while events go to `$META_ROOT/.handoff/ledger.db`; and
-  make `mint --from-kb` resolve `.kb` from the meta root regardless of CWD. The `handoff-sync` skill
-  already anticipates this ("if a future hf adds `--ledger`/`HANDOFF_DIR`, prefer that"). This is
-  natural kernel work (cf. kernel cards HFTASK-0007 `.handoff/policy.toml`, HFTASK-0011 `hf sync`).
-- **Option B — redefine "envctl Tier-A" as shared-ledger-only.** Accept that the *rendered* state
-  layer (`active.md`, `packets/latest.md`) lives **only** at `meta/.handoff`, and envctl's per-repo
-  `.handoff` stays the **hand/loop-maintained** text layer (`policy.toml`, `hooks/`, `skills/`,
-  `loop/`) + the markdown `loop/HANDOFF.md` the loop already uses. Rescope TASK-0002 accordingly
-  (no per-repo render). This needs no kernel change but contradicts TASK-0002's literal "render
-  `packets/latest.md` per repo."
-- **Option C — seed the kernel's own ledger/cards at meta root now.** Run `hf seed` + `hf handoff`
-  from `$META_ROOT` to bring up the *kernel's* HFTASK backlog in the shared ledger (this would also
-  give the TASK-0001 hook a real active task to witness). But these are the **kernel's** bring-up
-  cards, mutating the shared fleet ledger — an owner/kernel call, not an envctl-loop action.
+- **Option A — build the fleet verbs in the kernel, then re-run TASK-0002 (recommended).** Implement
+  HFTASK-0007 (`hf session` + `.handoff/policy.toml`), HFTASK-0011 (`hf sync` `.kb` mirror), and
+  `hf fleet status` + fleet-aware packet rendering in `meta/handoff`; install the upgraded `hf`
+  (re-run TASK-0001's symlink — propagates automatically). Then TASK-0002/0003 proceed as written.
+  Proper path, already carded. Route: `handoff-kernel-engineer` against `meta/handoff` (NOT an
+  envctl cycle).
+- **Option B — land the residency-safe text subset now, defer the rendered/minted/synced parts.**
+  Seed envctl's OPTIONAL `hooks/policies/skills` from the design-bundle templates this session (no
+  kernel dep), keep `packets/latest.md`+`active.md`+card-minting+`hf sync` blocked under A. Partial
+  progress; TASK-0002 stays open until A lands.
+- **Option C — rescope envctl Tier-A to the required text core (already satisfied).** Accept that
+  envctl's per-repo packets are produced **centrally by `hf fleet status`** once built (ADR-0004 §4),
+  so envctl never renders its own packet — close the envctl side, leaving only the kernel verb work.
 
 ## Consequences / linkage
-
-- **TASK-0003 (p7-conformance gate)** depends on a seeded Tier-A layer + `hf resume --json` emitting
-  `handoff.packet.v2` — so it is **also blocked** behind this decision (the residency-invariant
-  portion of the gate could land independently).
-- **TASK-0001 GO-LIVE end-to-end proof** (a Stop firing `hf checkpoint --auto` writing a witnessed
-  event) needs an **active task in the shared ledger**, which Option A/C would provide; until then
-  the hook is live but its event-write is a correct no-op.
+- **TASK-0003 (p7 gate)** validates cards/packets + `hf resume --json` → `handoff.packet.v2`; needs
+  the seeded/rendered layer, so it tracks A. The residency-invariant portion (assert no per-repo
+  `ledger.db` tracked) is landable independently.
+- **TASK-0001 GO-LIVE end-to-end** (a Stop firing `hf checkpoint --auto` writing a witnessed event)
+  needs an **active task in the fleet ledger**; Option A's `hf session`/fleet-aware minting provides
+  it. Until then the hook is live but its event-write is a correct no-op.
 
 ## Loop disposition
-
-Mark TASK-0002 `- [!]` blocked (this finding), surface in the DONE/HANDOFF summary, and proceed to
-the next actionable, unblocked backlog item per the dependency-aware order.
+TASK-0002 `- [!]` blocked; TASK-0003 `- [!]` blocked (tracks A). The fix is kernel-side
+(`meta/handoff` fleet verbs), so the envctl loop proceeds to the next unblocked item (Epic C
+TASK-0012) pending the owner's choice of A/B/C.
