@@ -96,18 +96,20 @@ pub(crate) mod seed_factor {
         Some(out)
     }
 
-    /// Device-side script: open the localhost-only pairing window, pair a transient client, sign
-    /// the context message, print ONLY the hex signature, then unpair. The bearer token never
-    /// leaves the device; only the (public) signature returns on stdout.
-    fn device_script(context: &str) -> String {
+    /// Device-side script: open the localhost-only pairing window, pair a transient `client`, sign
+    /// `data`, print ONLY the hex signature, then unpair. The bearer token never leaves the device;
+    /// only the (public) signature returns on stdout. Every device call is `--max-time` bounded so
+    /// a wedged device cannot hang the (synchronous) unlock path.
+    fn device_script(client: &str, data: &str) -> String {
         format!(
             r#"set -e
 B=https://localhost:8443/api/v1
-curl -sk -X POST $B/pair/window >/dev/null
-P=$(curl -sk -X POST $B/pair -H 'Content-Type: application/json' -d '{{"client_name":"envctl-kek"}}')
+C="-sk --max-time 15"
+curl $C -X POST $B/pair/window >/dev/null
+P=$(curl $C -X POST $B/pair -H 'Content-Type: application/json' -d '{{"client_name":"{client}"}}')
 T=$(printf '%s' "$P" | grep -oE '"token"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-S=$(curl -sk -X POST $B/custody/sign -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{{"data":"{context}"}}')
-curl -sk -X DELETE $B/pair/envctl-kek -H "Authorization: Bearer $T" >/dev/null 2>&1 || true
+S=$(curl $C -X POST $B/custody/sign -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{{"data":"{data}"}}')
+curl $C -X DELETE $B/pair/{client} -H "Authorization: Bearer $T" >/dev/null 2>&1 || true
 printf '%s' "$S" | grep -oE '"signature"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]+"' | sed -E 's/.*"([0-9a-fA-F]+)".*/\1/'
 "#
         )
@@ -117,16 +119,32 @@ printf '%s' "$S" | grep -oE '"signature"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]+"'
     /// return the 128-char hex signature. `None` on any failure (Seed unreachable / unpaired /
     /// empty). Single SSH+sign implementation shared by the KEK probe and the presence gate
     /// (Profile S).
+    ///
+    /// Bounded against a wedged device: SSH `ConnectTimeout` + `ServerAlive*` drop a dead session
+    /// (~15s), and every device-side `curl` is `--max-time` capped — so a synchronous caller on the
+    /// unlock path can never block indefinitely. A fresh random pairing-client name per call avoids
+    /// a collision if two probes run concurrently.
     pub(crate) fn sign_hex(data: &str) -> Option<String> {
-        use std::io::Write;
+        use std::fmt::Write as _;
+        use std::io::Write as _;
+        let mut tag = [0u8; 6];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut tag);
+        let mut client = String::from("envctl-kek-");
+        for b in tag {
+            let _ = write!(client, "{b:02x}");
+        }
         let target = ssh_target();
-        let script = device_script(data);
+        let script = device_script(&client, data);
         let mut child = std::process::Command::new("ssh")
             .args([
                 "-o",
                 "BatchMode=yes",
                 "-o",
                 "ConnectTimeout=10",
+                "-o",
+                "ServerAliveInterval=5",
+                "-o",
+                "ServerAliveCountMax=3",
                 &target,
                 "bash -s",
             ])
