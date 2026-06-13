@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Stop / PreCompact hook (envctl) — auto-checkpoint this session into the FLEET ledger (ADR-0004 §3).
+# Stop / PreCompact hook (envctl) — auto-checkpoint this session into the FLEET ledger (ADR-0004 §3)
+# AND mirror it one-way into GitKB (`hf sync`, ADR-0003 HFTASK-0011 — TASK-0024 GO-LIVE).
 #
-# DORMANT BY DESIGN until the kernel's `hf checkpoint --auto --quiet` verb lands (Epic A,
-# .handoff/loop/backlog.md TASK-0001 build hf + TASK-0002 seed). Until then: if `hf` is absent OR
-# rejects the flags, we swallow it and exit 0 — the session is NEVER blocked. When the verb lands,
-# auto-checkpointing goes live with zero settings changes.
+# LIVE: the kernel's `hf checkpoint --auto --quiet` + `hf sync` verbs landed (Epic A TASK-0001/0002,
+# meta/handoff #17). Both calls are fail-soft — if `hf` is absent OR rejects a flag we swallow it and
+# exit 0, so the session is NEVER blocked. `hf sync` is one-way (ledger truth → .kb context/overridable),
+# so a checkpoint also lands in code intelligence; this makes "auto-sync to .handoff and .kb" TRUE.
 #
 # Ledger-residency (the kernel invariant): the shipped `hf` resolves a CWD-relative `.handoff/`
 # (`const HF=".handoff"`, no --ledger flag), so we run it from $META_ROOT — the witnessed FLEET
@@ -34,4 +35,7 @@ fi
 # $META_ROOT/.handoff/ledger.db is permitted; run hf from there so its CWD-relative .handoff resolves to it.
 cd "$META_ROOT" 2>/dev/null || exit 0
 "$HF" checkpoint --auto --quiet >/dev/null 2>&1 || true
+# TASK-0024 GO-LIVE: one-way mirror the witnessed FLEET ledger → GitKB (.kb context/overridable/
+# {active,progress}). Same $META_ROOT residency as the checkpoint (never a per-repo ledger). Fail-soft.
+"$HF" sync --auto >/dev/null 2>&1 || true
 exit 0

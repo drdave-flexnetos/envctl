@@ -6,15 +6,17 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 2   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003) + 7 (CI checks)
-cycles_total: 7
-last_item: TASK-0025 (CI required checks on develop) — DONE 2026-06-13 (cycle 7); ci.yml + develop protection
-status: ACTIVE (new session) 2026-06-13 — cycle 7 TASK-0025 DONE (owner: "add the checks to envctl
-  develop so automerge can be enabled"): added `.github/workflows/ci.yml` (rustfmt/clippy/test/gates),
-  fixed the `locate_walks_up` $META_FILE leak, set CI test serial. All 4 green locally; enabling repo
-  allow_auto_merge + develop branch protection requiring those contexts. NEXT (owner-directed): proceed
-  to **TASK-0024** — `hf sync` `.kb` GO-LIVE (run at $META_ROOT) + envctl card-minting. Then Epic C
-  TASK-0012. Budget 2/3.
+cycles_this_session: 3   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003) + 7 (CI checks) + 8 (TASK-0024)
+cycles_total: 8
+last_item: TASK-0024 (hf sync .kb GO-LIVE) — DONE 2026-06-13 (cycle 8); wired hf sync into checkpoint hook
+status: ACTIVE (new session) 2026-06-13 @ 3/3 (AT BUDGET → HAND OFF next). cycle 7 TASK-0025 DONE
+  (develop CI checks + branch protection LIVE — auto-merge gates fail-closed on rustfmt/clippy/test/gates;
+  PR #59 merged; gap-fix: parallel tests + job timeouts after serial-crypto slowness). cycle 8 TASK-0024
+  DONE: wired `hf sync --auto` into `.claude/hooks/hf-checkpoint.sh` (after `hf checkpoint`, at $META_ROOT),
+  so each checkpoint one-way mirrors the FLEET ledger → GitKB; verified live ("mirrored
+  context/overridable/{active,progress}"). Card-minting conditional-deferred (no envctl kb task docs).
+  Next pick: **Epic C TASK-0012** (crates/agent-env — kasetto absorption, large, fresh context) — the
+  main remaining keystone. HAND OFF now (budget 3/3); resume via `/forge-loop resume`; reset cycles to 0.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
