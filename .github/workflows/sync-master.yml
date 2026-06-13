@@ -1,14 +1,21 @@
 name: sync-master
 
-# Keep `master` as a protected mirror of `develop`: every push to develop
-# fast-forwards master. develop is the integration/working branch; master is
-# the protected release mirror. The workflow's GITHUB_TOKEN is granted a
-# branch-protection bypass for master (see repo branch-protection config), so
-# this sync succeeds while humans remain PR-gated on master.
+# Keep `master` as a mirror of `develop`: every push to develop fast-forwards master.
+# develop is the integration/working trunk; master is the release mirror.
+#
+# NOTE: master protection (a ruleset blocking human pushes/PRs) is PENDING — it requires the
+# fast-forward push to be made by an identity that can bypass the ruleset, since GITHUB_TOKEN
+# (github-actions[bot]) cannot be a bypass actor. The intended identity is the
+# `flexnetos-github-app` GitHub App (org secrets APP_ID/APP_CLIENT_ID + APP_PRIVATE_KEY), but
+# those org secrets are not yet visible to THIS repo. Until envctl is added to their repository
+# access list, this workflow uses GITHUB_TOKEN and master stays unprotected.
+#
+# NO-DOWNGRADE: fast-forward-only (never --force). Fails closed if master diverges from develop.
 
 on:
   push:
     branches: [develop]
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -32,11 +39,10 @@ jobs:
           set -euo pipefail
           git config user.name  "flexnetos-sync[bot]"
           git config user.email "sync@flexnetos.local"
-          # develop must be a strict descendant of master (no-downgrade invariant).
           if git merge-base --is-ancestor origin/master origin/develop; then
             git push origin "origin/develop:refs/heads/master"
             echo "master fast-forwarded to $(git rev-parse --short origin/develop)"
           else
-            echo "::error::develop is not a fast-forward of master — refusing to sync (would not be a clean promotion)."
+            echo "::error::develop is not a fast-forward of master — refusing to sync."
             exit 1
           fi

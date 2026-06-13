@@ -72,6 +72,41 @@ Two facts make the Seed a natural USB factor **without touching it**:
 streamable-HTTP client can't pass its health probe against the Seed's transport anyway. SSH is
 the Seed's documented admin path and the right possession bootstrap.
 
+## Amendment (2026-06-13) — transport: SSH tunnel → direct pinned-CA HTTPS
+
+**Trigger:** `secretctl unlock` (USB-first) succeeded interactively but **failed under the
+`env-ctl.service` systemd sandbox**. Root cause: the seam shelled `ssh genesis@169.254.42.1`, and
+`ProtectHome=read-only` (no writable `known_hosts`) + `BatchMode=yes` without
+`StrictHostKeyChecking=accept-new` + no ssh-agent ⇒ non-interactive host-key verification fails.
+Shelling `ssh` from a sandboxed daemon is fundamentally fragile.
+
+**Change (supersedes Decision §1's transport clause):** `seed_factor::sign_hex` now reaches the
+Seed by a **direct, blocking, pure-Rust HTTPS call** (ring-only `rustls`, already in the resolved
+graph) to `POST /api/v1/custody/sign`, validating the Seed's TLS against the **pinned Cognitum CA
+only** (`ENVCTL_SEED_CA`, default `/usr/local/share/ca-certificates/cognitum-ca.crt`) — FS-S7
+frozen-roots discipline, never the OS store. No `ssh`, no `known_hosts`, no agent, no `$HOME`
+access, no subprocess → works unchanged under the sandbox; the no-C gate stays green (rustls is
+already linked via `mitm-ca`; `seed-factor` just enables the same optional deps). Bounded by a
+15s connect/read/write timeout (replaces the SSH `ServerAlive*`/`--max-time` fences).
+
+**Token-at-rest decision (the open ADR item from the plan, now locked):** the device-bound,
+revocable bearer token is resolved from `ENVCTL_SEED_TOKEN`, else a **0600 token file**
+(`ENVCTL_SEED_TOKEN_FILE`, default `$XDG_DATA_HOME/env-ctl/seed-token`) — deliberately inside the
+unit's `ReadWritePaths` (`%h/.local/share/env-ctl`) so the daemon can read it *and* refresh it
+under `ProtectSystem=strict`. **Rotation = re-mint on demand:** on a missing/rejected token,
+`sign_hex` re-opens the **USB-only** `pair/window` (possession of the USB is the trust floor,
+ADR-057), re-pairs under the stable client `envctl-daemon` (replacing any prior token, so no
+per-unlock client leak — an improvement over the transient-client churn), persists, and retries
+once. A lost/expired token is therefore self-healing whenever the Seed is present. Env knobs:
+`ENVCTL_SEED_API` (base URL, default `https://169.254.42.1:8443`), `ENVCTL_SEED_CA`,
+`ENVCTL_SEED_TOKEN[_FILE]`, `ENVCTL_SEED_KEK_CONTEXT`.
+
+**Residual (owner-gated live verify):** if the Seed serves `pair/window` *only* on its own
+localhost (not over the `169.254.42.1` USB link-local), a cold daemon with no token file cannot
+self-bootstrap — the owner pre-seeds the token file once (e.g. by running the
+`seed_factor_probe` example or pairing over ssh-localhost). The `custody/sign` hot path is
+unaffected either way. This is the only step that needs the physical Seed + the running service.
+
 ## Consequences
 
 - **Positive:** the dual-KEK USB half is now real and hardware-backed; SSH-key possession +
