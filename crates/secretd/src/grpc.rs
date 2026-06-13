@@ -41,23 +41,20 @@ fn join_err(e: tokio::task::JoinError) -> Status {
 /// engine's unlock path uses to PROVE possession). The keyfile is HKDF IKM only — it never crosses
 /// the wire and is never persisted (the engine drops it after wrapping the slot).
 ///
-/// HARDWARE GATE: the shipped `RealUsbProbe::keyfile_for` is an unimplemented hardware seam in this
-/// build (USB enrollment is a deliberate human/hardware provisioning step — see the secretd
-/// provisioning runbook). Rather than invoke the `todo!()` seam (which would panic), we refuse
-/// CLEANLY and fail-closed: `Vault.Init --enroll-usb --apply` returns a precise error telling the
-/// operator the USB enrollment path is hardware-gated, while the wire/CLI/daemon plumbing around it
-/// is fully built and exercised (the passphrase enrollment + the dry-run preview both work end to
-/// end). When the real `keyfile_for` lands, this helper forwards to it unchanged.
+/// Forwards to `RealUsbProbe::keyfile_for`. Built with `--features seed-factor`, that resolves the
+/// keyfile from the **Cognitum Seed** (a deterministic, PARTUUID-bound Ed25519 signature) — so the
+/// material is identical at init and at unlock for the same `partuuid`. Without the feature the seam
+/// returns `None` and we refuse cleanly (fail-closed): a stock daemon has no USB backend, so the
+/// operator enrolls the passphrase keyslot and completes USB enrollment with a seed-factor build +
+/// the Seed present. `None` also covers a Seed that is unreachable/unpaired at runtime.
 fn read_usb_keyfile(partuuid: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, String> {
-    // The engine's `RealUsbProbe::keyfile_for` is `todo!()` in this build; calling it would panic.
-    // Fail closed with a clear, non-panicking refusal until the hardware probe is implemented.
-    let _ = partuuid;
-    Err(
-        "USB keyslot enrollment is a hardware-gated provisioning step not wired in this build \
-         (the USB keyfile probe seam is unimplemented). Enroll the passphrase keyslot now, and \
-         complete USB enrollment per docs once the dedicated USB token is inserted."
-            .to_string(),
-    )
+    use envctl_secrets::{RealUsbProbe, UsbProbe};
+    RealUsbProbe.keyfile_for(partuuid).ok_or_else(|| {
+        "USB possession not proven: the Cognitum Seed USB factor is unavailable (Seed unreachable / \
+         unpaired, or this secretd was not built with --features seed-factor). Enroll the passphrase \
+         keyslot as recovery and retry USB enrollment with the Seed present."
+            .to_string()
+    })
 }
 
 // ============================================================================================
