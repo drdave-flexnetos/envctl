@@ -175,6 +175,16 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Resolve the meta workspace root (via the `.meta.yaml` marker, like git's
+    /// `.git`) and emit environment exports so shells and configs locate meta
+    /// WITHOUT hardcoding paths. Read-only. Default prints POSIX `export` lines
+    /// for `eval "$(envctl env)"`; `--json` emits a map. This is the seam that
+    /// lets every config reference `$META_ROOT` no matter where meta is installed.
+    Env {
+        /// Explicit `.meta.yaml` path (else walk up from CWD / use $META_FILE).
+        #[arg(long)]
+        meta_file: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -184,7 +194,10 @@ fn main() -> anyhow::Result<()> {
     // — e.g. when the `meta dashboard` plugin shells to `envctl dashboard` from the
     // meta root. Use a detached engine (empty registry) for it; every other verb
     // still requires the real manifest.
-    let engine = if matches!(cli.cmd, Cmd::Dashboard { .. }) {
+    // `dashboard` and `env` are manifest-INDEPENDENT (they read `.meta.yaml`, not
+    // the component registry), so they must work from any cwd without a `manifest/`
+    // dir. Use a detached engine for them; every other verb requires the manifest.
+    let engine = if matches!(cli.cmd, Cmd::Dashboard { .. } | Cmd::Env { .. }) {
         Engine::detached()
     } else {
         Engine::load_default()?
@@ -308,6 +321,7 @@ fn main() -> anyhow::Result<()> {
             },
             json,
         ),
+        Cmd::Env { meta_file } => run_env(meta_file, json),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => {
@@ -335,6 +349,60 @@ fn main() -> anyhow::Result<()> {
             }
             run_action(engine, other, json)
         }
+    }
+}
+
+/// Resolve the meta workspace root from the `.meta.yaml` marker and print env
+/// exports. Read-only: the engine does the (non-printing) marker walk via
+/// `locate_meta_file`; the CLI owns the output. `eval "$(envctl env)"` makes
+/// `META_ROOT`/`META_FILE` available so configs never hardcode the meta path —
+/// the portability seam (ADR-0006). Honors `$META_FILE` / `--meta-file` override.
+fn run_env(meta_file: Option<std::path::PathBuf>, json: bool) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let meta_yaml = envctl_engine::dashboard::locate_meta_file(&cwd, meta_file.as_deref())?;
+    let meta_root = meta_yaml.parent().ok_or_else(|| {
+        anyhow::anyhow!("`.meta.yaml` at {} has no parent dir", meta_yaml.display())
+    })?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "META_ROOT": meta_root,
+                "META_FILE": meta_yaml,
+            }))?
+        );
+    } else {
+        println!(
+            "export META_ROOT={}",
+            sh_single_quote(&meta_root.to_string_lossy())
+        );
+        println!(
+            "export META_FILE={}",
+            sh_single_quote(&meta_yaml.to_string_lossy())
+        );
+    }
+    Ok(())
+}
+
+/// POSIX single-quote a value so `eval "$(envctl env)"` is safe for paths with
+/// spaces or shell metacharacters. Closes the quote, emits an escaped `'`, reopens.
+fn sh_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod env_cmd_tests {
+    use super::sh_single_quote;
+
+    #[test]
+    fn sh_single_quote_wraps_and_escapes() {
+        assert_eq!(
+            sh_single_quote("/home/d/Desktop/meta"),
+            "'/home/d/Desktop/meta'"
+        );
+        assert_eq!(sh_single_quote("/path with space"), "'/path with space'");
+        // embedded single quote: close, escaped quote, reopen
+        assert_eq!(sh_single_quote("a'b"), "'a'\\''b'");
     }
 }
 
@@ -432,7 +500,8 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
             | Cmd::Graph { .. }
             | Cmd::Lock { .. }
             | Cmd::Doctor
-            | Cmd::Dashboard { .. } => {
+            | Cmd::Dashboard { .. }
+            | Cmd::Env { .. } => {
                 unreachable!("handled in main")
             }
         };
