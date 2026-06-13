@@ -1,0 +1,48 @@
+name: Sync develop → master (FF-only mirror)
+
+# master is a PROTECTED, read-only downstream MIRROR of develop. develop is the sole
+# working trunk (default branch); all PRs land there. On every push to develop this
+# workflow fast-forwards master to match.
+#
+# NO-DOWNGRADE GUARANTEE: the push is fast-forward-only (never --force). If master ever
+# diverges from develop (e.g. a stray direct push), the FF is rejected and this job FAILS
+# LOUDLY rather than rewriting history — a human then reconciles. master only ever moves
+# forward to a commit that already contains its current tip.
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-develop-to-master
+  cancel-in-progress: false
+
+jobs:
+  fast-forward-master:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Fast-forward master to develop
+        run: |
+          set -euo pipefail
+          DEV_SHA="$(git rev-parse HEAD)"
+          echo "develop is at $DEV_SHA"
+          # FF-only push: no --force, no --force-with-lease. git rejects a non-fast-forward,
+          # which is exactly the fail-closed behavior we want (no-downgrade).
+          if git push origin "HEAD:refs/heads/master"; then
+            echo "✓ master fast-forwarded to develop ($DEV_SHA)"
+          else
+            echo "::error::master is not a fast-forward of develop — refusing to force. \
+            master has diverged and needs manual reconciliation (merge master → develop, \
+            then re-run). master is a downstream mirror and must never be written directly." >&2
+            exit 1
+          fi
