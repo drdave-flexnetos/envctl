@@ -6,17 +6,18 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 3   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003) + 7 (CI checks) + 8 (TASK-0024)
-cycles_total: 8
-last_item: TASK-0024 (hf sync .kb GO-LIVE) — DONE 2026-06-13 (cycle 8); wired hf sync into checkpoint hook
-status: ACTIVE (new session) 2026-06-13 @ 3/3 (AT BUDGET → HAND OFF next). cycle 7 TASK-0025 DONE
-  (develop CI checks + branch protection LIVE — auto-merge gates fail-closed on rustfmt/clippy/test/gates;
-  PR #59 merged; gap-fix: parallel tests + job timeouts after serial-crypto slowness). cycle 8 TASK-0024
-  DONE: wired `hf sync --auto` into `.claude/hooks/hf-checkpoint.sh` (after `hf checkpoint`, at $META_ROOT),
-  so each checkpoint one-way mirrors the FLEET ledger → GitKB; verified live ("mirrored
-  context/overridable/{active,progress}"). Card-minting conditional-deferred (no envctl kb task docs).
-  Next pick: **Epic C TASK-0012** (crates/agent-env — kasetto absorption, large, fresh context) — the
-  main remaining keystone. HAND OFF now (budget 3/3); resume via `/forge-loop resume`; reset cycles to 0.
+cycles_this_session: 1   # RESUME SESSION 2026-06-13 (reset to 0 on resume): cycle 9 = TASK-0012 kickoff
+cycles_total: 9
+last_item: TASK-0012 (crates/agent-env, kasetto absorption) — IN PROGRESS via /harness:rust-port; PR #71
+status: HANDING OFF 2026-06-13 (resume session, 1 cycle done; clean early boundary, token economy).
+  Cycle 9 = TASK-0012 kickoff: owner authorized the no-downgrade fork → synced meta/kasetto source UP to
+  pivoshenko v3.2.0 (divergence archived on flexnetos-divergence-backup-2026-06-13); seeded
+  crates/agent-env + ported model/* (foundational + 21-agent table + MCP/command formats), 78 tests +
+  no-c GREEN; **PR #71 → develop, auto-merge armed**. TASK-0012 is now driven by the rust-port
+  parity-ledger loop (55 [~] / 44 [ ] / 13 [≠] / 0 [x]) — NOT done until 100% parity.
+  **Resume the PORT** via `/harness:rust-port` (HANDOFF: `.handoff/loop/rust-port/HANDOFF.md`); the
+  forge-loop itself resumes via `/forge-loop resume` (next forge pick after TASK-0012 lands: TASK-0013
+  engine wiring, or another Epic). OWNER FOLLOW-UP: kasetto FORK origin/main force-push (see backlog TASK-0012 note).
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff

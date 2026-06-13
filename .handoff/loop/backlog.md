@@ -170,6 +170,19 @@ preset; multi-host resolver; 5 cmd + 4 MCP-merge additive transforms; 3 lock mod
   no-downgrade checklist; current doc is stale at v3.0.0).
 - [ ] **TASK-0012 (P0 of C):** New pure-Rust crate `crates/agent-env` — config model (6 keys +
   `extends`), multi-host source resolver, SHA-256 hash, lock. Drop `mimalloc`. no-c gate clean.
+  - **IN PROGRESS 2026-06-13 (forge-loop cycle, owner-directed `/harness:rust-port`).** Owner
+    resolved the no-downgrade fork: synced `meta/kasetto` source UP to **pivoshenko/kasetto v3.2.0**
+    (canonical upstream; FlexNetOS v3.0.0 divergence archived → `flexnetos-divergence-backup-2026-06-13`).
+    Crate `crates/agent-env` seeded + `model/*` ported (foundational config/extend/source/hash/lock +
+    full 21-agent preset table + 4 MCP/5 command formats); 78 tests + no-c GREEN. **PR #71 → develop
+    (auto-merge armed).** Now driven by the rust-port **parity ledger**
+    (`.handoff/loop/rust-port/parity-ledger.md`: 55 ported `[~]` / 44 todo `[ ]` / 13 front-end `[≠]`
+    / 0 verified `[x]`). Resume via `/harness:rust-port` (HANDOFF: `.handoff/loop/rust-port/HANDOFF.md`)
+    — next: parity-verifier pass, then fsops/config_edit/MCP-merge/commands. NOT done until 100% parity.
+    The ledger spans TASK-0012..0018 (Engine wiring = TASK-0013, CLI verbs = TASK-0014).
+  - **OWNER FOLLOW-UP (needs go-ahead):** the kasetto FORK (`FlexNetOS/env_manager_agent`) `origin/main`
+    is still v3.0.0+divergent; fully "syncing with pivoshenko" means a force-push rewriting 305 commits
+    on the fork — deferred for explicit owner OK (see `.handoff/loop/rust-port/HANDOFF.md`).
 - [ ] **TASK-0013:** Engine `agent_env` module + Engine methods + Events (agent_sync/add/remove/lock);
   non-printing, front-end parity.
 - [ ] **TASK-0014:** CLI verbs `envctl agent {sync,add,remove,lock,list,clean}` (--dry-run/--json/--locked)
