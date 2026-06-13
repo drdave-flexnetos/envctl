@@ -57,17 +57,22 @@ are **rendered by `hf`, never hand-written**.
 - [!] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
-  - **BLOCKED 2026-06-13 (cycle 2): shipped-binary capability gap → NEEDS-DECISION.** The shipped
-    `hf` is strictly CWD-relative (no `--ledger` flag, no `HANDOFF_DIR`/`HANDOFF_LEDGER` env):
-    `ledger_path`/`tasks_dir`/`packet_path` all resolve under `<CWD>/.handoff`. So you cannot render
-    envctl's Tier-A text/packet layer while the ledger stays at `$META_ROOT/.handoff/ledger.db`
-    (ADR-0004) — running from envctl makes a FORBIDDEN per-repo `ledger.db`; running from meta root
-    operates on the *kernel's* ledger/packets and `mint --from-kb` can't find `.kb`
-    (`current_dir().parent()/.kb`); and `hf seed` writes the kernel's own 22 `HFTASK-####` cards,
-    not the envctl backlog. Fix = a **kernel feature in `meta/handoff`** (ledger/dir split), out of
-    envctl scope. Full source-proven analysis + 3 decision options (A: add `--ledger`/`HANDOFF_DIR`
-    + meta-root `.kb` resolution [recommended]; B: rescope to shared-ledger-only; C: seed kernel
-    ledger at meta root) → `.handoff/decisions/FINDING-0002-hf-ledger-residency-vs-repo-tier-a.md`.
+  - **BLOCKED 2026-06-13 (cycle 2, REVISED): installed `hf` is the S1 spike, missing the fleet
+    verbs → NEEDS-DECISION.** The design is SETTLED (ADR-0004 §2/§3/§4 + PRD v2): per-repo
+    `.handoff/` is **text-only, no `ledger.db`**; events live in the **fleet** ledger
+    (`meta/.handoff/ledger.db` — cycle-1's target was correct; `meta/handoff/.handoff/ledger.db` is
+    the separate KERNEL ledger w/ 23 HFTASK cards); per-repo packets/cards are joined centrally via
+    **`hf fleet status`**. The blocker: the installed binary (S1 spike) lacks **`fleet`/`policy`/
+    `drift`/`sync`** (only `sync-cards`), which ADR-0001 §22 documents and ADR-0004 §76 cards as
+    "to implement" (HFTASK-0007 `session`+`policy.toml`, HFTASK-0011 `hf sync` `.kb` mirror, plus
+    `hf fleet status` + fleet-aware packet render). Fix = **build those verbs in `meta/handoff`**
+    (kernel scope), then re-run TASK-0002. NOTE: envctl's REQUIRED Tier-A text core
+    (`context/capsule.json`+`README`+`tasks/`+`packets/`) already exists; only OPTIONAL
+    `hooks/policies/skills` (residency-safe, no kernel dep) + the rendered/minted/synced parts
+    remain. v1's "add a `--ledger`/`HANDOFF_DIR` flag" is RETRACTED. Full analysis + 3 options
+    (A: build kernel fleet verbs [recommended]; B: seed the text subset now, defer the rest;
+    C: rescope to required-text-core + central `hf fleet` render) →
+    `.handoff/decisions/FINDING-0002-hf-ledger-residency-vs-repo-tier-a.md`.
   - GO-LIVE for `.handoff`↔`.kb` auto-sync: land/verify the kernel's `hf sync` (one-way `.kb`
     write-back, ADR-0003 HFTASK-0011) so the loop's `.handoff` cards/checkpoints sync to GitKB.
     NOTE: the broken `.kb` SessionStart hook was already FIXED (`meta/.claude/settings.json`:
