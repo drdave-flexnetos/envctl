@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook post"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook post"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook compact"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook compact"
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook pre"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook pre"
           }
         ]
       }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook end"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook end"
           }
         ]
       }
@@ -102,7 +102,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook start"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook start"
           }
         ]
       }
@@ -167,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook prompt"
+            "command": "'/home/drdave/Desktop/meta/icm/target/release/icm' hook prompt"
           }
         ]
       }
