@@ -16,6 +16,18 @@ status: ACTIVE (resumed) 2026-06-13 — cycle 3 TASK-0004 DONE. On resume (owner
   gate green. PR → develop (auto-promotes to master). Next pick: Epic A TASK-0002 (now executable:
   seed OPTIONAL hooks/policies/skills + hf fleet render envctl + hf sync inside a worktree cycle),
   or Epic C TASK-0012 (crates/agent-env, large). Resume via `/forge-loop resume`; reset cycles to 0.
+cycles_this_session: 2
+cycles_total: 2
+last_item: TASK-0002 — was BLOCKED cycle 2, now UNBLOCKED 2026-06-13 (hf fleet/sync verbs built); NEXT PICK
+status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 2 TASK-0002/0003 were
+  BLOCKED on missing hf fleet/sync verbs. **FINDING-0002 now RESOLVED:** a concurrent meta/handoff
+  session BUILT those verbs (PR #17 fleet/sync; commit 000e4c0 drift/policy + FLEET_GUIDE) and the
+  installed hf was rebuilt + verified. TASK-0002/0003 are UNBLOCKED. Owner deferred execution to the
+  NEXT session (let the kernel session settle). Resume: `/forge-loop resume from
+  .handoff/loop/HANDOFF.md` → NEXT PICK = TASK-0002 (seed Tier-A via hf fleet render + sync). Reset
+  cycles to 0. CAUTION: concurrent session may still be active in meta/handoff — use installed hf,
+  don't commit/build there.
+  Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
