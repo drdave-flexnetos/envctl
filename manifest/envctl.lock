@@ -30,6 +30,11 @@ content_hash = "af5110cb4a34882c"
 requires = []
 resolved = ""
 
+[components.claude-global-links]
+content_hash = "958163f21e9c8870"
+requires = []
+resolved = ""
+
 [components.codex-cli]
 content_hash = "9471ae9003dfb7a2"
 requires = ["bun"]
@@ -51,7 +56,7 @@ requires = ["nvidia-cuda-repo"]
 resolved = ""
 
 [components.dashboard]
-content_hash = "7be54724c8738147"
+content_hash = "8d1bb9db4a67b3c6"
 requires = [
     "claude-code-cli",
     "yazelix",
@@ -157,6 +162,26 @@ requires = [
 ]
 resolved = ""
 
+[components.group-portability]
+content_hash = "dabdf887a3edd6b0"
+requires = [
+    "claude-global-links",
+    "home-bin-links",
+    "home-config-links",
+    "meta-tool-links",
+]
+resolved = ""
+
+[components.home-bin-links]
+content_hash = "10acb59bb347cc1d"
+requires = ["home-config-links"]
+resolved = ""
+
+[components.home-config-links]
+content_hash = "09e55e59f4d50e82"
+requires = []
+resolved = ""
+
 [components.home-manager]
 content_hash = "4ba601bcc9326bb6"
 requires = ["nix"]
@@ -193,6 +218,11 @@ requires = [
     "ghostty",
     "podman",
 ]
+resolved = ""
+
+[components.meta-tool-links]
+content_hash = "c24beb8e0bf92b8e"
+requires = []
 resolved = ""
 
 [components.nerd-fonts]
@@ -279,7 +309,7 @@ requires = []
 resolved = ""
 
 [components.yazelix]
-content_hash = "bd314a45c059f954"
+content_hash = "124938c5ddff369e"
 requires = [
     "ghostty",
     "home-manager",
