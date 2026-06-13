@@ -16,11 +16,13 @@
 //! A libSQL `remote` connection holds a Hrana stream baton that sqld EXPIRES after a short idle
 //! window. The engine interleaves slow CPU work between store ops — most notably argon2id during
 //! `init_vault` (seconds to tens of seconds), which sits between a store read and the first
-//! `save_keyslot` write. If the baton expires in that gap the next statement fails with
-//! `STREAM_EXPIRED`. So every primitive runs through [`SyncConnection::run_retry`]: on a stream-expiry
-//! it reconnects ONCE (a fresh `db.connect()`) and retries. The retried statements are idempotent
-//! (`INSERT OR REPLACE` / reads) and a stream-expiry means the prior attempt never committed, so the
-//! retry is safe.
+//! `save_keyslot` write. If the baton expires in that gap the next statement fails — sqld surfaces
+//! this as either `STREAM_EXPIRED` ("the stream has expired due to inactivity") OR, for a baton
+//! gone stale across a long idle window or an advanced DB generation, a 400 `Received an invalid
+//! baton`. So every primitive runs through [`SyncConnection::run_retry`]: on EITHER shape (see
+//! [`is_stream_expired`]) it reconnects ONCE (a fresh `db.connect()`) and retries. The retried
+//! statements are idempotent (`INSERT OR REPLACE` / reads) and a stream fault means the prior
+//! attempt never committed, so the retry is safe.
 
 use std::sync::{Arc, Mutex};
 
@@ -39,15 +41,29 @@ pub struct SyncConnection {
     conn: Arc<Mutex<libsql::Connection>>,
 }
 
-/// True if `e` is a Hrana stream-expiry (the idle-baton timeout we transparently reconnect on).
+/// True if `e` is a recoverable Hrana stream/baton fault — one where the fix is to reconnect (a
+/// fresh `db.connect()`) and retry, because the prior statement never committed.
 ///
-/// libSQL 0.9.30 surfaces the server `code` `STREAM_EXPIRED` (and message "The stream has expired
-/// due to inactivity") through the error `Display` (the Hrana `StreamError` Debug-prints the proto
-/// `Error{message,code}`). We match case-insensitively on both the code and the prose so a future
-/// libSQL formatting tweak is less likely to silently disable reconnect; see the unit test below.
+/// sqld surfaces TWO distinct shapes of "your Hrana session is gone", BOTH idle/staleness-driven
+/// and BOTH recoverable by reconnecting:
+///   * `STREAM_EXPIRED` — "The stream has expired due to inactivity" (the idle-baton timeout).
+///   * `Received an invalid baton` (HTTP 400) — sqld rejects a stale/advanced/unknown baton when a
+///     long-idle connection makes its first request, or after the DB generation advanced under a
+///     concurrent writer. Observed on `secretctl unlock` after the daemon sat locked (idle) for a
+///     long window (2026-06-13). This shape was previously UNMATCHED, so `run_retry` did not
+///     reconnect and the 400 surfaced to the caller as an unlock failure.
+///
+/// We match case-insensitively on the codes/prose so a libSQL formatting tweak is less likely to
+/// silently disable reconnect; see the unit test below. Genuine, non-session errors (UNIQUE
+/// violations, connection-refused) must NOT match — they are not retryable.
 fn is_stream_expired(e: &Error) -> bool {
     let s = e.to_string().to_ascii_lowercase();
-    s.contains("stream_expired") || s.contains("stream has expired") || s.contains("stream expired")
+    s.contains("stream_expired")
+        || s.contains("stream has expired")
+        || s.contains("stream expired")
+        || s.contains("invalid baton")
+        || s.contains("baton not found")
+        || s.contains("stream not found")
 }
 
 impl SyncConnection {
@@ -201,6 +217,22 @@ mod tests {
         )));
         assert!(is_stream_expired(&Error::ExecuteFailed(
             "stream_expired".into()
+        )));
+        // The "invalid baton" shape — the exact error seen on `secretctl unlock` after a long idle
+        // window (2026-06-13). Must reconnect+retry, not surface a 400.
+        assert!(
+            is_stream_expired(&Error::QueryFailed(
+                "Hrana: `api error: `status=400 Bad Request, body=Received an invalid baton``"
+                    .into()
+            )),
+            "the `invalid baton` 400 must trigger a reconnect"
+        );
+        // Sibling baton/stream-gone shapes are also recoverable by reconnecting.
+        assert!(is_stream_expired(&Error::QueryFailed(
+            "baton not found".into()
+        )));
+        assert!(is_stream_expired(&Error::QueryFailed(
+            "stream not found".into()
         )));
         // Unrelated errors must NOT trigger a reconnect (no spurious retry of a genuine failure).
         assert!(!is_stream_expired(&Error::ExecuteFailed(
