@@ -123,6 +123,40 @@ async fn run(args: Cli) -> anyhow::Result<()> {
             let r = c.status(v1::StatusReq {}).await?.into_inner();
             render::render_status(&r, json);
         }
+        Cmd::Init {
+            passphrase_stdin,
+            enroll_usb,
+            usb_partuuid,
+            apply,
+        } => {
+            // `--usb-partuuid` is required when enrolling a USB keyslot (the daemon also re-checks,
+            // fail-closed). Catch it client-side for a friendlier error.
+            if enroll_usb
+                && usb_partuuid
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
+            {
+                anyhow::bail!("--enroll-usb requires --usb-partuuid <UUID>");
+            }
+            let passphrase = if passphrase_stdin {
+                Some(read_stdin_string()?)
+            } else {
+                None
+            };
+            let mut c = VaultClient::new(connect(sock).await?);
+            let stream = c
+                .init(v1::InitReq {
+                    passphrase,
+                    enroll_usb,
+                    usb_partition_uuid: usb_partuuid.unwrap_or_default(),
+                    apply,
+                })
+                .await?
+                .into_inner();
+            drain(stream, json).await?;
+        }
         Cmd::Unlock { passphrase_stdin } => {
             let passphrase = if passphrase_stdin {
                 Some(read_stdin_string()?)

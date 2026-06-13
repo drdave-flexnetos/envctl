@@ -48,11 +48,25 @@ message RunFinished   { RunSummary summary = 1; }
 
 // ===== Vault: secrets CRUD =====
 service Vault {
+  rpc Init   (InitReq)       returns (stream Event);   // genesis: mint DEK + enroll keyslots; apply-gated; REFUSES re-init
   rpc Add    (AddSecretReq)  returns (stream Event);   // additive; backs up on overwrite
   rpc Get    (GetSecretReq)  returns (GetSecretResp);  // unary; metadata only unless apply+confirm reveal; audited
   rpc List   (ListSecretReq) returns (ListSecretResp); // unary; metadata only
   rpc Rm     (RmSecretReq)   returns (stream Event);   // destructive: apply-gated (default dry-run)
   rpc Rotate (RotateReq)     returns (stream Event);   // destructive: apply-gated (full DEK/body re-seal where applicable)
+}
+// REVIEW FIX (fail-closed, FS-S13/FS-S22): Vault.Init mints the DEK + enrolls keyslots ONCE. `apply`
+// defaults false (proto3) = DRY-RUN preview (the safe state); the daemon mutates ONLY when apply=true.
+// The engine refuses if the vault already exists (no clobber). Argon2 params are NEVER accepted from
+// the client — the daemon forces the hardened floor server-side (m=1GiB, t=4, p=4). When `enroll_usb`
+// is set, the daemon reads the keyfile via the UsbProbe seam by `usb_partition_uuid` — the keyfile
+// NEVER crosses the wire. The optional passphrase is owner-only over the peercred-gated UDS and is
+// zeroized daemon-side after derivation.
+message InitReq {
+  optional string passphrase = 1;        // owner-only over the UDS; zeroized after derivation
+  bool enroll_usb = 2;                    // also enroll a USB keyslot (keyfile read via UsbProbe seam)
+  string usb_partition_uuid = 3;          // PARTUUID identifying the USB keyslot (selector only; not the key)
+  bool apply = 4;                         // apply=false => dry-run preview (CF-8); no mutation
 }
 message SecretMeta    { string name = 1; ProviderKind provider = 2; string created_at = 3; uint32 version = 4; string note = 5; bool broker_only = 6; }
 message AddSecretReq  { string name = 1; ProviderKind provider = 2; bytes value = 3; string note = 4; bool overwrite = 5; bool broker_only = 6; }

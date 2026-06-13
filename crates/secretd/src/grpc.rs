@@ -37,6 +37,29 @@ fn join_err(e: tokio::task::JoinError) -> Status {
     Status::internal(format!("blocking task failed: {e}"))
 }
 
+/// Read the USB keyslot keyfile for `partuuid` via the engine's `UsbProbe` seam (the same seam the
+/// engine's unlock path uses to PROVE possession). The keyfile is HKDF IKM only — it never crosses
+/// the wire and is never persisted (the engine drops it after wrapping the slot).
+///
+/// HARDWARE GATE: the shipped `RealUsbProbe::keyfile_for` is an unimplemented hardware seam in this
+/// build (USB enrollment is a deliberate human/hardware provisioning step — see the secretd
+/// provisioning runbook). Rather than invoke the `todo!()` seam (which would panic), we refuse
+/// CLEANLY and fail-closed: `Vault.Init --enroll-usb --apply` returns a precise error telling the
+/// operator the USB enrollment path is hardware-gated, while the wire/CLI/daemon plumbing around it
+/// is fully built and exercised (the passphrase enrollment + the dry-run preview both work end to
+/// end). When the real `keyfile_for` lands, this helper forwards to it unchanged.
+fn read_usb_keyfile(partuuid: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, String> {
+    // The engine's `RealUsbProbe::keyfile_for` is `todo!()` in this build; calling it would panic.
+    // Fail closed with a clear, non-panicking refusal until the hardware probe is implemented.
+    let _ = partuuid;
+    Err(
+        "USB keyslot enrollment is a hardware-gated provisioning step not wired in this build \
+         (the USB keyfile probe seam is unimplemented). Enroll the passphrase keyslot now, and \
+         complete USB enrollment per docs once the dedicated USB token is inserted."
+            .to_string(),
+    )
+}
+
 // ============================================================================================
 // Vault
 // ============================================================================================
@@ -48,9 +71,71 @@ pub struct VaultSvc {
 
 #[tonic::async_trait]
 impl v1::vault_server::Vault for VaultSvc {
+    type InitStream = EventStream;
     type AddStream = EventStream;
     type RmStream = EventStream;
     type RotateStream = EventStream;
+
+    /// Vault.Init — genesis: mint the DEK + enroll the passphrase keyslot (and optionally a USB
+    /// keyslot) over `Engine::init_vault`. Owner-only (the SO_PEERCRED interceptor already gated the
+    /// channel). FAIL-CLOSED + apply-gated:
+    ///   * `apply=false` (the default) is a DRY-RUN: it emits a preview of what init WOULD do and
+    ///     mutates NOTHING (no DEK, no keyslot, no audit row).
+    ///   * `apply=true` runs the real `init_vault`, which itself REFUSES to clobber an existing vault
+    ///     (engine guard) and re-validates the Argon2 floor.
+    /// The daemon FORCES the hardened Argon2 params server-side ([`conv::forced_argon2_params`]); the
+    /// client never supplies KDF params. The optional passphrase is owner-only over the UDS and is
+    /// zeroized after `init_vault` derives from it. For a USB keyslot the keyfile is read via the
+    /// `UsbProbe` seam by PARTUUID — it is NEVER carried on the wire.
+    async fn init(
+        &self,
+        request: Request<v1::InitReq>,
+    ) -> Result<Response<Self::InitStream>, Status> {
+        let req = request.into_inner();
+        // Validate USB fields at the boundary (enroll_usb REQUIRES a PARTUUID). Fails closed.
+        let usb_uuid = conv::init_usb_uuid(&req)?;
+        let apply = req.apply;
+        // Move the optional passphrase into a Zeroizing buffer immediately; the proto String drops
+        // with `req`. A missing passphrase means a USB-only enrollment (no passphrase keyslot is
+        // valid only if a USB slot is enrolled — the engine requires at least one factor).
+        let passphrase: Zeroizing<String> = Zeroizing::new(req.passphrase.unwrap_or_default());
+        let params = conv::forced_argon2_params();
+
+        let stream = run_streaming(self.engine.clone(), move |engine, sink: &EventSink| {
+            use envctl_secrets::event::{SecretEvent, Stream};
+            // DRY-RUN (the default, CF-8): preview only — mutate nothing.
+            if !apply {
+                let usb_note = match &usb_uuid {
+                    Some(u) => format!(" + a USB keyslot for PARTUUID {u}"),
+                    None => String::new(),
+                };
+                sink.emit(SecretEvent::Log {
+                    source: "vault.init".to_string(),
+                    stream: Stream::Stdout,
+                    line: format!(
+                        "DRY-RUN: would initialize a fresh vault (passphrase keyslot{usb_note}; \
+                         Argon2id m={} KiB, t={}, p={}). Re-run with --apply to mutate.",
+                        params.m_kib, params.t_cost, params.p_lanes
+                    ),
+                });
+                return Ok(());
+            }
+
+            // APPLY: read the USB keyfile via the seam (possession is proven cryptographically by the
+            // engine when it wraps the slot). The keyfile NEVER crosses the wire.
+            let usb_keyfile = match &usb_uuid {
+                Some(uuid) => match read_usb_keyfile(uuid) {
+                    Ok(kf) => Some(kf),
+                    Err(e) => anyhow::bail!(e),
+                },
+                None => None,
+            };
+
+            // The engine refuses to clobber an existing vault and re-validates the Argon2 floor.
+            engine.init_vault(passphrase, usb_uuid.clone(), usb_keyfile, params, sink)
+        });
+        Ok(Response::new(stream))
+    }
 
     async fn add(
         &self,

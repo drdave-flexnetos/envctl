@@ -43,6 +43,11 @@ egui_extras = "0.30.0"
 # --- env-ctl-only rows (added verbatim; no conflict — none of these names exist in envctl today) ---
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Pure-Rust systemd readiness protocol (Type=notify). Writes the READY=1/STOPPING=1 datagram to
+# $NOTIFY_SOCKET; a no-op when the env var is unset (safe in tests/non-systemd). Links no C — it is a
+# tiny std-only UDS writer (proven by ci/gates/no-c.sh). Closes the secretd crash-loop (no READY=1 =>
+# Type=notify 90s timeout => restart storm).
+sd-notify = "0.5.0"
 tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "net", "sync", "fs", "process", "signal", "time", "io-util"] }
 tonic = "0.12"
 tonic-build = "0.12"

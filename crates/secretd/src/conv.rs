@@ -16,10 +16,38 @@
 // and would churn every call site for no real gain — allow it module-wide at the proto boundary.
 #![allow(clippy::result_large_err)]
 use envctl_secrets::broker::{Method, Provider, RelayKind, RelayPolicy, SwapMode};
-use envctl_secrets::keyslot::Factor;
+use envctl_secrets::keyslot::{Argon2Params, Factor};
 use envctl_secrets::{AuditRecord, SecretEvent, SecretMeta};
 use envctl_secrets_proto::v1;
 use tonic::Status;
+
+// ---- Vault.Init: forced server-side Argon2 floor + USB-field validation ----------------------
+
+/// The Argon2id KDF params the daemon FORCES for a fresh passphrase keyslot. The client NEVER
+/// supplies KDF params over the wire (a hostile/downgraded client could otherwise request a weak
+/// `m`/`t` — FS-S13); the daemon pins the hardened defaults (`Argon2Params::default()` =
+/// m=1 GiB, t=4, p=4, well above `ARGON2_M_KIB_FLOOR`/`ARGON2_T_COST_FLOOR`). The engine's
+/// `init_vault` re-validates these against its floors regardless, so this is belt-and-suspenders.
+pub fn forced_argon2_params() -> Argon2Params {
+    Argon2Params::default()
+}
+
+/// Validate the USB enrollment fields of an `InitReq` and return the PARTUUID to enroll, if any.
+/// `enroll_usb` REQUIRES a non-empty `usb_partition_uuid` (the slot selector / identity, OI-5);
+/// the keyfile itself is NEVER on the wire — the daemon reads it via the `UsbProbe` seam. An
+/// `enroll_usb` without a UUID is a hard `invalid_argument` (fail-closed at the boundary).
+pub fn init_usb_uuid(req: &v1::InitReq) -> Result<Option<String>, Status> {
+    if !req.enroll_usb {
+        return Ok(None);
+    }
+    let uuid = req.usb_partition_uuid.trim();
+    if uuid.is_empty() {
+        return Err(Status::invalid_argument(
+            "enroll_usb requires a non-empty usb_partition_uuid",
+        ));
+    }
+    Ok(Some(uuid.to_string()))
+}
 
 // ---- small enum string maps (engine -> stable wire strings) --------------------------------
 
@@ -334,4 +362,61 @@ fn hex_encode(bytes: &[u8]) -> String {
         s.push_str(&format!("{b:02x}"));
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use envctl_secrets::keyslot::{ARGON2_M_KIB_FLOOR, ARGON2_T_COST_FLOOR};
+
+    fn init_req(enroll_usb: bool, uuid: &str) -> v1::InitReq {
+        v1::InitReq {
+            passphrase: Some("pp".to_string()),
+            enroll_usb,
+            usb_partition_uuid: uuid.to_string(),
+            apply: false,
+        }
+    }
+
+    #[test]
+    fn forced_argon2_is_at_or_above_the_floor() {
+        // The daemon forces a server-side floor; it must never sit below the engine's downgrade
+        // floors (FS-S13). This is the belt to the engine's suspenders.
+        let p = forced_argon2_params();
+        assert!(
+            p.m_kib >= ARGON2_M_KIB_FLOOR,
+            "m_kib below floor: {}",
+            p.m_kib
+        );
+        assert!(
+            p.t_cost >= ARGON2_T_COST_FLOOR,
+            "t_cost below floor: {}",
+            p.t_cost
+        );
+        assert!(p.p_lanes >= 1);
+    }
+
+    #[test]
+    fn init_usb_uuid_none_when_not_enrolling() {
+        assert_eq!(init_usb_uuid(&init_req(false, "")).unwrap(), None);
+        // A stray uuid without enroll_usb is ignored (no USB slot is enrolled).
+        assert_eq!(init_usb_uuid(&init_req(false, "SOME-UUID")).unwrap(), None);
+    }
+
+    #[test]
+    fn init_usb_uuid_requires_uuid_when_enrolling() {
+        // FAIL-CLOSED: enroll_usb with no/blank partuuid is invalid_argument.
+        let err = init_usb_uuid(&init_req(true, "")).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err = init_usb_uuid(&init_req(true, "   ")).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn init_usb_uuid_trims_and_returns_uuid() {
+        assert_eq!(
+            init_usb_uuid(&init_req(true, "  E2E-USB-1234 ")).unwrap(),
+            Some("E2E-USB-1234".to_string())
+        );
+    }
 }

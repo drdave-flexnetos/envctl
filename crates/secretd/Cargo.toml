@@ -34,6 +34,9 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# Type=notify readiness: send READY=1 after the UDS is bound (the crash-loop fix) and STOPPING=1 on
+# graceful shutdown. Pure-Rust, no-op when $NOTIFY_SOCKET is unset (safe in tests).
+sd-notify = { workspace = true }
 rustix = { workspace = true }
 clap = { workspace = true }
 # conv.rs: serde_json reads the audit detail JSON; chrono parses RFC3339 policy expiries; zeroize

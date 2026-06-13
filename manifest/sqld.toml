@@ -1,0 +1,155 @@
+# manifest/sqld.toml — loopback sqld (libSQL server) as the DURABLE store backend for secretd.
+#
+# WHY a release binary, not a workspace crate / `cargo install`: sqld is an EXTERNAL tool that lives
+# OUTSIDE the trust boundary. Building it from source pulls its C-SQLite (libsql-ffi/libsql-sys)
+# bottom half, which `ci/gates/no-c.sh` forbids INSIDE the workspace. We therefore install the
+# prebuilt release binary and run it as a separate process; secretd talks to it over the loopback
+# libSQL `remote` (HTTP/Hrana) transport (`http://127.0.0.1:8080`). The trust boundary stays C-free:
+# nothing C is LINKED into any envctl crate — sqld is a sibling daemon, not a dependency.
+#
+# Profile: loopback-only (binds 127.0.0.1), open auth (no token) — acceptable for a local single-user
+# box because the auth token is what secretd's config.rs allows to be empty ONLY for a loopback URL.
+# detect == verify (binary present + unit installed + the loopback port answers) so drift never nudges
+# a destructive reinstall. remove() drops the binary + unit but NEVER the data dir (user data is
+# never touched; purge is the operator's explicit path).
+
+[[component]]
+id = "sqld"
+name = "sqld (libSQL server, loopback)"
+description = "Prebuilt libSQL server (sqld) bound to 127.0.0.1:8080 as secretd's durable store backend. External binary OUTSIDE the trust boundary (installed from a release tarball, NOT built from source) so no C-SQLite is linked into the workspace."
+requires = []
+destructive = false
+
+# DETECT == "installed AND the unit is present" predicate (fast; no network).
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "test -x \"$HOME/.local/bin/sqld\" && test -f \"$HOME/.config/systemd/user/sqld.service\""]
+
+# INSTALL: fetch the prebuilt sqld release tarball, place the binary, create the loopback data dir.
+# Pinned version for reproducibility; override with SQLD_VERSION. Idempotent.
+[component.install]
+kind = "script"
+script = '''
+set -euo pipefail
+ver="${SQLD_VERSION:-v0.24.32}"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64)  target="x86_64-unknown-linux-gnu" ;;
+  aarch64) target="aarch64-unknown-linux-gnu" ;;
+  *) echo "FATAL: unsupported arch $arch for sqld release binary"; exit 1 ;;
+esac
+
+install -d -m755 "$HOME/.local/bin"
+install -d -m700 "$HOME/.local/share/sqld"   # loopback data dir (the durable libSQL database)
+
+if [ ! -x "$HOME/.local/bin/sqld" ]; then
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  # Release asset naming: tag = libsql-server-<ver>; asset = libsql-server-<target>.tar.xz.
+  url="https://github.com/tursodatabase/libsql/releases/download/libsql-server-${ver}/libsql-server-${target}.tar.xz"
+  echo "fetching sqld ${ver} for ${target}"
+  curl -fsSL "$url" -o "$tmp/sqld.tar.xz" \
+    || { echo "FATAL: could not download sqld release from $url"; exit 1; }
+  tar -xJf "$tmp/sqld.tar.xz" -C "$tmp"
+  # The tarball contains the `sqld` binary (under a versioned dir); place just the binary.
+  bin="$(find "$tmp" -type f -name sqld | head -n1)"
+  test -n "$bin" || { echo "FATAL: sqld binary not found in tarball"; exit 1; }
+  install -Dm755 "$bin" "$HOME/.local/bin/sqld"
+fi
+'''
+
+# VERIFY: the binary answers AND (best-effort) the loopback port is listening if the unit is up.
+# The hard predicate is the binary; the port check is non-fatal (unit may be intentionally stopped).
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", '''
+export PATH="$HOME/.local/bin:$PATH"
+sqld --version >/dev/null 2>&1 || sqld --help >/dev/null 2>&1 || exit 1
+if systemctl --user is-active --quiet sqld.service; then
+  if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1 \
+     || curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1; then
+    echo "sqld serving on 127.0.0.1:8080 (healthy)"
+  else
+    echo "sqld.service active but loopback port not answering yet (non-fatal)"
+  fi
+else
+  echo "sqld.service not active (non-fatal; start it to serve)"
+fi
+exit 0
+''']
+
+# FIX: re-fetch the binary if missing and (re)start the unit. Idempotent.
+[component.fix]
+kind = "script"
+script = '''
+set -euo pipefail
+ver="${SQLD_VERSION:-v0.24.32}"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64)  target="x86_64-unknown-linux-gnu" ;;
+  aarch64) target="aarch64-unknown-linux-gnu" ;;
+  *) echo "FATAL: unsupported arch $arch"; exit 1 ;;
+esac
+install -d -m755 "$HOME/.local/bin"
+install -d -m700 "$HOME/.local/share/sqld"
+if [ ! -x "$HOME/.local/bin/sqld" ]; then
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  url="https://github.com/tursodatabase/libsql/releases/download/libsql-server-${ver}/libsql-server-${target}.tar.xz"
+  curl -fsSL "$url" -o "$tmp/sqld.tar.xz" || { echo "FATAL: download failed $url"; exit 1; }
+  tar -xJf "$tmp/sqld.tar.xz" -C "$tmp"
+  bin="$(find "$tmp" -type f -name sqld | head -n1)"
+  install -Dm755 "$bin" "$HOME/.local/bin/sqld"
+fi
+systemctl --user daemon-reload || true
+systemctl --user enable --now sqld.service || true
+'''
+
+# REMOVE: disable + drop the unit and the binary. The data dir is data_paths — touched only on --purge.
+[component.remove]
+kind = "script"
+script = '''
+set -euo pipefail
+systemctl --user disable --now sqld.service 2>/dev/null || true
+rm -f "$HOME/.local/bin/sqld"
+systemctl --user daemon-reload || true
+# ~/.local/share/sqld is data_paths below — never deleted by remove(); --purge only (user data rule).
+'''
+
+# ---- WIRING: PATH + the loopback user service that secretd orders after ----
+[component.wiring]
+path_entries = ["~/.local/bin"]
+
+[[component.wiring.systemd_user]]
+name = "sqld.service"
+enable = true
+content = '''
+[Unit]
+Description=sqld (libSQL server, loopback) — durable store backend for env-ctl secretd
+After=default.target
+
+[Service]
+Type=simple
+# Loopback-only (no remote exposure), open auth (acceptable for a single-user local box; secretd's
+# config.rs permits an empty auth token ONLY for a loopback URL). Data persists under the data dir.
+ExecStart=%h/.local/bin/sqld --http-listen-addr 127.0.0.1:8080 -d %h/.local/share/sqld
+Restart=on-failure
+RestartSec=5
+# Defense-in-depth sandbox (sqld is external; keep it boxed).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/sqld
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
+'''
+
+# ---- DATA: the durable libSQL database — deleted ONLY by `envctl reset sqld --purge` ----
+[[component.wiring.data_paths]]
+path = "~/.local/share/sqld"

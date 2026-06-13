@@ -499,6 +499,159 @@ async fn e2e_authz_deny_non_owner() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ---- test 2b: Vault.Init over the REAL server (apply-gating + refusals) -----------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn e2e_vault_init_apply_gated_and_refusals() {
+    // A FRESH engine over an UNINITIALIZED in-mem vault. The daemon's Vault.Init drives the real
+    // grpc::Vault::init -> conv::init_usb_uuid / forced_argon2_params -> engine.init_vault path.
+    let (dir, paths) = temp_paths("init");
+    let keyfile = Zeroizing::new(vec![0x5Au8; 64]);
+    let engine = make_engine(&paths, &keyfile);
+
+    let sock = paths.control_socket();
+    let listener = bind(&sock);
+    let owner_uid = rustix::process::getuid().as_raw();
+    let server_engine = engine.clone();
+    let server = tokio::spawn(async move {
+        envctl_secretd::server::serve(server_engine, owner_uid, listener, std::future::pending())
+            .await
+            .expect("serve");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let wire: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let pp = "correct horse battery staple";
+
+    // 1. DRY-RUN (apply=false): emits a preview Log and mutates NOTHING.
+    {
+        let mut vault = v1::vault_client::VaultClient::new(connect(sock.clone()).await);
+        let evs = drain(
+            vault
+                .init(v1::InitReq {
+                    passphrase: Some(pp.to_string()),
+                    enroll_usb: false,
+                    usb_partition_uuid: String::new(),
+                    apply: false,
+                })
+                .await
+                .expect("init dry-run rpc")
+                .into_inner(),
+            &wire,
+        )
+        .await;
+        assert!(
+            evs.iter().any(|e| matches!(
+                &e.kind, Some(v1::event::Kind::Log(l)) if l.line.contains("DRY-RUN")
+            )),
+            "dry-run init must emit a DRY-RUN preview Log, got {evs:?}"
+        );
+    }
+
+    // 1b. PROOF dry-run mutated nothing: an unlock now must FAIL (no keyslots exist yet).
+    {
+        let mut lock = v1::lock_client::LockClient::new(connect(sock.clone()).await);
+        let stream = lock
+            .unlock(v1::UnlockReq {
+                passphrase: Some(pp.to_string()),
+            })
+            .await
+            .expect("unlock rpc after dry-run")
+            .into_inner();
+        let err = drain_expect_err(stream).await;
+        assert!(
+            !err.is_empty(),
+            "unlock after a dry-run init must fail (vault not initialized)"
+        );
+    }
+
+    // 2. enroll_usb WITHOUT a partuuid: invalid_argument (fail-closed at the boundary).
+    {
+        let mut vault = v1::vault_client::VaultClient::new(connect(sock.clone()).await);
+        let err = vault
+            .init(v1::InitReq {
+                passphrase: Some(pp.to_string()),
+                enroll_usb: true,
+                usb_partition_uuid: String::new(),
+                apply: true,
+            })
+            .await
+            .expect_err("enroll_usb without partuuid must be rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    // 3. APPLY a passphrase-only init: succeeds, and a subsequent unlock now WORKS.
+    {
+        let mut vault = v1::vault_client::VaultClient::new(connect(sock.clone()).await);
+        let _ = drain(
+            vault
+                .init(v1::InitReq {
+                    passphrase: Some(pp.to_string()),
+                    enroll_usb: false,
+                    usb_partition_uuid: String::new(),
+                    apply: true,
+                })
+                .await
+                .expect("init apply rpc")
+                .into_inner(),
+            &wire,
+        )
+        .await;
+
+        let mut lock = v1::lock_client::LockClient::new(connect(sock.clone()).await);
+        let evs = drain(
+            lock.unlock(v1::UnlockReq {
+                passphrase: Some(pp.to_string()),
+            })
+            .await
+            .expect("unlock after apply init")
+            .into_inner(),
+            &wire,
+        )
+        .await;
+        assert!(
+            evs.iter()
+                .any(|e| matches!(&e.kind, Some(v1::event::Kind::VaultUnlocked(_)))),
+            "unlock after an applied init must emit VaultUnlocked, got {evs:?}"
+        );
+    }
+
+    // 4. RE-INIT (apply) is REFUSED by the engine guard (no clobber).
+    {
+        let mut vault = v1::vault_client::VaultClient::new(connect(sock.clone()).await);
+        let stream = vault
+            .init(v1::InitReq {
+                passphrase: Some(pp.to_string()),
+                enroll_usb: false,
+                usb_partition_uuid: String::new(),
+                apply: true,
+            })
+            .await
+            .expect("re-init rpc")
+            .into_inner();
+        let err = drain_expect_err(stream).await;
+        assert!(
+            err.contains("already initialized"),
+            "re-init must be refused with 'already initialized', got {err:?}"
+        );
+    }
+
+    server.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Drain a streaming RPC that is expected to terminate with a terminal `Err(Status)`; returns the
+/// status message (empty if the stream ended cleanly with no error).
+async fn drain_expect_err(mut s: Streaming<v1::Event>) -> String {
+    loop {
+        match s.message().await {
+            Ok(Some(_)) => continue,
+            Ok(None) => return String::new(),
+            Err(status) => return status.message().to_string(),
+        }
+    }
+}
+
 // ---- test 3: conv drift / round-trip (the documented invariant) ------------------------------
 
 #[test]
