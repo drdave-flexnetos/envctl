@@ -106,17 +106,20 @@ are **rendered by `hf`, never hand-written**.
   - **Wired** into the loop verify-on-resume (`.handoff/loop/HANDOFF.md`) + `CLAUDE.md` gate list.
     Verified: positive PASS on the seeded Tier-A; negative tests (stray `*.db`, bad packet/capsule
     schema) all fail closed (exit 1). GO-LIVE + card-minting split to **TASK-0024**.
-- [ ] **TASK-0024 (P2, Epic A) — `hf sync` `.kb` GO-LIVE + envctl card-minting** (split from TASK-0003):
-  - **GO-LIVE for `.handoff`↔`.kb` auto-sync (run at `$META_ROOT`, NEVER in-member — `hf sync` opens a
-    CWD-relative ledger):** verify the kernel's `hf sync` one-way `.kb` write-back (ADR-0003
-    HFTASK-0011) so the loop's `.handoff` cards/checkpoints mirror into GitKB. The broken `.kb`
-    SessionStart hook is already FIXED (`meta/.claude/settings.json`: `git kb service` → guarded
-    `git kb serve`, meta main `bf68d57`). Acceptance: `hf sync` reflects a checkpoint into `.kb` (the
-    `/verify` finding's "auto-sync to .handoff and .kb" becomes TRUE).
-  - **Card-minting:** populate `envctl/.handoff/tasks/` via `hf task mint --from-kb <slug>` once kb
-    task docs exist for the envctl backlog (today `tasks/` is empty; packet degrades to "no open
-    cards"). Reference: `meta/handoff/FLEET_GUIDE.md` for verb usage. CAUTION: use the installed `hf`;
-    do not build/commit in `meta/handoff` while a kernel session may be active.
+- [x] **TASK-0024 (P2, Epic A) — `hf sync` `.kb` GO-LIVE DONE 2026-06-13 (cycle 8); card-minting
+  conditional-deferred** (split from TASK-0003):
+  - **GO-LIVE ✓:** wired `hf sync --auto` into the Stop/PreCompact hook
+    (`.claude/hooks/hf-checkpoint.sh`) right after `hf checkpoint --auto`, run at `$META_ROOT`
+    (same residency — never a per-repo ledger), fail-soft. So every checkpoint now ALSO one-way
+    mirrors the witnessed FLEET ledger → GitKB (ADR-0003 HFTASK-0011). Verified live from `$META_ROOT`:
+    `hf sync --auto` → "mirrored context/overridable/{active,progress} (one-way ledger→kb)", exit 0
+    (FLEET ledger now has 10 witnessed events). Refreshed the hook's stale "DORMANT" header → LIVE.
+    The `/verify` finding's "auto-sync to .handoff and .kb" is now **TRUE**. (Broken `.kb` SessionStart
+    hook was already FIXED upstream: `meta/.claude/settings.json` `git kb service`→`git kb serve`.)
+  - **Card-minting (conditional-deferred, no actionable prereq):** `envctl/.handoff/tasks/` is empty
+    and there are **no envctl `.kb` task docs** to `hf task mint --from-kb` (verified). When kb task
+    docs are authored for the envctl backlog, mint them (packet degrades to "no open cards" until
+    then — residency-correct). Ref `meta/handoff/FLEET_GUIDE.md`; use the installed `hf`.
 
 ## Epic B — Meta-portability / env-ownership (`$META_ROOT`)
 
