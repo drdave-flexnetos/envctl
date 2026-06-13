@@ -54,17 +54,32 @@ are **rendered by `hf`, never hand-written**.
     **`rusqlite`/`libsqlite3-sys` (bundled C SQLite, statically linked)**. Does NOT violate
     envctl's `no-c.sh` (separate `meta/handoff` workspace, not an envctl crate), but is relevant to
     Epic A's "pure-Rust, no C in the trust boundary" north star if the kernel itself must be C-free.
-- [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
+- [!] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
+  - **BLOCKED 2026-06-13 (cycle 2): shipped-binary capability gap → NEEDS-DECISION.** The shipped
+    `hf` is strictly CWD-relative (no `--ledger` flag, no `HANDOFF_DIR`/`HANDOFF_LEDGER` env):
+    `ledger_path`/`tasks_dir`/`packet_path` all resolve under `<CWD>/.handoff`. So you cannot render
+    envctl's Tier-A text/packet layer while the ledger stays at `$META_ROOT/.handoff/ledger.db`
+    (ADR-0004) — running from envctl makes a FORBIDDEN per-repo `ledger.db`; running from meta root
+    operates on the *kernel's* ledger/packets and `mint --from-kb` can't find `.kb`
+    (`current_dir().parent()/.kb`); and `hf seed` writes the kernel's own 22 `HFTASK-####` cards,
+    not the envctl backlog. Fix = a **kernel feature in `meta/handoff`** (ledger/dir split), out of
+    envctl scope. Full source-proven analysis + 3 decision options (A: add `--ledger`/`HANDOFF_DIR`
+    + meta-root `.kb` resolution [recommended]; B: rescope to shared-ledger-only; C: seed kernel
+    ledger at meta root) → `.handoff/decisions/FINDING-0002-hf-ledger-residency-vs-repo-tier-a.md`.
   - GO-LIVE for `.handoff`↔`.kb` auto-sync: land/verify the kernel's `hf sync` (one-way `.kb`
     write-back, ADR-0003 HFTASK-0011) so the loop's `.handoff` cards/checkpoints sync to GitKB.
     NOTE: the broken `.kb` SessionStart hook was already FIXED (`meta/.claude/settings.json`:
     `git kb service` → guarded background `git kb serve`, meta main bf68d57) — code-intelligence
     indexing is independent and already live. Acceptance: `hf sync` reflects a checkpoint into `.kb`,
     making "auto-sync to .handoff and .kb" TRUE (the `/verify` finding).
-- [ ] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
+- [!] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
   `hf resume --json` succeeds + emits `handoff.packet.v2`).
+  - **BLOCKED 2026-06-13 (cycle 2): depends on TASK-0002.** The schema/packet portion needs a seeded
+    Tier-A layer (blocked above). The residency-invariant portion (assert no per-repo `ledger.db`
+    tracked under `envctl/.handoff`) is independently landable but deferred with TASK-0002 to keep
+    the gate coherent. Unblocks when FINDING-0002 is decided.
 
 ## Epic B — Meta-portability / env-ownership (`$META_ROOT`)
 
