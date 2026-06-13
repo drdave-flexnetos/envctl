@@ -199,6 +199,15 @@ fmt, clippy). Remaining follow-ups extracted from each:
 
 - [ ] **TASK-0023:** develop→master auto-sync GitHub Action (ff master on develop push) +
   enable branch protection on master (PR-only for humans; action token bypass). [in progress 2026-06-12]
+- [x] **TASK-0025 (P1, Epic E) — DONE 2026-06-13 (cycle 7): CI required checks on `develop` so
+  auto-merge gates fail-closed.** Added `.github/workflows/ci.yml` (4 jobs: **rustfmt · clippy
+  (workspace, default features) · test (`--test-threads=1`) · gates (no-c/shape/enable/p7)**) — no
+  `--all-features` (mutually-exclusive `remote`/`embedded`). Enabled repo `allow_auto_merge` +
+  `develop` branch protection requiring those 4 contexts (strict=false so concurrent sessions aren't
+  serialized; no required reviews; admins not enforced). Fixed a real isolation bug TASK-0004 exposed:
+  `dashboard::tests::locate_walks_up` leaked the inherited `$META_FILE` → made hermetic. `test` runs
+  serial in CI to kill the `XDG_CACHE_HOME`/`$META_FILE` parallel env-race flakiness. Verified all 4
+  green locally before requiring them. (Master protection / develop→master mirror = TASK-0023, separate.)
 
 ## Key finding (carried)
 

@@ -1,0 +1,85 @@
+name: CI
+
+# Required-check workflow for the `develop` branch. develop is the integration branch and
+# GitHub default; once these contexts are required by branch protection, a PR can arm
+# auto-merge (`gh pr merge <n> --auto`) and it lands itself fail-closed when they go green.
+# Mirrors the local pre-push gate (scripts/preflight.sh) — CI is the authoritative superset.
+#
+# Feature note: this workspace uses MUTUALLY-EXCLUSIVE cargo features
+# (crates/secrets-store-libsql: `remote` ships, `embedded` is an unbuilt placeholder), so CI
+# never uses `--all-features` (it would trip the crate's `compile_error!`). Default features
+# (= `remote`) are the shipping wiring.
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"        # debuggable backtraces when a CI test panics
+
+jobs:
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Default features (= `remote`), workspace-wide. No `--all-features` (mutually-exclusive
+      # features) and no `--all-targets` (kept a strict superset of the green preflight set).
+      - name: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    # Generous but bounded: the cold build dominates; the parallel test run is ~2 min. A real hang
+    # (e.g. an await-forever in an e2e stream drain) then fails the check fast instead of running to
+    # the 6h default. NEVER run --test-threads=1 here: the argon2 (memory-hard KDF) crypto tests in
+    # secrets-engine/secretd take 20-50s EACH, so serial execution balloons the job to 25-30 min.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Parallel (default). The few tests that touch process-global env are made hermetic at the
+      # source (locate_walks_up clears $META_FILE; runtime XDG test isolates its own var) so the
+      # suite is deterministic without serializing it.
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Fail-closed supply-chain / shape / enable / p7-conformance gates (ci/gates/*.sh).
+      - name: no-c gate (no C in the trust boundary)
+        run: bash ci/gates/no-c.sh
+      - name: shape gate (TLS / edge module invariants)
+        run: bash ci/gates/shape.sh
+      - name: enable gate (secretd systemd-unit invariant)
+        run: bash ci/gates/enable.sh
+      - name: p7-conformance gate (.handoff Tier-A schema + ledger residency)
+        run: bash ci/gates/p7.sh

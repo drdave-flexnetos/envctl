@@ -693,6 +693,12 @@ projects:
 
     #[test]
     fn locate_walks_up() {
+        // Hermetic: `locate_meta_file` honors `$META_FILE` BEFORE walking up, and this process may
+        // inherit one (envctl now injects META_FILE/META_ROOT into the agent env — settings.json
+        // env block, TASK-0004). Clear them so the walk-up branch is what's under test. No other
+        // test reads/writes these vars, so this is race-free under parallel execution.
+        std::env::remove_var("META_FILE");
+        std::env::remove_var("META_ROOT");
         let dir = std::env::temp_dir().join(format!("envctl-locate-{}", now_nanos()));
         let nested = dir.join("a/b/c");
         std::fs::create_dir_all(&nested).unwrap();
