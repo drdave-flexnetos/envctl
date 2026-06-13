@@ -17,11 +17,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"        # debuggable backtraces when a CI test panics
 
 jobs:
   rustfmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,6 +36,7 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,19 +51,25 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # Generous but bounded: the cold build dominates; the parallel test run is ~2 min. A real hang
+    # (e.g. an await-forever in an e2e stream drain) then fails the check fast instead of running to
+    # the 6h default. NEVER run --test-threads=1 here: the argon2 (memory-hard KDF) crypto tests in
+    # secrets-engine/secretd take 20-50s EACH, so serial execution balloons the job to 25-30 min.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Serial (`--test-threads=1`): a few tests mutate process-global state (XDG_CACHE_HOME,
-      # and locate_meta_file reads $META_FILE), which races under parallel execution. Serial is
-      # deterministic and keeps this required check from flaking — the right trade for a gate.
-      - name: cargo test --workspace -- --test-threads=1
-        run: cargo test --workspace -- --test-threads=1
+      # Parallel (default). The few tests that touch process-global env are made hermetic at the
+      # source (locate_walks_up clears $META_FILE; runtime XDG test isolates its own var) so the
+      # suite is deterministic without serializing it.
+      - name: cargo test --workspace
+        run: cargo test --workspace
 
   gates:
     name: gates
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
