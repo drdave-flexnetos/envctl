@@ -27,12 +27,16 @@ boundary · ledger-residency ($META_ROOT only) · packets rendered, never hand-w
 
 ## Resume command
 ```
-/forge-loop resume from .handoff/loop/HANDOFF.md (branch <new-slug> off develop) — verify baseline
-green; FIRST surface FINDING-0002 (Epic A blocker) for an owner decision, then run the next
-UNBLOCKED pick TASK-0012 (crates/agent-env) via feature-architect → rust-implementer →
-invariant-guardian. (TASK-0001 DONE, TASK-0002/0003 BLOCKED — do NOT retry them until FINDING-0002
-is decided. cycles_this_session resets to 0 on resume.)
+/forge-loop resume from .handoff/loop/HANDOFF.md
 ```
+Then: verify baseline green and run the NEXT PICK **TASK-0002** (now UNBLOCKED — the `hf` fleet/sync
+verbs were built 2026-06-13; see the FINDING-0002 RESOLVED banner + `meta/handoff/FLEET_GUIDE.md`).
+Route via the `handoff-kernel-engineer` agent + `handoff-sync` skill using the now-available verbs
+(`hf fleet render envctl`, `hf sync`, `hf task mint`), all from `$META_ROOT`, residency-safe, commit
+TEXT ONLY. CAUTION: a concurrent session may still be active in `meta/handoff` — use the installed
+`hf`; do NOT commit/build there. After TASK-0002 → TASK-0003 (p7 gate), then Epic C TASK-0012.
+(TASK-0001 DONE. cycles_this_session resets to 0 on resume.)
+
 Do NOT work in any stale worktree. Create a FRESH worktree off `develop`:
 `git worktree add ../envctl-<slug> -b <slug> develop` (or `meta git worktree create <slug>`),
 PR to `develop` → auto-promotes to `master` via `.github/workflows/sync-master.yml`.

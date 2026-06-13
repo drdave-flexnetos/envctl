@@ -8,11 +8,15 @@ worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
 cycles_this_session: 2
 cycles_total: 2
-last_item: TASK-0002 (seed Tier-A) — BLOCKED/NEEDS-DECISION 2026-06-13 (cycle 2); TASK-0003 blocked w/ it
-status: STOPPED 2026-06-13 @ 2/3 (deliberate early stop, not budget-exhaustion) — cycle 1 TASK-0001
-  DONE (landed 7dd2443); cycle 2 TASK-0002+0003 BLOCKED (FINDING-0002). Epic A stalls pending an
-  OWNER/KERNEL decision; stopped & reported rather than start the large fresh-context TASK-0012 at
-  session tail. Resume via `/forge-loop resume from .handoff/loop/HANDOFF.md`; reset cycles to 0.
+last_item: TASK-0002 — was BLOCKED cycle 2, now UNBLOCKED 2026-06-13 (hf fleet/sync verbs built); NEXT PICK
+status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 2 TASK-0002/0003 were
+  BLOCKED on missing hf fleet/sync verbs. **FINDING-0002 now RESOLVED:** a concurrent meta/handoff
+  session BUILT those verbs (PR #17 fleet/sync; commit 000e4c0 drift/policy + FLEET_GUIDE) and the
+  installed hf was rebuilt + verified. TASK-0002/0003 are UNBLOCKED. Owner deferred execution to the
+  NEXT session (let the kernel session settle). Resume: `/forge-loop resume from
+  .handoff/loop/HANDOFF.md` → NEXT PICK = TASK-0002 (seed Tier-A via hf fleet render + sync). Reset
+  cycles to 0. CAUTION: concurrent session may still be active in meta/handoff — use installed hf,
+  don't commit/build there.
   Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
 
 ## Progress log

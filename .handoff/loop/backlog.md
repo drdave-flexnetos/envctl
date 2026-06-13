@@ -54,35 +54,36 @@ are **rendered by `hf`, never hand-written**.
     **`rusqlite`/`libsqlite3-sys` (bundled C SQLite, statically linked)**. Does NOT violate
     envctl's `no-c.sh` (separate `meta/handoff` workspace, not an envctl crate), but is relevant to
     Epic A's "pure-Rust, no C in the trust boundary" north star if the kernel itself must be C-free.
-- [!] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
-  `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
+- [ ] **TASK-0002 (P0) — NEXT PICK (UNBLOCKED 2026-06-13):** Seed envctl `.handoff` via `hf` —
+  render `active.md`/`packets/latest.md`, mint cards, `hf sync` to `.kb`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
-  - **BLOCKED 2026-06-13 (cycle 2, REVISED): installed `hf` is the S1 spike, missing the fleet
-    verbs → NEEDS-DECISION.** The design is SETTLED (ADR-0004 §2/§3/§4 + PRD v2): per-repo
-    `.handoff/` is **text-only, no `ledger.db`**; events live in the **fleet** ledger
-    (`meta/.handoff/ledger.db` — cycle-1's target was correct; `meta/handoff/.handoff/ledger.db` is
-    the separate KERNEL ledger w/ 23 HFTASK cards); per-repo packets/cards are joined centrally via
-    **`hf fleet status`**. The blocker: the installed binary (S1 spike) lacks **`fleet`/`policy`/
-    `drift`/`sync`** (only `sync-cards`), which ADR-0001 §22 documents and ADR-0004 §76 cards as
-    "to implement" (HFTASK-0007 `session`+`policy.toml`, HFTASK-0011 `hf sync` `.kb` mirror, plus
-    `hf fleet status` + fleet-aware packet render). Fix = **build those verbs in `meta/handoff`**
-    (kernel scope), then re-run TASK-0002. NOTE: envctl's REQUIRED Tier-A text core
-    (`context/capsule.json`+`README`+`tasks/`+`packets/`) already exists; only OPTIONAL
-    `hooks/policies/skills` (residency-safe, no kernel dep) + the rendered/minted/synced parts
-    remain. v1's "add a `--ledger`/`HANDOFF_DIR` flag" is RETRACTED. Full analysis + 3 options
-    (A: build kernel fleet verbs [recommended]; B: seed the text subset now, defer the rest;
-    C: rescope to required-text-core + central `hf fleet` render) →
-    `.handoff/decisions/FINDING-0002-hf-ledger-residency-vs-repo-tier-a.md`.
+  - **UNBLOCKED 2026-06-13:** the kernel fleet verbs FINDING-0002 was waiting on are now BUILT +
+    INSTALLED. A concurrent `meta/handoff` session shipped them: `hf fleet status`/`fleet render`
+    + `hf sync` (PR #17 `feat/fleet-verbs-loop-harness`) and `hf drift` + `hf policy` + `FLEET_GUIDE.md`
+    (commit `000e4c0` on `feat/drift-policy-fleetguide`). The installed `~/.local/bin/hf` was rebuilt
+    and **verified working**: `hf fleet render envctl` writes `envctl/.handoff/packets/latest.md`
+    from the FLEET ledger with **no per-repo `ledger.db`** (residency-safe); `hf sync --dry-run`
+    mirrors to `.kb`; `hf drift`/`hf policy check-claim` run. **FINDING-0002's blocker is RESOLVED**
+    (the finding's design analysis still holds; only its "blocked-on-unbuilt-verbs" status is now
+    cleared). Read `meta/handoff/FLEET_GUIDE.md` for the verb usage before executing.
+  - **Execution procedure (next session), all from `$META_ROOT` (residency guard):** (1) read
+    `FLEET_GUIDE.md`; (2) seed the OPTIONAL Tier-A text (hooks/policies/skills) from the design-bundle
+    templates (`~/Downloads/tmp/handoff/handoff/templates/.handoff/`) — REQUIRED core
+    (capsule.json/README/tasks/packets dirs) already exists; (3) mint the envctl backlog as
+    `handoff.task.v1` cards; (4) `hf fleet render envctl` to compile `packets/latest.md`+`active.md`;
+    (5) `hf sync` (`.kb` write-back); (6) verify residency (no per-repo `ledger.db`) + commit TEXT
+    ONLY. CAUTION: a concurrent session may still be active in `meta/handoff` — do NOT commit/build
+    there; only use the installed `hf`.
   - GO-LIVE for `.handoff`↔`.kb` auto-sync: land/verify the kernel's `hf sync` (one-way `.kb`
     write-back, ADR-0003 HFTASK-0011) so the loop's `.handoff` cards/checkpoints sync to GitKB.
     NOTE: the broken `.kb` SessionStart hook was already FIXED (`meta/.claude/settings.json`:
     `git kb service` → guarded background `git kb serve`, meta main bf68d57) — code-intelligence
     indexing is independent and already live. Acceptance: `hf sync` reflects a checkpoint into `.kb`,
     making "auto-sync to .handoff and .kb" TRUE (the `/verify` finding).
-- [!] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
-  `hf resume --json` succeeds + emits `handoff.packet.v2`).
-  - **BLOCKED 2026-06-13 (cycle 2): depends on TASK-0002.** The schema/packet portion needs a seeded
-    Tier-A layer (blocked above). The residency-invariant portion (assert no per-repo `ledger.db`
+- [ ] **TASK-0003 (P1) — UNBLOCKED 2026-06-13 (follows TASK-0002):** Add `p7-conformance` CI gate
+  (validate capsule/policy/task schemas + `hf resume --json` succeeds + emits `handoff.packet.v2`).
+  - Was blocked behind TASK-0002 (now unblocked). Do after TASK-0002 seeds the Tier-A layer. The
+    residency-invariant portion (assert no per-repo `ledger.db`
     tracked under `envctl/.handoff`) is independently landable but deferred with TASK-0002 to keep
     the gate coherent. Unblocks when FINDING-0002 is decided.
 
