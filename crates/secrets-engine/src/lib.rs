@@ -155,6 +155,12 @@ pub struct EgressReq {
     pub bytes_out: u64,
     pub peer_uid: Option<u32>,
     pub peer_pid: Option<u32>,
+    /// The SNI the proxy actually OBSERVED on the inbound TLS handshake, when the request was
+    /// terminated by a MITM ingress (PR-3b). `None` for non-MITM planes (no TLS is terminated at the
+    /// relay, so there is no observed SNI). For `SwapMode::ProxyMitm`, `trusted_sni_for` returns this
+    /// value so `decide` can enforce SNI==Host (anti-fronting) against a TLS-observed name rather than
+    /// a sentinel. `None` under a MITM swap fails closed (`SniHostMismatch`).
+    pub observed_sni: Option<String>,
 }
 
 pub struct EgressResp {
@@ -1223,6 +1229,7 @@ impl Engine {
                     bytes_out: req.bytes_out,
                     peer_uid: req.peer_uid,
                     peer_pid: req.peer_pid,
+                    observed_sni: req.observed_sni.clone(),
                 };
                 // HF-11 send-site fence (belt-and-suspenders): re-assert that the EXACT host about to
                 // receive the real key is in the provider's frozen canonical allowlist, immediately
@@ -2342,11 +2349,18 @@ struct AllowPrepared {
 ///   * everything else — there is no TLS termination at the relay, so there is nothing for the
 ///     engine to observe; we return `None` (the check is a documented no-op) instead of pretending a
 ///     client-supplied header is a real SNI.
-fn trusted_sni_for(swap: &SwapMode, _req: &EgressReq) -> Option<String> {
+fn trusted_sni_for(swap: &SwapMode, req: &EgressReq) -> Option<String> {
     match swap {
-        // Fail closed: a sentinel that cannot match any real host (the leading byte is illegal in a
-        // DNS name), forcing SniHostMismatch until a trusted, TLS-observed SNI is plumbed in.
-        SwapMode::ProxyMitm => Some("\u{0}untrusted-sni-not-observed".to_string()),
+        // PR-3b: the MITM ingress terminates the child's TLS and records the handshake SNI in
+        // `observed_sni`. Trust THAT (it is what the proxy actually saw on the wire, anti-fronting-
+        // checked by the resolver), so `decide` enforces SNI == inner Host against a real name.
+        // `None` (no SNI plumbed / not a MITM termination) fails closed with a sentinel that can
+        // never equal a real host (the leading NUL byte is illegal in a DNS name) → SniHostMismatch.
+        SwapMode::ProxyMitm => Some(
+            req.observed_sni
+                .clone()
+                .unwrap_or_else(|| "\u{0}untrusted-sni-not-observed".to_string()),
+        ),
         _ => None,
     }
 }

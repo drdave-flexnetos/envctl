@@ -14,10 +14,15 @@ name = "secretd"
 path = "src/main.rs"
 
 [features]
+default = ["mitm-ca"]
 # Build the daemon with the Cognitum Seed USB possession factor. Forwards to the engine feature;
 # the USB keyslot (init + unlock) is then backed by the Seed's deterministic Ed25519 signature.
 # Off by default — a stock secretd has no USB backend and refuses USB enrollment cleanly.
 seed-factor = ["envctl-secrets-engine/seed-factor"]
+# PR-3b: the HTTPS_PROXY/CONNECT MITM data plane. Forwards the engine's `mitm-ca` (local CA + leaf
+# issuance) and gates the proxy's TLS-termination ingress. Default-on; a `--no-default-features`
+# secretd build drops the MITM code and the CONNECT branch falls back to the existing 501.
+mitm-ca = ["envctl-secrets-engine/mitm-ca", "dep:tokio-rustls"]
 
 [dependencies]
 envctl-secrets-engine = { workspace = true }
@@ -35,6 +40,10 @@ http-body-util = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+# PR-3b MITM ingress: terminate the child's TLS with an engine-minted per-host leaf. ring-only
+# (default-features=false in the workspace pin) so it tracks the single pinned rustls 0.23 and never
+# pulls aws-lc-rs (no-c). OPTIONAL: only the `mitm-ca` feature links it.
+tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true }   # frozen upstream root store (FS-S7)
 # proxy.rs impls the engine's `Upstream` trait, declared with #[async_trait]. Already in the resolved
 # workspace graph (the engine depends on it); promoting it to a normal dep adds NO new crate to the
@@ -66,3 +75,9 @@ zeroize = { workspace = true }
 chrono = { workspace = true }
 # the test impls the engine's `Upstream` trait, whose `send` is declared with #[async_trait].
 async-trait = { workspace = true }
+# mitm_e2e.rs: a rustls client trusting ONLY the engine's CA, terminating against the MITM leaf.
+# ring-only (workspace pin), same single rustls 0.23 — no aws-lc-rs, no-c stays green.
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pki-types = { workspace = true }
+rustls-pemfile = { workspace = true }

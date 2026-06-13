@@ -346,14 +346,17 @@ impl v1::relay_server::Relay for RelaySvc {
         let injection = match self.state.proxy_addr.get() {
             Some(addr) => {
                 let proxy_url = format!("http://{addr}");
-                // `ca_pem_path` is empty for the BaseUrlRepoint plane (no MITM CA); a future MITM plane
-                // (PR-3) supplies the engine-minted CA path here.
-                let ca_pem_path = "";
+                // `ca_pem_path` is empty for the BaseUrlRepoint plane (no MITM CA). For the
+                // HttpsProxyMitm plane (PR-3b) the child MUST trust the engine-minted local CA, so we
+                // materialize the public CA bundle here. FAIL-CLOSED: if no CA is initialized,
+                // `engine.ca_pem_path()` errors and we refuse the mint rather than ship a MITM
+                // injection whose child can never validate the leaf (no half-built env).
+                let ca_pem_path = ca_pem_path_for_mode(&self.engine, mode)?;
                 let resolved = envctl_secrets::inject::injection_template(
                     provider,
                     &bearer.raw,
                     &proxy_url,
-                    ca_pem_path,
+                    &ca_pem_path,
                     mode,
                 );
                 Some(conv::injection_to_proto(&resolved))
@@ -368,6 +371,41 @@ impl v1::relay_server::Relay for RelaySvc {
             injection,
             token_id: bearer.token_id,
         }))
+    }
+}
+
+/// Resolve the child-trust `ca_pem_path` for a data-plane `mode`. The `BaseUrlRepoint` /
+/// `NativeSubtoken` planes do NOT terminate TLS, so the child uses its normal OS roots and the path
+/// is empty. The `HttpsProxyMitm` plane terminates the child's TLS with an engine-minted leaf, so
+/// the child MUST trust the engine's local CA: we materialize the public CA bundle and return its
+/// path. FAIL-CLOSED: an uninitialized CA errors (`failed_precondition`) — we never ship a MITM
+/// injection whose child can't validate the leaf.
+// Boxing `tonic::Status` is non-idiomatic at the gRPC boundary (mirrors conv.rs's module allow); a
+// `failed_precondition` here is the documented fail-closed path, so the large-Err is intentional.
+#[allow(clippy::result_large_err)]
+fn ca_pem_path_for_mode(
+    engine: &Engine,
+    mode: envctl_secrets::inject::DataPlaneMode,
+) -> Result<String, Status> {
+    use envctl_secrets::inject::DataPlaneMode;
+    match mode {
+        DataPlaneMode::HttpsProxyMitm => {
+            #[cfg(feature = "mitm-ca")]
+            {
+                let path = engine
+                    .ca_pem_path()
+                    .map_err(|_| Status::failed_precondition("MITM CA not initialized"))?;
+                Ok(path.to_string_lossy().into_owned())
+            }
+            #[cfg(not(feature = "mitm-ca"))]
+            {
+                let _ = engine;
+                Err(Status::failed_precondition(
+                    "MITM data plane requires the mitm-ca feature",
+                ))
+            }
+        }
+        DataPlaneMode::BaseUrlRepoint | DataPlaneMode::NativeSubtoken => Ok(String::new()),
     }
 }
 
