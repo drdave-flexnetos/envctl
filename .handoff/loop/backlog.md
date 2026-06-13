@@ -31,9 +31,21 @@ are **rendered by `hf`, never hand-written**.
 - [ ] **TASK-0001 (P0):** Build & install the `hf` kernel binary from `meta/handoff` (not on PATH
   today — keystone blocker). Relocate per Epic B procedure (symlink into meta). Verify
   `hf resume/claim/checkpoint/handoff` run from envctl against `meta/.handoff/ledger.db`.
+  - GO-LIVE for the wired-but-DORMANT continuity hook: `.claude/settings.json` +
+    `.claude/hooks/hf-checkpoint.sh` are already wired (Stop + PreCompact, fleet-ledger-resident,
+    self-resolves `$META_ROOT`) but no-op until `hf` exists + supports `checkpoint --auto --quiet`.
+    Acceptance: after `hf` lands, a Stop fires `hf checkpoint --auto` writing a witnessed event to
+    `$META_ROOT/.handoff/ledger.db` (NOT a per-repo ledger), proving "auto-update .handoff after
+    every task" (the `/verify` 2026-06-13 finding — currently FALSE, this makes it TRUE).
 - [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
+  - GO-LIVE for `.handoff`↔`.kb` auto-sync: land/verify the kernel's `hf sync` (one-way `.kb`
+    write-back, ADR-0003 HFTASK-0011) so the loop's `.handoff` cards/checkpoints sync to GitKB.
+    NOTE: the broken `.kb` SessionStart hook was already FIXED (`meta/.claude/settings.json`:
+    `git kb service` → guarded background `git kb serve`, meta main bf68d57) — code-intelligence
+    indexing is independent and already live. Acceptance: `hf sync` reflects a checkpoint into `.kb`,
+    making "auto-sync to .handoff and .kb" TRUE (the `/verify` finding).
 - [ ] **TASK-0003 (P1):** Add `p7-conformance` CI gate (validate capsule/policy/task schemas +
   `hf resume --json` succeeds + emits `handoff.packet.v2`).
 

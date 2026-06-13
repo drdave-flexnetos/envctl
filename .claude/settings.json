@@ -1,0 +1,27 @@
+{
+  "_comment": "envctl PROJECT settings layer (additive to the user-global source-of-truth at envctl/home/.claude/settings.json). Adds the hf-checkpoint continuity hook so envctl sessions auto-checkpoint .handoff after each task (Stop) and before compaction (PreCompact). DORMANT until the kernel's `hf checkpoint --auto` verb lands (Epic A TASK-0001/0002) — the script no-ops + never blocks until then. Ledger-resident: writes only the fleet ledger at $META_ROOT/.handoff/ledger.db (ADR-0004).",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/hf-checkpoint.sh\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/hf-checkpoint.sh\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
