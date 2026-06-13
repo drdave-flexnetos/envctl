@@ -9,9 +9,11 @@ cycle_budget: 3
 cycles_this_session: 2
 cycles_total: 2
 last_item: TASK-0002 (seed Tier-A) — BLOCKED/NEEDS-DECISION 2026-06-13 (cycle 2); TASK-0003 blocked w/ it
-status: ACTIVE 2026-06-13 — cycle 1 TASK-0001 DONE (landed develop 7dd2443); cycle 2 TASK-0002 +
-  TASK-0003 BLOCKED (shipped-hf capability gap, FINDING-0002). Epic A stalled pending owner decision.
-  Next actionable (unblocked): Epic C TASK-0012 (crates/agent-env) per the post-Epic-A order.
+status: STOPPED 2026-06-13 @ 2/3 (deliberate early stop, not budget-exhaustion) — cycle 1 TASK-0001
+  DONE (landed 7dd2443); cycle 2 TASK-0002+0003 BLOCKED (FINDING-0002). Epic A stalls pending an
+  OWNER/KERNEL decision; stopped & reported rather than start the large fresh-context TASK-0012 at
+  session tail. Resume via `/forge-loop resume from .handoff/loop/HANDOFF.md`; reset cycles to 0.
+  Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
