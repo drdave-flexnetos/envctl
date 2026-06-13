@@ -23,7 +23,25 @@ pub async fn serve(
     listener: tokio::net::UnixListener,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<(), tonic::transport::Error> {
-    let state = DaemonState::default();
+    serve_with_state(
+        engine,
+        owner_uid,
+        listener,
+        DaemonState::default(),
+        shutdown,
+    )
+    .await
+}
+
+/// As [`serve`], but with a caller-provided [`DaemonState`] so `main` can publish the relay proxy's
+/// bound loopback address into the SAME state the `Relay.Mint` handler reads (PR-2b).
+pub async fn serve_with_state(
+    engine: Engine,
+    owner_uid: u32,
+    listener: tokio::net::UnixListener,
+    state: DaemonState,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<(), tonic::transport::Error> {
     let guard = OwnerGuard::new(owner_uid);
 
     let incoming = UnixListenerStream::new(listener);

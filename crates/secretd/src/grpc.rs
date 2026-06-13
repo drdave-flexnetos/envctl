@@ -30,6 +30,10 @@ use crate::conv;
 pub struct DaemonState {
     /// Mirror of the last successful Unlock/Lock outcome. The engine is the true authority.
     pub unlocked: Arc<AtomicBool>,
+    /// The relay proxy's bound `127.0.0.1:<port>` loopback address, published ONCE by `main` after
+    /// `serve_proxy` binds. PR-2b's `Relay.Mint` reads it to fill `MintResp.injection` so the child
+    /// is repointed at the proxy. `None` until the proxy has bound (or if it failed to bind).
+    pub proxy_addr: Arc<std::sync::OnceLock<std::net::SocketAddr>>,
 }
 
 /// Map a `JoinError` from `spawn_blocking` to an internal status.
