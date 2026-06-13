@@ -85,6 +85,20 @@ const META_AUDIT_HEAD: &str = "vault.audit_head";
 /// `META_AUDIT_HIGH_WATER` in lock-step is NOT detectable in-store — see THREAT-MODEL A2.)
 const META_AUDIT_HIGH_WATER: &str = "vault.audit_high_water";
 
+/// Reserved secret name under which the local MITM CA's PKCS#8 private-key DER is sealed (feature
+/// `mitm-ca`). Stored as a normal `broker_only` `SecretRow` so it inherits the record AAD binding +
+/// the un-revealable HF-5 gate (`secret_get` refuses a `broker_only` reveal): the CA key can never
+/// be read out through the operator surface, only reconstructed into the in-RAM issuer at unlock.
+#[cfg(feature = "mitm-ca")]
+const META_MITM_CA_KEY_NAME: &str = "__mitm_ca_key";
+/// Meta key holding the PUBLIC local-CA certificate DER (hex), written by `ca_init`. Its presence is
+/// the "CA initialized" signal the unlock tail keys off to rebuild the issuer.
+#[cfg(feature = "mitm-ca")]
+const META_MITM_CA_CERT_DER: &str = "mitm.ca_cert_der";
+/// Meta key holding the local-CA cert `not_after` (RFC3339), for visibility / rotation tooling.
+#[cfg(feature = "mitm-ca")]
+const META_MITM_CA_NOT_AFTER: &str = "mitm.ca_not_after";
+
 /// BLAKE3 `derive_key` context for the audit-head anchor key (DEK-keyed, domain-separated from the
 /// header MAC and every other BLAKE3 use in the crate).
 const AUDIT_HEAD_KEY_INFO: &str = "env-ctl/v1/audit-head/key";
@@ -491,10 +505,74 @@ impl Engine {
         // `vault_unlocked` row (it was appended while still Locked, so the in-`audit` advance was a
         // no-op). This leaves the freshly-unlocked vault with a current tail anchor.
         self.advance_audit_anchor_if_unlocked()?;
+        // If a local MITM CA has been initialized, rebuild its in-RAM issuer now that the DEK is
+        // resident (the sealed CA key opens against the live DEK). A failure here is non-fatal to the
+        // unlock (the vault is already usable; CA issuance simply stays unavailable until re-init).
+        #[cfg(feature = "mitm-ca")]
+        self.rebuild_ca_if_initialized(sink)?;
         sink.emit(SecretEvent::VaultUnlocked {
             factor: want_factor,
         });
         Ok(VaultState::Unlocked)
+    }
+
+    /// Rebuild the in-RAM CA issuer from the sealed key + persisted public cert, iff CA meta is
+    /// present. Idempotent: overwrites any existing issuer. Called from the `unlock` tail.
+    #[cfg(feature = "mitm-ca")]
+    fn rebuild_ca_if_initialized(&self, sink: &EventSink) -> anyhow::Result<()> {
+        let inner = &self.inner;
+        let Some(cert_hex) = inner.store.get_meta(META_MITM_CA_CERT_DER)? else {
+            return Ok(()); // no CA initialized.
+        };
+        let ca_cert_der =
+            hex_decode(&cert_hex).ok_or_else(|| anyhow::anyhow!("malformed ca_cert_der meta"))?;
+        // Open the sealed CA key directly (NOT via secret_get, which refuses a broker_only reveal):
+        // we reconstruct the AAD from the row identity and open against the live DEK.
+        let key_der = match self.open_mitm_ca_key()? {
+            Some(k) => k,
+            None => {
+                // Cert meta present but the sealed key is missing/unopenable: do not half-build a CA.
+                self.audit_failed(
+                    sink,
+                    "ca_rebuild",
+                    None,
+                    serde_json::json!({ "reason": "ca_key_unavailable" }),
+                )?;
+                return Ok(());
+            }
+        };
+        let ca = ca::LocalCa::from_material(key_der, &ca_cert_der)?;
+        {
+            let mut slot = inner.ca.write().expect("ca lock");
+            *slot = Some(ca);
+        }
+        Ok(())
+    }
+
+    /// Open the sealed `__mitm_ca_key` SecretRow against the live DEK, returning its plaintext
+    /// PKCS#8 DER (Zeroizing). `None` if the row is absent or fails authentication. Requires the
+    /// vault to be Unlocked. This bypasses `secret_get`'s reveal gate (a `broker_only` secret is
+    /// never revealed through the operator surface) BY DESIGN: the CA key is consumed internally to
+    /// build the issuer and is never returned to a caller.
+    #[cfg(feature = "mitm-ca")]
+    fn open_mitm_ca_key(&self) -> anyhow::Result<Option<Zeroizing<Vec<u8>>>> {
+        let inner = &self.inner;
+        let v = inner.vault.read().expect("vault lock");
+        let dek = match v.dek() {
+            Some(d) => d,
+            None => return Err(EngineError::Locked.into()),
+        };
+        let row = match inner.store.get_secret_latest(META_MITM_CA_KEY_NAME)? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        let aad = record_aad(
+            TableTag::SecretVersion,
+            row.row_id,
+            row.version as i64,
+            row.dek_generation,
+        );
+        Ok(vault::crypto::open(dek, &aad, &row.nonce, &row.ct_tag))
     }
 
     /// Zeroizes the DEK + CA issuer in RAM (the true panic stop). Idempotent when already Locked.
@@ -1611,7 +1689,230 @@ impl Engine {
         });
         Ok(reason)
     }
-    /// Operator-issued NON-MITM leaves only; REFUSES `usage = mitm_leaf` (CF-5).
+    /// Initialize the local MITM CA (feature `mitm-ca`). Requires `Unlocked` (mirrors `secret_put`'s
+    /// DEK guard). Generates a self-signed CA; when `apply`, seals the CA private-key DER into the
+    /// vault as a `broker_only` `SecretRow` under `__mitm_ca_key` (un-revealable, HF-5), `put_meta`s
+    /// the PUBLIC cert DER + `not_after`, and builds the in-RAM issuer. When `!apply`, a dry-run that
+    /// previews keygen and persists NOTHING. Idempotent (`Ok` no-op if a CA is already present).
+    /// Audited (`ca_initialized`) + emits `SecretEvent::CaIssued`. The private key is never logged.
+    #[cfg(feature = "mitm-ca")]
+    pub fn ca_init(&self, apply: bool, sink: &EventSink) -> anyhow::Result<()> {
+        let inner = &self.inner;
+
+        // DEK guard (mirror secret_put): CA keygen seals against the live DEK, so an unlocked vault
+        // is required. Refusing on a locked vault is a setup-time error, not a guard refusal.
+        {
+            let v = inner.vault.read().expect("vault lock");
+            if v.dek().is_none() {
+                return Err(EngineError::Locked.into());
+            }
+        }
+
+        // Idempotent: an already-initialized CA (cert meta present) is an Ok no-op.
+        if inner.store.get_meta(META_MITM_CA_CERT_DER)?.is_some() {
+            return Ok(());
+        }
+
+        let now_unix = inner.clock.now().timestamp();
+        let generated = ca::LocalCa::generate(now_unix)?;
+
+        if !apply {
+            // Dry-run: previews that keygen succeeds; persists/seals NOTHING and builds no issuer.
+            self.audit(
+                sink,
+                "ca_initialized",
+                None,
+                serde_json::json!({ "applied": false, "not_after": generated.not_after_rfc3339 }),
+                AuditOutcome::Refused,
+            )?;
+            sink.emit(SecretEvent::GuardRefused {
+                subject: ca::CA_COMMON_NAME.to_string(),
+                reason: "ca_init dry-run: pass --apply to persist".to_string(),
+            });
+            return Ok(());
+        }
+
+        // Seal the CA private key as a broker_only SecretRow (un-revealable via secret_get). The
+        // plaintext key DER is consumed here and dropped (Zeroizing) at end of scope.
+        self.secret_put(
+            SecretMeta {
+                name: META_MITM_CA_KEY_NAME.to_string(),
+                provider: Provider::Generic,
+                note: "local MITM CA private key (sealed; never revealable)".to_string(),
+                broker_only: true,
+            },
+            generated.key_der.clone(),
+            sink,
+        )?;
+
+        // Persist the PUBLIC cert DER (hex) + not_after as non-secret meta.
+        inner
+            .store
+            .put_meta(META_MITM_CA_CERT_DER, &hex_encode(&generated.cert_der))?;
+        inner
+            .store
+            .put_meta(META_MITM_CA_NOT_AFTER, &generated.not_after_rfc3339)?;
+
+        // Build the in-RAM issuer.
+        let ca = ca::LocalCa::from_material(generated.key_der.clone(), &generated.cert_der)?;
+        {
+            let mut slot = inner.ca.write().expect("ca lock");
+            *slot = Some(ca);
+        }
+
+        self.audit_ok(
+            sink,
+            "ca_initialized",
+            None,
+            serde_json::json!({ "applied": true, "not_after": generated.not_after_rfc3339 }),
+        )?;
+        sink.emit(SecretEvent::CaIssued {
+            serial: String::new(),
+            cn: ca::CA_COMMON_NAME.to_string(),
+            not_after: generated.not_after_rfc3339,
+        });
+        Ok(())
+    }
+
+    /// Write the PUBLIC CA certificate PEM to a `0600` file under the runtime dir and return its
+    /// path. Feeds the child-trust bundle (`inject::injection_template`'s `ca_pem_path`) for
+    /// `HttpsProxyMitm` mode. Refuses (`Err`) when no CA is initialized. Public material only.
+    #[cfg(feature = "mitm-ca")]
+    pub fn ca_pem_path(&self) -> anyhow::Result<std::path::PathBuf> {
+        use std::io::Write;
+        let inner = &self.inner;
+        let pem = {
+            let ca = inner.ca.read().expect("ca lock");
+            match ca.as_ref() {
+                Some(c) => c.ca_cert_pem(),
+                None => return Err(EngineError::NoCa.into()),
+            }
+        };
+        let dir = inner.paths.runtime.clone();
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("mitm-ca.pem");
+        // Create 0600 (owner read/write only) BEFORE writing any bytes, so the public bundle is
+        // never world-readable even momentarily. The CA cert is public, but tight perms are the
+        // house style for runtime artifacts.
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&path)?;
+        f.write_all(pem.as_bytes())?;
+        f.flush()?;
+        // Re-assert mode in case the file pre-existed with looser perms (O_CREAT mode applies only
+        // on creation).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(path)
+    }
+
+    /// Mint a MITM leaf for `host` IFF the vault is Unlocked, the CA issuer is present, AND `host` is
+    /// covered by an enabled, non-revoked `RelayPolicy.host_allow` of an active relay (the
+    /// relay-coverage gate, CF-5). This is the ONLY path that mints MITM leaves; PR-3b's proxy calls
+    /// it. Default-deny: a locked vault, an absent issuer, or an uncovered host yields a refusal and
+    /// NO leaf (`Err`), never a cert.
+    #[cfg(feature = "mitm-ca")]
+    pub fn issue_leaf_for_covered_host(
+        &self,
+        host: &str,
+        sink: &EventSink,
+    ) -> anyhow::Result<(
+        Vec<rustls_pki_types::CertificateDer<'static>>,
+        rustls_pki_types::PrivateKeyDer<'static>,
+    )> {
+        let inner = &self.inner;
+
+        // Unlocked guard.
+        {
+            let v = inner.vault.read().expect("vault lock");
+            if v.dek().is_none() {
+                self.refuse(sink, "leaf_minted", host, "vault locked")?;
+                return Err(EngineError::Locked.into());
+            }
+        }
+
+        // Relay-coverage gate: host must match an enabled, non-revoked policy's host_allow.
+        let covered = inner.store.list_relay_policies()?.into_iter().any(|row| {
+            let p = &row.policy;
+            p.enabled && !p.revoked && p.host_allow.iter().any(|h| h.eq_ignore_ascii_case(host))
+        });
+        if !covered {
+            self.refuse(
+                sink,
+                "leaf_minted",
+                host,
+                "host not covered by any active relay",
+            )?;
+            anyhow::bail!("leaf refused: host '{host}' is not covered by an active relay");
+        }
+
+        // Issuer must be resident.
+        let now_unix = inner.clock.now().timestamp();
+        let result = {
+            let ca = inner.ca.read().expect("ca lock");
+            match ca.as_ref() {
+                Some(c) => c.issue_leaf(host, now_unix)?,
+                None => {
+                    self.refuse(sink, "leaf_minted", host, "CA not initialized")?;
+                    return Err(EngineError::NoCa.into());
+                }
+            }
+        };
+
+        self.audit_ok(
+            sink,
+            "leaf_minted",
+            Some(host.to_string()),
+            serde_json::json!({ "mitm": true }),
+        )?;
+        sink.emit(SecretEvent::LeafMinted {
+            sni: host.to_string(),
+            relay: String::new(),
+            not_after: String::new(),
+        });
+        Ok(result)
+    }
+
+    /// Operator-issued NON-MITM leaves only; REFUSES `usage = "mitm_leaf"` (CF-5). A MITM leaf may be
+    /// minted ONLY through the relay-gated [`Engine::issue_leaf_for_covered_host`], never through
+    /// this operator surface. The refusal is a durable `Refused` row + `GuardRefused` event mapped to
+    /// an `Err`. Non-MITM operator issuance is not part of PR-3a: a recognized non-mitm `usage`
+    /// returns a safe `unimplemented` error WITHOUT minting anything (no key material is touched).
+    #[cfg(feature = "mitm-ca")]
+    pub fn ca_issue(
+        &self,
+        _cn: &str,
+        _sans: &[String],
+        usage: &str,
+        sink: &EventSink,
+    ) -> anyhow::Result<String> {
+        // CF-5: the operator path NEVER mints a MITM leaf. Refuse before touching any key material.
+        if usage == "mitm_leaf" {
+            self.refuse(
+                sink,
+                "ca_issued",
+                usage,
+                "operator ca issue refused: mitm_leaf may only be minted via the relay-gated path (CF-5)",
+            )?;
+            anyhow::bail!("ca issue refused: usage 'mitm_leaf' is not operator-issuable (CF-5)");
+        }
+        // Other usages (e.g. "client", "server") are valid operator targets but not implemented in
+        // PR-3a. Fail safe (no issuance) rather than mint something half-specified.
+        anyhow::bail!(
+            "ca issue: operator leaf issuance for usage '{usage}' is not yet implemented"
+        );
+    }
+
+    /// CA-less build: `ca_issue` still exists but the whole CA surface is unavailable.
+    #[cfg(not(feature = "mitm-ca"))]
     pub fn ca_issue(
         &self,
         _cn: &str,
@@ -1619,7 +1920,7 @@ impl Engine {
         _usage: &str,
         _sink: &EventSink,
     ) -> anyhow::Result<String> {
-        todo!()
+        anyhow::bail!("ca issue: built without the `mitm-ca` feature")
     }
     /// Spawn a child with the provider env delta overlaid onto the inherited parent env, streaming
     /// its stdout/stderr line-by-line as `SecretEvent::Log` and returning its true exit code
@@ -2192,5 +2493,311 @@ impl Upstream for NullUpstream {
         _real_key: &Zeroizing<Vec<u8>>,
     ) -> Result<EgressResp, seam::UpstreamError> {
         Err(seam::UpstreamError::Io("upstream not wired".to_string()))
+    }
+}
+
+#[cfg(all(test, feature = "mitm-ca"))]
+mod ca_tests {
+    //! PR-3a CA-stack acceptance tests, driven through the PUBLIC `Engine` API over an `InMemStore`.
+    //! No tokio: the CA path is fully synchronous. The shared store handle lets a test inspect audit
+    //! rows + seed a relay policy for the coverage gate.
+    use super::*;
+    use crate::keyslot::{Argon2Params, ARGON2_M_KIB_FLOOR, ARGON2_T_COST_FLOOR};
+    use crate::vault::store::RelayPolicyRow;
+    use crate::vault::{InMemStore, Store};
+    use std::sync::Arc;
+
+    const NOW_MS: i64 = 1_700_000_000_000;
+
+    /// A USB probe that never returns a keyfile (the CA tests use the passphrase factor only).
+    struct NoUsb;
+    impl UsbProbe for NoUsb {
+        fn keyfile_for(&self, _uuid: &str) -> Option<Zeroizing<Vec<u8>>> {
+            None
+        }
+    }
+
+    /// Fixed-time clock so leaf/CA validity windows are deterministic.
+    struct FixedClock;
+    impl Clock for FixedClock {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW_MS).unwrap()
+        }
+        fn boottime_ms(&self) -> i64 {
+            NOW_MS
+        }
+    }
+
+    /// A `Store` forwarding to a shared `Arc<InMemStore>` so a test keeps the concrete handle while
+    /// the engine owns a `Box<dyn Store>`. (Mirrors tests/relay.rs SharedStore, trimmed.)
+    struct SharedStore(Arc<InMemStore>);
+    macro_rules! fwd {
+        ($($f:ident($($a:ident : $t:ty),*) -> $r:ty;)*) => {
+            $(fn $f(&self, $($a: $t),*) -> $r { self.0.$f($($a),*) })*
+        };
+    }
+    impl Store for SharedStore {
+        fwd! {
+            get_meta(k: &str) -> anyhow::Result<Option<String>>;
+            put_meta(k: &str, v: &str) -> anyhow::Result<()>;
+            reserve_secret_row_id() -> anyhow::Result<i64>;
+            put_secret(row: crate::vault::SecretRow) -> anyhow::Result<i64>;
+            get_secret_latest(name: &str) -> anyhow::Result<Option<crate::vault::SecretRow>>;
+            get_secret_version(name: &str, version: u32) -> anyhow::Result<Option<crate::vault::SecretRow>>;
+            max_secret_version(name: &str) -> anyhow::Result<u32>;
+            list_secret_names() -> anyhow::Result<Vec<String>>;
+            list_secret_versions(name: &str) -> anyhow::Result<Vec<u32>>;
+            save_keyslot(slot: &Keyslot) -> anyhow::Result<()>;
+            load_keyslots() -> anyhow::Result<Vec<Keyslot>>;
+            load_keyslot(id: i64) -> anyhow::Result<Option<Keyslot>>;
+            append_audit(rec: &AuditRecord) -> anyhow::Result<i64>;
+            verify_audit_chain() -> anyhow::Result<()>;
+            last_audit() -> anyhow::Result<Option<AuditRecord>>;
+            query_audit(since_seq: i64, limit: usize) -> anyhow::Result<Vec<AuditRecord>>;
+            save_relay_policy(row: RelayPolicyRow) -> anyhow::Result<i64>;
+            load_relay_policy(relay_id: &str) -> anyhow::Result<Option<RelayPolicyRow>>;
+            list_relay_policies() -> anyhow::Result<Vec<RelayPolicyRow>>;
+        }
+    }
+
+    fn at_floor() -> Argon2Params {
+        Argon2Params {
+            m_kib: ARGON2_M_KIB_FLOOR,
+            t_cost: ARGON2_T_COST_FLOOR,
+            p_lanes: 1,
+        }
+    }
+
+    fn paths() -> paths::Paths {
+        // Unique per-test root so the 0600 PEM file does not collide between tests.
+        let root = std::env::temp_dir().join(format!("env-ctl-ca-test-{}", std::process::id()));
+        paths::Paths::under(root)
+    }
+
+    /// Build an engine over a SHARED in-mem store, init + unlock the vault (passphrase factor).
+    fn unlocked_engine() -> (
+        Engine,
+        Arc<InMemStore>,
+        EventSink,
+        std::sync::mpsc::Receiver<SecretEvent>,
+    ) {
+        let store = Arc::new(InMemStore::new());
+        let engine = Engine::with_seams(
+            paths(),
+            Box::new(SharedStore(store.clone())),
+            Box::new(FixedClock),
+            Box::new(NoUsb),
+            Box::new(seam::NoMint),
+            Box::new(NullUpstream),
+        )
+        .expect("with_seams");
+        let (sink, rx) = EventSink::channel();
+        engine
+            .init_vault(
+                Zeroizing::new("correct horse battery staple".to_string()),
+                None,
+                None,
+                at_floor(),
+                &sink,
+            )
+            .expect("init_vault");
+        engine
+            .unlock(
+                Unlock::Passphrase(Zeroizing::new("correct horse battery staple".to_string())),
+                &sink,
+            )
+            .expect("unlock");
+        (engine, store, sink, rx)
+    }
+
+    fn covering_policy(host: &str) -> RelayPolicyRow {
+        RelayPolicyRow {
+            id: 0,
+            policy: RelayPolicy {
+                relay_id: "claude-main".to_string(),
+                kind: RelayKind::Named,
+                provider: Provider::Anthropic,
+                secret_name: "anthropic".to_string(),
+                swap: SwapMode::ProxyMitm,
+                host_allow: vec![host.to_string()],
+                path_allow: vec!["/v1/".to_string()],
+                method_allow: vec![Method::Post],
+                policy_ttl_secs: 31_536_000,
+                rate_per_min: None,
+                quota_total_requests: None,
+                quota_total_bytes: None,
+                enabled: true,
+                revoked: false,
+            },
+        }
+    }
+
+    fn audit_has(store: &InMemStore, event_type: &str, outcome: AuditOutcome) -> bool {
+        store
+            .audit_rows()
+            .iter()
+            .any(|r| r.event_type == event_type && r.outcome == outcome)
+    }
+
+    #[test]
+    fn init_persist_unlock_roundtrip() {
+        let (engine, store, sink, _rx) = unlocked_engine();
+        // Fresh: no CA.
+        assert!(store.get_meta(META_MITM_CA_CERT_DER).unwrap().is_none());
+
+        engine.ca_init(true, &sink).expect("ca_init apply");
+        assert!(store.get_meta(META_MITM_CA_CERT_DER).unwrap().is_some());
+        assert!(store.get_meta(META_MITM_CA_NOT_AFTER).unwrap().is_some());
+        assert!(audit_has(&store, "ca_initialized", AuditOutcome::Ok));
+
+        // Idempotent: a second apply is an Ok no-op (no second key version).
+        engine.ca_init(true, &sink).expect("ca_init idempotent");
+        assert_eq!(
+            store.max_secret_version(META_MITM_CA_KEY_NAME).unwrap(),
+            1,
+            "idempotent ca_init must not seal a second CA key"
+        );
+
+        // Survives lock -> unlock: the issuer is rebuilt and can issue again.
+        engine.lock(&sink).expect("lock");
+        engine
+            .unlock(
+                Unlock::Passphrase(Zeroizing::new("correct horse battery staple".to_string())),
+                &sink,
+            )
+            .expect("re-unlock");
+        store
+            .save_relay_policy(covering_policy("api.anthropic.com"))
+            .unwrap();
+        let (chain, _k) = engine
+            .issue_leaf_for_covered_host("api.anthropic.com", &sink)
+            .expect("issue after re-unlock");
+        assert_eq!(chain.len(), 2);
+    }
+
+    #[test]
+    fn lock_zeroizes_issuer_no_issuance_when_locked() {
+        let (engine, store, sink, _rx) = unlocked_engine();
+        engine.ca_init(true, &sink).expect("ca_init");
+        store
+            .save_relay_policy(covering_policy("api.anthropic.com"))
+            .unwrap();
+        engine.lock(&sink).expect("lock");
+        // Locked: no leaf, even for a covered host.
+        let err = engine
+            .issue_leaf_for_covered_host("api.anthropic.com", &sink)
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("locked"),
+            "locked vault must refuse issuance"
+        );
+    }
+
+    #[test]
+    fn cf5_ca_issue_refuses_mitm_leaf() {
+        let (engine, store, sink, _rx) = unlocked_engine();
+        engine.ca_init(true, &sink).expect("ca_init");
+
+        // mitm_leaf is refused (Err + a Refused audit row + GuardRefused event).
+        let err = engine
+            .ca_issue("host", &["host".to_string()], "mitm_leaf", &sink)
+            .unwrap_err();
+        assert!(format!("{err}").contains("CF-5"));
+        assert!(audit_has(&store, "ca_issued", AuditOutcome::Refused));
+
+        // A non-mitm usage is NOT a CF-5 refusal: it is an explicit "not implemented" error, and it
+        // does NOT write a ca_issued Refused row for that usage path.
+        let err2 = engine
+            .ca_issue("host", &["host".to_string()], "client", &sink)
+            .unwrap_err();
+        assert!(format!("{err2}").contains("not yet implemented"));
+    }
+
+    #[test]
+    fn relay_coverage_gate() {
+        let (engine, store, sink, _rx) = unlocked_engine();
+        engine.ca_init(true, &sink).expect("ca_init");
+
+        // Uncovered host (no policy yet): refused, no leaf.
+        let err = engine
+            .issue_leaf_for_covered_host("evil.example.com", &sink)
+            .unwrap_err();
+        assert!(format!("{err}").contains("not covered"));
+        assert!(audit_has(&store, "leaf_minted", AuditOutcome::Refused));
+
+        // Add a covering active policy: now a leaf is minted.
+        store
+            .save_relay_policy(covering_policy("api.anthropic.com"))
+            .unwrap();
+        let (chain, _k) = engine
+            .issue_leaf_for_covered_host("api.anthropic.com", &sink)
+            .expect("covered host issues");
+        assert_eq!(chain.len(), 2);
+        assert!(audit_has(&store, "leaf_minted", AuditOutcome::Ok));
+
+        // A disabled policy does NOT cover its host.
+        let mut disabled = covering_policy("api.disabled.com");
+        disabled.policy.enabled = false;
+        store.save_relay_policy(disabled).unwrap();
+        let err2 = engine
+            .issue_leaf_for_covered_host("api.disabled.com", &sink)
+            .unwrap_err();
+        assert!(format!("{err2}").contains("not covered"));
+    }
+
+    #[test]
+    fn apply_gate_dryrun_persists_nothing() {
+        let (engine, store, sink, _rx) = unlocked_engine();
+        engine.ca_init(false, &sink).expect("ca_init dry-run");
+        assert!(
+            store.get_meta(META_MITM_CA_CERT_DER).unwrap().is_none(),
+            "dry-run must not persist the cert"
+        );
+        assert!(
+            store
+                .get_secret_latest(META_MITM_CA_KEY_NAME)
+                .unwrap()
+                .is_none(),
+            "dry-run must not seal the key"
+        );
+        assert!(audit_has(&store, "ca_initialized", AuditOutcome::Refused));
+    }
+
+    #[test]
+    fn ca_key_not_revealable_via_secret_get() {
+        let (engine, _store, sink, _rx) = unlocked_engine();
+        engine.ca_init(true, &sink).expect("ca_init");
+        // The sealed CA key is broker_only: a reveal is refused (HF-5), never returns the key bytes.
+        let err = engine
+            .secret_get(META_MITM_CA_KEY_NAME, true, true, &sink)
+            .unwrap_err();
+        assert!(
+            format!("{err}").contains("broker-only"),
+            "ca key must be un-revealable via secret_get"
+        );
+    }
+
+    #[test]
+    fn ca_pem_path_is_0600_and_public_only() {
+        let (engine, _store, sink, _rx) = unlocked_engine();
+        engine.ca_init(true, &sink).expect("ca_init");
+        let path = engine.ca_pem_path().expect("ca_pem_path");
+        let contents = std::fs::read_to_string(&path).expect("read pem");
+        assert!(contents.contains("BEGIN CERTIFICATE"));
+        assert!(!contents.contains("PRIVATE KEY"), "PEM must be public-only");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "ca pem must be 0600");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ca_pem_path_refuses_without_ca() {
+        let (engine, _store, _sink, _rx) = unlocked_engine();
+        let err = engine.ca_pem_path().unwrap_err();
+        assert!(format!("{err}").contains("CA not initialized"));
     }
 }
