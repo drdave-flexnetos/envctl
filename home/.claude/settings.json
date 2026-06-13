@@ -1,4 +1,8 @@
 {
+  "env": {
+    "META_ROOT": "/home/drdave/Desktop/meta",
+    "META_FILE": "/home/drdave/Desktop/meta/.meta.yaml"
+  },
   "skillListingBudgetFraction": 0.05,
   "permissions": {
     "git worktree add": "alwaysAllow",
