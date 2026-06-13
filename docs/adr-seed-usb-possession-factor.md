@@ -82,12 +82,16 @@ the Seed's documented admin path and the right possession bootstrap.
   enrolled on the Seed once (one-time `ssh-copy-id`, owner-gated); the seam fails closed and
   silent (engine is non-printing by design — debugging a `None` relies on the operator probe
   example).
-- **Follow-ups (out of scope here):** wire `SeedPresenceGate` into the **runtime relay/egress
-  gate** (today `status.usb_possessed` reflects the unwired gate and reads `false` even when the
-  vault was unlocked via the USB factor — cosmetic, not a correctness issue); HARDENING — verify
-  the KEK signature against the pinned pubkey in `keyfile_for` too (Profile S already does); fix
-  **ADR-0007's phantom `secretctl import`** reference (correct verb is `secretctl secret add`) in
-  the *handoff* repo.
+- **Profile S → relay gate: DONE** (commit `068491e`). The egress choke point + both mint sites
+  route through one `presence_proven()` resolver — Profile A (uncached local probe) by default,
+  Profile S (Seed challenge) under `seed-factor` + a pinned pubkey, behind a **5s presence cache**
+  so the per-request egress path never does a live SSH probe (owner decision; ≤5s network-factor
+  staleness is the sole deviation from REQ-SEC-13's no-grace rule).
+- **Follow-ups (out of scope here):** HARDENING — verify the KEK signature against the pinned
+  pubkey in `keyfile_for` too (Profile S already does); `status.usb_possessed` is still a
+  hardcoded `false` stub (cosmetic — a live probe per status call would be too costly); fix
+  **ADR-0007's phantom `secretctl import`** (correct verb `secretctl secret add`) in the *handoff*
+  repo; live `/verify` of a Profile-S-gated relay mint/swap with the Seed present vs absent.
 
 ## Alternatives considered
 
