@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/drdave/.local/bin/icm hook end"
+            "command": "true"
           }
         ]
       }
