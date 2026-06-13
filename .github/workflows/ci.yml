@@ -1,0 +1,76 @@
+name: CI
+
+# Required-check workflow for the `develop` branch. develop is the integration branch and
+# GitHub default; once these contexts are required by branch protection, a PR can arm
+# auto-merge (`gh pr merge <n> --auto`) and it lands itself fail-closed when they go green.
+# Mirrors the local pre-push gate (scripts/preflight.sh) — CI is the authoritative superset.
+#
+# Feature note: this workspace uses MUTUALLY-EXCLUSIVE cargo features
+# (crates/secrets-store-libsql: `remote` ships, `embedded` is an unbuilt placeholder), so CI
+# never uses `--all-features` (it would trip the crate's `compile_error!`). Default features
+# (= `remote`) are the shipping wiring.
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Default features (= `remote`), workspace-wide. No `--all-features` (mutually-exclusive
+      # features) and no `--all-targets` (kept a strict superset of the green preflight set).
+      - name: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Serial (`--test-threads=1`): a few tests mutate process-global state (XDG_CACHE_HOME,
+      # and locate_meta_file reads $META_FILE), which races under parallel execution. Serial is
+      # deterministic and keeps this required check from flaking — the right trade for a gate.
+      - name: cargo test --workspace -- --test-threads=1
+        run: cargo test --workspace -- --test-threads=1
+
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Fail-closed supply-chain / shape / enable / p7-conformance gates (ci/gates/*.sh).
+      - name: no-c gate (no C in the trust boundary)
+        run: bash ci/gates/no-c.sh
+      - name: shape gate (TLS / edge module invariants)
+        run: bash ci/gates/shape.sh
+      - name: enable gate (secretd systemd-unit invariant)
+        run: bash ci/gates/enable.sh
+      - name: p7-conformance gate (.handoff Tier-A schema + ledger residency)
+        run: bash ci/gates/p7.sh

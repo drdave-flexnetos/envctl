@@ -6,15 +6,15 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 1   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003 p7 gate)
-cycles_total: 6
-last_item: TASK-0003 (p7-conformance gate) — DONE 2026-06-13 (cycle 6); added ci/gates/p7.sh
-status: ACTIVE (new session) 2026-06-13 — cycle 6 TASK-0003 DONE: added `ci/gates/p7.sh` (fail-closed
-  grep-based gate — Tier-A schema tags + ledger residency + packet v2; positive PASS + 3 negative
-  tests fail closed), wired into HANDOFF verify-on-resume + CLAUDE.md. Verified-not-claimed first
-  (only unrelated PR #53 libsql-baton-fix open; grit empty). The GO-LIVE (`hf sync` `.kb`) + envctl
-  card-minting were SPLIT into the new **TASK-0024** (P2, Epic A). Next pick: **TASK-0024** (hf sync
-  go-live, needs $META_ROOT) or **Epic C TASK-0012** (crates/agent-env, large). Budget 1/3.
+cycles_this_session: 2   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003) + 7 (CI checks)
+cycles_total: 7
+last_item: TASK-0025 (CI required checks on develop) — DONE 2026-06-13 (cycle 7); ci.yml + develop protection
+status: ACTIVE (new session) 2026-06-13 — cycle 7 TASK-0025 DONE (owner: "add the checks to envctl
+  develop so automerge can be enabled"): added `.github/workflows/ci.yml` (rustfmt/clippy/test/gates),
+  fixed the `locate_walks_up` $META_FILE leak, set CI test serial. All 4 green locally; enabling repo
+  allow_auto_merge + develop branch protection requiring those contexts. NEXT (owner-directed): proceed
+  to **TASK-0024** — `hf sync` `.kb` GO-LIVE (run at $META_ROOT) + envctl card-minting. Then Epic C
+  TASK-0012. Budget 2/3.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
