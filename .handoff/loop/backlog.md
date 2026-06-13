@@ -61,10 +61,10 @@ verify env health.
   emit `export META_ROOT=…` + meta tool dirs on PATH; `--toolchains`/`--materialize` (merged from
   feat/envctl-env, 2026-06-12).
 - [ ] **TASK-0004 (P0):** Wire `META_ROOT` into the env Claude inherits (login/session env envctl owns).
-- [~] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
+- [x] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
   per-machine templating: statusline script + 2 plugin-marketplace dirs (HIGH — live source-of-truth file).
-  - IN REVIEW (2026-06-13, per rtk-tokenkill session): delivered as `home/.claude/settings.json.tmpl` +
-    `claude-global-links` per-machine render (byte-identical, non-breaking); PR **envctl#37 → develop**. Merge to close.
+  - DONE 2026-06-13: `home/.claude/settings.json.tmpl` + `claude-global-links` per-machine render
+    (byte-identical, non-breaking). PR **envctl#37 MERGED → develop** (`bf29acd`). (Git>backlog: confirmed merged.)
 - [ ] **TASK-0006 (P2):** Point global `home/.config/kasetto/kasetto.yaml` mcps source at in-meta
   agent-skills (not `github.com/FlexNetOS/agent-skills`); genericize MED shell/nushell hardcodes
   (`shell_nu.nu`, `shell_bash.sh`, `config.nu`). Fix stale `Documentation=` URL in `manifest/env-ctl.toml`.

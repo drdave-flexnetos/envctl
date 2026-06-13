@@ -9,7 +9,8 @@ cycle_budget: 3
 cycles_this_session: 0
 cycles_total: 0
 last_item: (none yet — backlog reconciled, loop not yet started this session)
-status: READY — backlog + cards pending; next pick = TASK-0001 (build hf, the keystone)
+status: HANDED-OFF 2026-06-13 — checkpoint at .handoff/loop/HANDOFF.md; successor resumes via
+  forge-loop at TASK-0001 (build hf) in a fresh worktree off develop. cycles_this_session resets to 0 on resume.
 
 ## Next safe step
 - Epic A TASK-0001 (P0): build & install the `hf` kernel from `meta/handoff` (markdown-fallback pick;
