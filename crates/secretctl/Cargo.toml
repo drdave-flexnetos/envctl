@@ -11,6 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 envctl-secrets-proto = { workspace = true }
+# The engine edge: `env-ctl run` calls `Engine::run_child` in-process to spawn the child with the
+# daemon-built env injection (bearer-only). Pure-Rust — adds no banned C to the trust boundary.
+envctl-secrets-engine = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 # tower (service_fn) + hyper-util (TokioIo) build the classic UDS client connector for tonic's

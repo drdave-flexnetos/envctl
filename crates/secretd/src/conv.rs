@@ -16,6 +16,7 @@
 // and would churn every call site for no real gain — allow it module-wide at the proto boundary.
 #![allow(clippy::result_large_err)]
 use envctl_secrets::broker::{Method, Provider, RelayKind, RelayPolicy, SwapMode};
+use envctl_secrets::inject::{DataPlaneMode, ResolvedInjection};
 use envctl_secrets::keyslot::{Argon2Params, Factor};
 use envctl_secrets::{AuditRecord, SecretEvent, SecretMeta};
 use envctl_secrets_proto::v1;
@@ -234,6 +235,78 @@ pub fn mint_req_to_policy(req: &v1::MintReq) -> RelayPolicy {
     }
 }
 
+// ---- DataPlaneMode <-> proto DataPlaneMode ---------------------------------------------------
+
+/// Engine `inject::DataPlaneMode` -> proto `DataPlaneMode` discriminant (`i32`). The engine's
+/// `DataPlaneMode` is the data-plane shape (base-url / proxy-mitm / native-subtoken); the proto
+/// twin mirrors it 1:1 (its `MODE_UNSPECIFIED` is reserved and never emitted here).
+pub fn dataplane_mode_to_proto(m: DataPlaneMode) -> i32 {
+    let k = match m {
+        DataPlaneMode::BaseUrlRepoint => v1::DataPlaneMode::BaseUrlRepoint,
+        DataPlaneMode::HttpsProxyMitm => v1::DataPlaneMode::HttpsProxyMitm,
+        DataPlaneMode::NativeSubtoken => v1::DataPlaneMode::NativeSubtoken,
+    };
+    k as i32
+}
+
+/// Proto `DataPlaneMode` (an `i32` on the wire) -> engine `inject::DataPlaneMode`. `MODE_UNSPECIFIED`
+/// (and any unknown discriminant) maps to `BaseUrlRepoint` — default-safe: the most constrained data
+/// plane (no CA, no MITM), matching `swapmode_from_proto`'s default.
+pub fn dataplane_mode_from_proto(mode: i32) -> DataPlaneMode {
+    match v1::DataPlaneMode::try_from(mode).unwrap_or(v1::DataPlaneMode::BaseUrlRepoint) {
+        v1::DataPlaneMode::HttpsProxyMitm => DataPlaneMode::HttpsProxyMitm,
+        v1::DataPlaneMode::NativeSubtoken => DataPlaneMode::NativeSubtoken,
+        v1::DataPlaneMode::BaseUrlRepoint | v1::DataPlaneMode::ModeUnspecified => {
+            DataPlaneMode::BaseUrlRepoint
+        }
+    }
+}
+
+/// Derive the data-plane `DataPlaneMode` from an engine `SwapMode` (the field the minted policy
+/// carries). `BaseUrlRepoint`/`NativeSubToken`/`ProxyMitm` map 1:1 onto the inject mode the child
+/// env is shaped for.
+pub fn dataplane_mode_from_swap(swap: &SwapMode) -> DataPlaneMode {
+    match swap {
+        SwapMode::BaseUrlRepoint { .. } => DataPlaneMode::BaseUrlRepoint,
+        SwapMode::ProxyMitm => DataPlaneMode::HttpsProxyMitm,
+        SwapMode::NativeSubToken { .. } => DataPlaneMode::NativeSubtoken,
+    }
+}
+
+// ---- ResolvedInjection <-> proto ResolvedInjection -------------------------------------------
+
+/// Engine `inject::ResolvedInjection` -> proto `ResolvedInjection`. The daemon is authoritative: it
+/// builds the env delta (the bearer-only child env) via `inject::injection_template` and ships the
+/// resolved shape to the owner-only client. The proto `proxy_url`/`base_url` are plain strings, so an
+/// absent (`None`) value is encoded as the empty string (the client re-derives `Option` on the way
+/// back via `injection_from_proto`). NEVER carries the real key — only the bearer, by construction.
+pub fn injection_to_proto(r: &ResolvedInjection) -> v1::ResolvedInjection {
+    v1::ResolvedInjection {
+        provider: provider_to_proto(r.provider),
+        mode: dataplane_mode_to_proto(r.mode),
+        env: r.env.clone().into_iter().collect(),
+        ca_env_keys: r.ca_env_keys.clone(),
+        proxy_url: r.proxy_url.clone().unwrap_or_default(),
+        base_url: r.base_url.clone().unwrap_or_default(),
+    }
+}
+
+/// Proto `ResolvedInjection` -> engine `inject::ResolvedInjection`. The inverse of
+/// [`injection_to_proto`]: the empty-string `proxy_url`/`base_url` sentinel maps back to `None`. Used
+/// by the client (`secretctl run`) to reconstruct the engine plan the daemon authoritatively built,
+/// so all env/key logic stays in the engine and the daemon stays the single source of truth.
+pub fn injection_from_proto(p: &v1::ResolvedInjection) -> ResolvedInjection {
+    let opt = |s: &str| (!s.is_empty()).then(|| s.to_string());
+    ResolvedInjection {
+        provider: provider_from_proto(p.provider),
+        mode: dataplane_mode_from_proto(p.mode),
+        env: p.env.clone().into_iter().collect(),
+        ca_env_keys: p.ca_env_keys.clone(),
+        proxy_url: opt(&p.proxy_url),
+        base_url: opt(&p.base_url),
+    }
+}
+
 // ---- SecretEvent -> proto Event (the oneof) --------------------------------------------------
 
 /// Convert an engine `SecretEvent` to its proto `Event` twin. Returns `None` for the variants that
@@ -417,6 +490,89 @@ mod tests {
         assert_eq!(
             init_usb_uuid(&init_req(true, "  E2E-USB-1234 ")).unwrap(),
             Some("E2E-USB-1234".to_string())
+        );
+    }
+
+    // ---- ResolvedInjection round-trip (engine <-> proto) -----------------------------------
+
+    #[test]
+    fn injection_to_proto_carries_bearer_base_url_and_provider() {
+        // The daemon-built BaseUrlRepoint injection for Anthropic: child sees the loopback proxy as
+        // ANTHROPIC_BASE_URL and the BEARER (never the real key) as ANTHROPIC_API_KEY.
+        const BEARER: &str = "relay-bearer-DO-NOT-LEAK";
+        const PROXY: &str = "http://127.0.0.1:54321";
+        let r = envctl_secrets::inject::injection_template(
+            Provider::Anthropic,
+            BEARER,
+            PROXY,
+            "",
+            DataPlaneMode::BaseUrlRepoint,
+        );
+        let p = injection_to_proto(&r);
+        assert_eq!(p.provider, provider_to_proto(Provider::Anthropic));
+        assert_eq!(
+            p.mode,
+            dataplane_mode_to_proto(DataPlaneMode::BaseUrlRepoint)
+        );
+        assert_eq!(
+            p.env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some(PROXY)
+        );
+        assert_eq!(
+            p.env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some(BEARER)
+        );
+        assert_eq!(p.base_url, PROXY);
+        // BaseUrlRepoint carries no proxy_url / no CA keys.
+        assert!(p.proxy_url.is_empty());
+        assert!(p.ca_env_keys.is_empty());
+    }
+
+    #[test]
+    fn injection_round_trips_through_proto() {
+        // proto -> engine -> proto is lossless for every field (the empty-string proxy_url/base_url
+        // sentinel maps to None and back). Cover a MITM injection so ca_env_keys + proxy_url are
+        // populated and base_url is absent.
+        const BEARER: &str = "bearer-xyz";
+        const PROXY: &str = "http://127.0.0.1:7000";
+        const CA: &str = "/run/envctl/mitm-ca.pem";
+        let engine = envctl_secrets::inject::injection_template(
+            Provider::Anthropic,
+            BEARER,
+            PROXY,
+            CA,
+            DataPlaneMode::HttpsProxyMitm,
+        );
+        let proto = injection_to_proto(&engine);
+        let back = injection_from_proto(&proto);
+        assert_eq!(back.provider, engine.provider);
+        assert_eq!(back.mode, engine.mode);
+        assert_eq!(back.env, engine.env);
+        assert_eq!(back.ca_env_keys, engine.ca_env_keys);
+        assert_eq!(back.proxy_url, engine.proxy_url);
+        assert_eq!(back.base_url, engine.base_url);
+        // Re-encoding the reconstructed engine value yields the identical proto.
+        let proto2 = injection_to_proto(&back);
+        assert_eq!(proto2.env, proto.env);
+        assert_eq!(proto2.proxy_url, proto.proxy_url);
+        assert_eq!(proto2.base_url, proto.base_url);
+    }
+
+    #[test]
+    fn dataplane_mode_from_swap_maps_each_variant() {
+        assert_eq!(
+            dataplane_mode_from_swap(&SwapMode::BaseUrlRepoint {
+                upstream_base: "https://api.anthropic.com".to_string()
+            }),
+            DataPlaneMode::BaseUrlRepoint
+        );
+        assert_eq!(
+            dataplane_mode_from_swap(&SwapMode::ProxyMitm),
+            DataPlaneMode::HttpsProxyMitm
+        );
+        assert_eq!(
+            dataplane_mode_from_swap(&SwapMode::NativeSubToken { ttl_secs: 60 }),
+            DataPlaneMode::NativeSubtoken
         );
     }
 }

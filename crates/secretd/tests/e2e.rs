@@ -377,6 +377,125 @@ async fn e2e_control_plane_roundtrip_and_wire_secrecy() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ---- test 1b: Mint response carries the child-env injection (PR-2b) --------------------------
+
+/// PR-2b: a `Relay.Mint` over the REAL server stack, with the relay proxy address published into the
+/// shared `DaemonState`, returns `injection: Some` whose env repoints the child at the loopback proxy
+/// (`ANTHROPIC_BASE_URL`) and carries the minted BEARER (`ANTHROPIC_API_KEY`) — NEVER the real key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn e2e_mint_returns_child_env_injection() {
+    let (dir, paths) = temp_paths("inject");
+    let keyfile = Zeroizing::new(vec![0x5Au8; 64]);
+    let engine = make_engine(&paths, &keyfile);
+
+    // Init + serve. We DON'T need a stored secret to mint the injection — the injection carries the
+    // bearer, not the upstream key — but init is required so the vault has a DEK to MAC the bearer.
+    let sink0 = EventSink::null();
+    engine
+        .init_vault(
+            Zeroizing::new("correct horse battery staple".to_string()),
+            Some(USB_UUID.to_string()),
+            Some(keyfile.clone()),
+            Argon2Params::default(),
+            &sink0,
+        )
+        .expect("init_vault");
+
+    let sock = paths.control_socket();
+    let listener = bind(&sock);
+    let owner_uid = rustix::process::getuid().as_raw();
+
+    // Publish a (synthetic, but well-formed) loopback proxy address into the shared state, exactly as
+    // `main` does after `serve_proxy` binds. The Mint handler reads it to build the injection.
+    let state = envctl_secretd::grpc::DaemonState::default();
+    let proxy_addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
+    state.proxy_addr.set(proxy_addr).expect("set proxy_addr");
+    let expected_base = format!("http://{proxy_addr}");
+
+    let server_engine = engine.clone();
+    let server_state = state.clone();
+    let server = tokio::spawn(async move {
+        envctl_secretd::server::serve_with_state(
+            server_engine,
+            owner_uid,
+            listener,
+            server_state,
+            std::future::pending(),
+        )
+        .await
+        .expect("serve_with_state");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // Unlock so the mint's vault DEK is available.
+    {
+        let mut lock = v1::lock_client::LockClient::new(connect(sock.clone()).await);
+        let stream = lock
+            .unlock(v1::UnlockReq {
+                passphrase: Some("correct horse battery staple".to_string()),
+            })
+            .await
+            .expect("unlock rpc")
+            .into_inner();
+        let mut s = stream;
+        while s.message().await.expect("unlock msg").is_some() {}
+    }
+
+    // Mint an Anthropic ephemeral bearer; client_pid=0 => uid-primary binding (the swap re-checks the
+    // child's uid, which equals ours). The response must now carry the injection.
+    let mut relay = v1::relay_client::RelayClient::new(connect(sock.clone()).await);
+    let r = relay
+        .mint(v1::MintReq {
+            relay: "eph-relay".into(),
+            ephemeral: true,
+            provider: v1::ProviderKind::Anthropic as i32,
+            ttl_secs: 3600,
+            client_pid: 0,
+        })
+        .await
+        .expect("mint")
+        .into_inner();
+
+    let bearer = r.bearer.clone();
+    assert!(!bearer.is_empty(), "minted bearer must be non-empty");
+    let inj = r
+        .injection
+        .expect("PR-2b: Mint must return injection: Some");
+
+    // The child is repointed at the loopback proxy and carries the BEARER (never the real key).
+    assert_eq!(inj.provider, v1::ProviderKind::Anthropic as i32);
+    assert_eq!(inj.mode, v1::DataPlaneMode::BaseUrlRepoint as i32);
+    assert_eq!(
+        inj.env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+        Some(expected_base.as_str()),
+        "child must be repointed at the loopback relay proxy"
+    );
+    assert_eq!(
+        inj.env.get("ANTHROPIC_API_KEY").map(String::as_str),
+        Some(bearer.as_str()),
+        "child's API key env must be the minted bearer"
+    );
+    assert_eq!(inj.base_url, expected_base);
+    // BaseUrlRepoint: no MITM proxy_url, no CA env keys.
+    assert!(inj.proxy_url.is_empty());
+    assert!(inj.ca_env_keys.is_empty());
+
+    // The bearer in the child env is NOT the real key sentinel, and no injected value is the sentinel.
+    assert!(
+        !contains(bearer.as_bytes(), SENTINEL),
+        "the bearer must not be the real key"
+    );
+    for (k, v) in &inj.env {
+        assert!(
+            !contains(v.as_bytes(), SENTINEL),
+            "injected env {k} leaked the real key sentinel"
+        );
+    }
+
+    server.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- test 2: REAL server NEGATIVE authz path -------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

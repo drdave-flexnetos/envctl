@@ -396,8 +396,10 @@ async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyB
         headers,
         bytes_out,
         peer_uid: ctx.peer_uid,
-        // The proxy does not (in PR-2a) resolve the child pid per request; the bearer is uid-bound at
-        // mint and re-checked here by uid. pid binding is advisory and wired in PR-2b.
+        // The proxy does not resolve the child pid per request; the bearer is uid-bound at mint and
+        // re-checked here by uid. PR-2b deliberately mints uid-only (`client_pid = 0`): `decide`
+        // checks pid only when bound, so a pid-bound bearer would `PeerMismatch`-deny every egress
+        // here. Same-uid trust is the local boundary; the bearer stays short-lived + scoped + USB-gated.
         peer_pid: None,
     };
 

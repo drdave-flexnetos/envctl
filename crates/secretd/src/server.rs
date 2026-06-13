@@ -56,6 +56,7 @@ pub async fn serve_with_state(
         .add_service(RelayServer::with_interceptor(
             RelaySvc {
                 engine: engine.clone(),
+                state: state.clone(),
             },
             guard.clone(),
         ))
