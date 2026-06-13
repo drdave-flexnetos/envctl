@@ -31,7 +31,7 @@ requires = []
 resolved = ""
 
 [components.claude-global-links]
-content_hash = "958163f21e9c8870"
+content_hash = "06d6bee9d0f407d6"
 requires = []
 resolved = ""
 
