@@ -226,10 +226,50 @@ for p in .claude/settings.json .claude/CLAUDE.md .claude/RTK.md .claude/commands
 done
 '''
 
+# usrlocal-script-links — root-owned /usr/local/bin helper scripts -> symlinks into the
+# canonical meta-owned source (envctl/assets/scripts). These are byte-identical duplicates of
+# files already in the repo (yazelix-gpu-verify-install is run FROM assets/scripts by the
+# gpu-verify-scripts component; the rest are manual/one-off helpers). Needs write access to
+# /usr/local/bin == the bootstrap SUDO phase (`sudo envctl install usrlocal-script-links`, or
+# bootstrap.sh phase 3 run with sudo). As a non-root user it SKIPS (exit 0) so `envctl install`
+# never errors mid-run. META_ROOT resolves via SUDO_USER's home so it works under sudo (where
+# $HOME would otherwise be /root). Archive-first; idempotent.
+[[component]]
+id = "usrlocal-script-links"
+name = "/usr/local/bin helper scripts -> meta assets (sudo phase)"
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", '''OWNER="${SUDO_USER:-$USER}"; OH="$(getent passwd "$OWNER" | cut -d: -f6)"; S="${META_ROOT:-$OH/Desktop/meta}/envctl/assets/scripts"; ok=1; for n in yazelix-config.sh yazelix-setup.sh yazelix-gpu-verify-install.sh ubuntu-boot-repair.sh; do [ "$(readlink -f "/usr/local/bin/$n" 2>/dev/null)" = "$(readlink -f "$S/$n")" ] || ok=0; done; [ $ok = 1 ]''']
+[component.install]
+kind = "script"
+script = '''
+set -e
+OWNER="${SUDO_USER:-$USER}"; OH="$(getent passwd "$OWNER" | cut -d: -f6)"
+S="${META_ROOT:-$OH/Desktop/meta}/envctl/assets/scripts"
+ARCH="$OH/Desktop/_archives/home-links-$(date +%Y-%m-%d)/usr-local-bin"
+if [ ! -w /usr/local/bin ]; then
+  echo "SKIP usrlocal-script-links: /usr/local/bin not writable — run the sudo bootstrap phase (sudo envctl install usrlocal-script-links)"; exit 0
+fi
+mkdir -p "$ARCH"
+for n in yazelix-config.sh yazelix-setup.sh yazelix-gpu-verify-install.sh ubuntu-boot-repair.sh; do
+  src="$S/$n"; dst="/usr/local/bin/$n"
+  [ -e "$src" ] || { echo "SKIP (missing meta source): $n"; continue; }
+  [ "$(readlink -f "$dst" 2>/dev/null)" = "$(readlink -f "$src")" ] && continue
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then mv "$dst" "$ARCH/$n"; echo "archived: $n"; fi
+  [ -L "$dst" ] && rm "$dst"
+  ln -s "$src" "$dst"; echo "linked: /usr/local/bin/$n -> $src"
+done
+'''
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", '''OWNER="${SUDO_USER:-$USER}"; OH="$(getent passwd "$OWNER" | cut -d: -f6)"; S="${META_ROOT:-$OH/Desktop/meta}/envctl/assets/scripts"; [ ! -w /usr/local/bin ] && exit 0; for n in yazelix-config.sh yazelix-setup.sh yazelix-gpu-verify-install.sh ubuntu-boot-repair.sh; do [ "$(readlink -f "/usr/local/bin/$n" 2>/dev/null)" = "$(readlink -f "$S/$n")" ] || { echo "not linked: $n"; exit 1; }; done''']
+
 [[component]]
 id = "group-portability"
 name = "Portability link layer (ADR-0006)"
-requires = ["home-config-links", "home-bin-links", "meta-tool-links", "claude-global-links"]
+requires = ["home-config-links", "home-bin-links", "meta-tool-links", "claude-global-links", "usrlocal-script-links"]
 [component.detect]
 kind = "command"
 command = "bash"

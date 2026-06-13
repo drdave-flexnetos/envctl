@@ -16,6 +16,28 @@ status: ACTIVE (resumed) 2026-06-13 @ 2/3 — cycle 3 TASK-0004 DONE (PR #47), c
   **Epic A TASK-0003** (p7-conformance CI gate + `hf sync` `.kb` GO-LIVE, run at $META_ROOT) — natural
   follow-on — or **Epic C TASK-0012** (crates/agent-env, large, fresh context). Budget 2/3: ONE more
   cycle then HAND OFF. Resume via `/forge-loop resume`; reset cycles to 0.
+cycles_this_session: 1   # RESUME 2026-06-13: counter reset to 0 on resume; cycle 3 (TASK-0004) ran
+cycles_total: 3
+last_item: TASK-0004 (wire META_ROOT into the env Claude inherits) — DONE 2026-06-13 (cycle 3, resume)
+status: ACTIVE (resumed) 2026-06-13 — cycle 3 TASK-0004 DONE. On resume (owner "check now") confirmed
+  the Epic A blocker FINDING-0002 is RESOLVED (Option A): the kernel built the fleet verbs in
+  meta/handoff PR #17 (hf fleet status/render, hf sync), verified live → TASK-0002/0003 UNBLOCKED.
+  Then ran the owner-chosen item TASK-0004: env block in settings.json.tmpl + drift-guard test;
+  gate green. PR → develop (auto-promotes to master). Next pick: Epic A TASK-0002 (now executable:
+  seed OPTIONAL hooks/policies/skills + hf fleet render envctl + hf sync inside a worktree cycle),
+  or Epic C TASK-0012 (crates/agent-env, large). Resume via `/forge-loop resume`; reset cycles to 0.
+cycles_this_session: 2
+cycles_total: 2
+last_item: TASK-0002 — was BLOCKED cycle 2, now UNBLOCKED 2026-06-13 (hf fleet/sync verbs built); NEXT PICK
+status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 2 TASK-0002/0003 were
+  BLOCKED on missing hf fleet/sync verbs. **FINDING-0002 now RESOLVED:** a concurrent meta/handoff
+  session BUILT those verbs (PR #17 fleet/sync; commit 000e4c0 drift/policy + FLEET_GUIDE) and the
+  installed hf was rebuilt + verified. TASK-0002/0003 are UNBLOCKED. Owner deferred execution to the
+  NEXT session (let the kernel session settle). Resume: `/forge-loop resume from
+  .handoff/loop/HANDOFF.md` → NEXT PICK = TASK-0002 (seed Tier-A via hf fleet render + sync). Reset
+  cycles to 0. CAUTION: concurrent session may still be active in meta/handoff — use installed hf,
+  don't commit/build there.
+  Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
