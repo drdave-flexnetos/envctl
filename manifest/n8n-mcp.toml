@@ -1,0 +1,55 @@
+# n8n-mcp — external Node MCP server (czlonkowski/n8n-mcp) for agent web-access.
+#
+# This is an EXTERNAL Node tool, intentionally kept OUT of envctl's trust boundary
+# (no Cargo dependency — it enters nothing into the resolved Cargo graph, exactly
+# like the AI CLIs and podman). It is installed/verified via npm under node-via-bun.
+#
+# Two tiers:
+#   1. docs-only (key-less): 7 core documentation tools work with NO N8N_API_* env.
+#      This is what `verify` proves — fail-closed, never touches a human key.
+#   2. live management (gated): create/update/run workflows additionally needs a
+#      running n8n at N8N_API_URL + the `n8n-api-key` secret (HUMAN GATE). The live
+#      smoke is DOCUMENTED (see _workspace/n8n-live-smoke-runbook.md), NOT wired
+#      into verify — an absent key must neither falsely pass nor falsely fail here.
+
+[[component]]
+id = "n8n-mcp"
+name = "n8n MCP server (docs-only key-less)"
+description = "External Node MCP server (npm n8n-mcp) giving agents n8n workflow docs/tools. Docs-only tier is key-less; live management tier needs a running n8n + the n8n-api-key secret (human gate)."
+requires = ["node-via-bun"]
+
+# Present iff the bin resolves (global install) OR is otherwise on PATH.
+[component.detect]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; npm ls -g n8n-mcp >/dev/null 2>&1 || command -v n8n-mcp >/dev/null"]
+
+# Idempotent global install via npm (node provided by node-via-bun).
+[component.install]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; npm i -g n8n-mcp"]
+
+# KEY-LESS, fail-closed verify: prove the bin resolves AND speaks MCP in docs-only
+# mode WITHOUT the human key. `--version` is NOT a real flag (it boots the stdio
+# server and exits on STDIN close — unreliable), so we drive a minimal MCP
+# `initialize` handshake over stdio and assert the documentation server identity.
+# This passes only when the docs-only server actually answers; it never touches
+# n8n or the n8n-api-key, so an absent key can neither falsely pass nor falsely
+# fail this check.
+[component.verify]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"envctl-verify\",\"version\":\"0\"}}}' | timeout 60 npx -y n8n-mcp 2>/dev/null | grep -q 'n8n-documentation-mcp'"]
+
+# Idempotent repair: reinstall.
+[component.fix]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; npm i -g n8n-mcp"]
+
+# Remove the global install.
+[component.remove]
+kind = "command"
+command = "bash"
+args = ["-lc", "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; npm rm -g n8n-mcp"]

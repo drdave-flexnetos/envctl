@@ -227,6 +227,11 @@ content_hash = "c24beb8e0bf92b8e"
 requires = []
 resolved = ""
 
+[components.n8n-mcp]
+content_hash = "f1cc110ba3589365"
+requires = ["node-via-bun"]
+resolved = ""
+
 [components.nerd-fonts]
 content_hash = "ca4c37420854c9e3"
 requires = []

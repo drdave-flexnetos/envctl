@@ -24,6 +24,13 @@
       ],
       "command": "npx"
     },
+    "n8n-mcp": {
+      "args": [
+        "-lc",
+        "export PATH=\"$HOME/.bun/bin:$HOME/.local/bin:$PATH\"; export N8N_API_URL=http://localhost:5678; export N8N_API_KEY=\"$(secretctl secret get n8n-api-key --reveal --apply)\"; exec npx -y n8n-mcp"
+      ],
+      "command": "bash"
+    },
     "playwright": {
       "args": [
         "-y",
