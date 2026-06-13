@@ -1553,13 +1553,112 @@ impl Engine {
     ) -> anyhow::Result<String> {
         todo!()
     }
+    /// Spawn a child with the provider env delta overlaid onto the inherited parent env, streaming
+    /// its stdout/stderr line-by-line as `SecretEvent::Log` and returning its true exit code
+    /// (128+signal on signal death). Fail-closed: refuses an empty argv or a program that does not
+    /// resolve on PATH (durable `Refused` row + `GuardRefused` event), never printing.
+    ///
+    /// The real vault key is structurally absent here: only `plan.injection.env` (which carries the
+    /// relay *bearer*, never a real key — see `inject::injection_template`) is overlaid.
     pub fn run_child(
         &self,
-        _plan: inject::ChildEnvPlan,
-        _argv: Vec<String>,
-        _sink: &EventSink,
+        plan: inject::ChildEnvPlan,
+        argv: Vec<String>,
+        sink: &EventSink,
     ) -> anyhow::Result<i32> {
-        todo!()
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+
+        // Fail-closed: an empty argv has no program to resolve.
+        let program = match argv.first() {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => {
+                self.refuse(sink, "run_child", "<empty>", "empty argv")?;
+                anyhow::bail!("run_child refused: empty argv");
+            }
+        };
+
+        // Resolve the program on PATH via the existing `which` dep; refuse if unresolvable.
+        let resolved = match which::which(&program) {
+            Ok(p) => p,
+            Err(e) => {
+                self.refuse(
+                    sink,
+                    "run_child",
+                    &program,
+                    &format!("program not found on PATH: {e}"),
+                )?;
+                anyhow::bail!("run_child refused: program not found: {program}");
+            }
+        };
+
+        let mut cmd = Command::new(&resolved);
+        cmd.args(&argv[1..])
+            // Overlay the provider env delta onto the INHERITED parent env (bearer only).
+            .envs(plan.injection.env.iter())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                self.refuse(sink, "run_child", &program, &format!("spawn failed: {e}"))?;
+                anyhow::bail!("run_child failed to spawn {program}: {e}");
+            }
+        };
+
+        let source = program.clone();
+        // Stream stdout + stderr concurrently so a full pipe on one stream can't deadlock the other.
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        std::thread::scope(|scope| {
+            if let Some(out) = stdout {
+                let sink = sink.clone();
+                let source = source.clone();
+                scope.spawn(move || {
+                    for line in BufReader::new(out).lines().map_while(Result::ok) {
+                        sink.emit(SecretEvent::Log {
+                            source: source.clone(),
+                            stream: Stream::Stdout,
+                            line,
+                        });
+                    }
+                });
+            }
+            if let Some(err) = stderr {
+                let sink = sink.clone();
+                let source = source.clone();
+                scope.spawn(move || {
+                    for line in BufReader::new(err).lines().map_while(Result::ok) {
+                        sink.emit(SecretEvent::Log {
+                            source: source.clone(),
+                            stream: Stream::Stderr,
+                            line,
+                        });
+                    }
+                });
+            }
+        });
+
+        let status = child.wait()?;
+        // True exit code: 128 + signal on signal death (POSIX convention), else the exit code.
+        let code = match status.code() {
+            Some(c) => c,
+            None => {
+                use std::os::unix::process::ExitStatusExt;
+                128 + status.signal().unwrap_or(0)
+            }
+        };
+
+        sink.emit(SecretEvent::ChildExited { code });
+        let mut summary = event::RunSummary::default();
+        if code != 0 {
+            summary.failed.push(source.clone());
+        }
+        sink.emit(SecretEvent::RunFinished { summary });
+        let _ = plan.child_pid_hint; // peer-binding is a PR-2 concern (HF-8).
+        Ok(code)
     }
 
     // ---- internal helpers ---------------------------------------------------------------------
