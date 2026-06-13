@@ -6,11 +6,12 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 1
-cycles_total: 1
-last_item: TASK-0001 (build & install hf kernel) — DONE/PASS-WITH-NOTES 2026-06-13 (cycle 1)
-status: ACTIVE 2026-06-13 — resumed from .handoff/loop/HANDOFF.md (c9c724c) in fresh worktree
-  task-0001-hf-kernel off develop; cycle 1 done (TASK-0001). Next pick TASK-0002 (seed Tier-A + mint).
+cycles_this_session: 2
+cycles_total: 2
+last_item: TASK-0002 (seed Tier-A) — BLOCKED/NEEDS-DECISION 2026-06-13 (cycle 2); TASK-0003 blocked w/ it
+status: ACTIVE 2026-06-13 — cycle 1 TASK-0001 DONE (landed develop 7dd2443); cycle 2 TASK-0002 +
+  TASK-0003 BLOCKED (shipped-hf capability gap, FINDING-0002). Epic A stalled pending owner decision.
+  Next actionable (unblocked): Epic C TASK-0012 (crates/agent-env) per the post-Epic-A order.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
@@ -21,13 +22,23 @@ status: ACTIVE 2026-06-13 — resumed from .handoff/loop/HANDOFF.md (c9c724c) in
   libsqlite3-sys via the `ledger` crate) — not an envctl no-c violation (separate workspace) but
   flagged against Epic A's pure-Rust-kernel north star.
 
+- cycle 2 (2026-06-13, TASK-0002 + TASK-0003, BLOCKED/NEEDS-DECISION): source-proved that the
+  shipped `hf` is strictly CWD-relative (no `--ledger`/`HANDOFF_DIR`), so envctl's Tier-A
+  text/packet layer cannot be hf-rendered against the shared meta ledger without creating a
+  forbidden per-repo `ledger.db` (ADR-0004). `mint --from-kb` needs CWD=child-repo; `hf seed`
+  writes the kernel's own HFTASK cards. Fix is a kernel feature in `meta/handoff` (out of envctl
+  scope). Wrote `.handoff/decisions/FINDING-0002-...md` (3 options, A recommended). TASK-0003
+  blocked with it (depends on a seeded layer). Epic A stalls pending the owner/kernel decision.
+
 ## Next safe step
-- Epic A TASK-0002 (P0): seed envctl `.handoff` Tier-A via `hf` (`hf init`/`hf seed`, render
-  `active.md`+`packets/latest.md` via `hf handoff`, mint `handoff.task.v1` cards via `hf task
-  mint`) — all run from `$META_ROOT` (residency guard), TEXT ONLY committed, never a per-repo
-  ledger, never hand-written packets. This seeds an active task → makes the hook's witnessed-event
-  write live (closes the TASK-0001 GO-LIVE end-to-end proof). Route via `handoff-kernel-engineer`
-  + `handoff-sync` Step 2/3. Land `hf sync` (.kb write-back) per backlog.
+- Epic A is BLOCKED (TASK-0002/0003 → FINDING-0002, needs owner/kernel decision). Per the
+  dependency-aware order, the next UNBLOCKED pick is **Epic C TASK-0012 (P0)**: new pure-Rust crate
+  `crates/agent-env` (6-key+extends model, multi-host resolver, SHA-256, lock; drop `mimalloc`;
+  no-c gate clean). It gates TASK-0013..0018. Large cycle → route via `feature-architect` →
+  `rust-implementer` → `invariant-guardian` (the standard envctl crew), benefits from fresh context.
+- Alt smaller unblocked picks if budget is tight: TASK-0004 (P0, wire META_ROOT into Claude's
+  inherited env via the settings.json.tmpl per-machine render path) or TASK-0011 (P1, refresh
+  docs/KASETTO-FEATURES.md to v3.2.0 — research-heavy, supports Epic C no-downgrade checklist).
 
 ## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
 Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).
