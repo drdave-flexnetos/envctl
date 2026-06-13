@@ -94,26 +94,29 @@ are **rendered by `hf`, never hand-written**.
     `packets/latest.md`), `hf sync --dry-run` (one-way `.kb` mirror). TASK-0002 is now executable as
     written. Next Epic A cycle: seed the OPTIONAL `hooks/policies/skills` text + run
     `hf fleet render envctl` / `hf sync` properly inside a worktree cycle and commit the artifacts.
-- [ ] **TASK-0003 (P1) — UNBLOCKED 2026-06-13 (follows TASK-0002, now DONE — NEXT PICK):** Add a
-  `p7-conformance` gate. Rust-native, mirroring `ci/gates/{no-c,shape,enable}.sh` (no Python — see
-  the Hub Standard validator pattern).
-  - **Schema validation:** assert the seeded Tier-A files carry their `schema` tag —
-    `context/capsule.json` = `handoff.context_capsule.v1`, `policies/rules.toml` =
-    `handoff.policy.rules.v1`, `hooks/hooks.toml` = `handoff.hooks.v1`, any `tasks/*.task.json` =
-    `handoff.task.v1` — and that `hf fleet render envctl` emits a `handoff.packet.v2` packet.
-  - **Residency invariant (independently landable):** assert **no per-repo `ledger.db`** is tracked
-    under `envctl/.handoff` (today guarded by `.gitignore: .handoff/**/ledger.db` + `hf fleet status`
-    P7 detection — the gate makes it fail-closed in CI).
+- [x] **TASK-0003 (P1) — DONE 2026-06-13 (cycle 6): `p7-conformance` gate landed.** Added
+  `ci/gates/p7.sh`, a fail-closed grep-based bash gate mirroring `ci/gates/{shape,enable}.sh`
+  (dependency-free; validates the COMMITTED Tier-A, never runs a ledger-mutating `hf` verb in-member).
+  - **Schema validation ✓:** asserts the `schema` tag on `context/capsule.json`
+    (`handoff.context_capsule.v1`), `policies/rules.toml` (`handoff.policy.rules.v1`),
+    `hooks/hooks.toml` (`handoff.hooks.v1`), every `tasks/*.task.json` (`handoff.task.v1`), and that
+    `packets/latest.md` (the `hf fleet render` artifact) is a `handoff.packet.v2`.
+  - **Residency invariant ✓:** asserts **no per-repo `ledger.db`** is git-tracked OR present on disk
+    under `.handoff`, and that `.gitignore` carries the `.handoff/**/ledger.db` guard. Fail-closed.
+  - **Wired** into the loop verify-on-resume (`.handoff/loop/HANDOFF.md`) + `CLAUDE.md` gate list.
+    Verified: positive PASS on the seeded Tier-A; negative tests (stray `*.db`, bad packet/capsule
+    schema) all fail closed (exit 1). GO-LIVE + card-minting split to **TASK-0024**.
+- [ ] **TASK-0024 (P2, Epic A) — `hf sync` `.kb` GO-LIVE + envctl card-minting** (split from TASK-0003):
   - **GO-LIVE for `.handoff`↔`.kb` auto-sync (run at `$META_ROOT`, NEVER in-member — `hf sync` opens a
     CWD-relative ledger):** verify the kernel's `hf sync` one-way `.kb` write-back (ADR-0003
     HFTASK-0011) so the loop's `.handoff` cards/checkpoints mirror into GitKB. The broken `.kb`
     SessionStart hook is already FIXED (`meta/.claude/settings.json`: `git kb service` → guarded
     `git kb serve`, meta main `bf68d57`). Acceptance: `hf sync` reflects a checkpoint into `.kb` (the
     `/verify` finding's "auto-sync to .handoff and .kb" becomes TRUE).
-  - **Card-minting (deferred):** populate `envctl/.handoff/tasks/` via `hf task mint --from-kb <slug>`
-    once kb task docs exist for the envctl backlog (today `tasks/` is empty; packet degrades to
-    "no open cards"). Reference: `meta/handoff/FLEET_GUIDE.md` for verb usage. CAUTION: use the
-    installed `hf`; do not build/commit in `meta/handoff` while a kernel session may be active.
+  - **Card-minting:** populate `envctl/.handoff/tasks/` via `hf task mint --from-kb <slug>` once kb
+    task docs exist for the envctl backlog (today `tasks/` is empty; packet degrades to "no open
+    cards"). Reference: `meta/handoff/FLEET_GUIDE.md` for verb usage. CAUTION: use the installed `hf`;
+    do not build/commit in `meta/handoff` while a kernel session may be active.
 
 ## Epic B — Meta-portability / env-ownership (`$META_ROOT`)
 

@@ -50,6 +50,7 @@ integration tests (`#[tokio::test]` for the async daemon path). MSRV 1.80, stabl
 bash ci/gates/no-c.sh     # supply-chain: forbids C in the trust boundary (see below)
 bash ci/gates/shape.sh    # code-shape invariants (native-roots, edge module)
 bash ci/gates/enable.sh   # secretd systemd-unit enable invariant
+bash ci/gates/p7.sh       # .handoff Tier-A p7-conformance: schema tags + ledger residency (ADR-0004 §3)
 ```
 
 ## NON-NEGOTIABLE invariants (a change that breaks these is a regression)

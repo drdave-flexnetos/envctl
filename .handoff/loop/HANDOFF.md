@@ -172,7 +172,8 @@ git -C <new-worktree> status --short                                  # expect e
 
 # 2. Build + CI gates green
 cd <new-worktree> && cargo build --workspace \
-  && bash ci/gates/no-c.sh && bash ci/gates/shape.sh && bash ci/gates/enable.sh
+  && bash ci/gates/no-c.sh && bash ci/gates/shape.sh && bash ci/gates/enable.sh \
+  && bash ci/gates/p7.sh   # p7-conformance: .handoff Tier-A schema tags + ledger residency
 
 # 3. Loop preconditions
 which hf                       # expect ABSENT → markdown-fallback path (TASK-0001 will fix)
