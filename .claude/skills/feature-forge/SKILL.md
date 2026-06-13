@@ -25,12 +25,21 @@ without changing the agent definitions.
 |-------|-------|------|----------|----------|
 | Design | `feature-architect` | Plan | no | `.handoff/loop/cycle/01_architect_plan.md` |
 | Build | `rust-implementer` | general-purpose | **yes** | code + `.handoff/loop/cycle/02_implementer_log.md` |
+| Build (Epic A) | `handoff-kernel-engineer` | general-purpose | **yes** | hf/`.handoff` substrate + `.handoff/loop/cycle/02_implementer_log.md` |
 | Verify | `invariant-guardian` | general-purpose | no | `.handoff/loop/cycle/03_guardian_report.md` |
 | Continuity | `continuity-steward` | general-purpose | no (writes checkpoint) | `.handoff/loop/HANDOFF.md` |
 
 The implementer follows the **`rust-feature-impl`** skill; the guardian runs that skill's
 `references/verification.md` recipe. Conventions come from **`agent-env-config`**. The
 `continuity-steward` is used only in **continuous mode** at a session handoff (see below).
+
+**Epic A routing (handoff full-sync / hf kernel).** When the item's scope is building/relocating the
+`hf` kernel or seeding the Tier-A `.handoff` layer (backlog Epic A, TASK-0001…0003), the Build phase
+uses **`handoff-kernel-engineer`** instead of `rust-implementer` — it follows the **`handoff-sync`**
+skill and owns the kernel invariants (single shared ledger at `$META_ROOT/.handoff/ledger.db`,
+packets-rendered-never-hand-written, p7-conformance). The guardian additionally verifies those kernel
+invariants for Epic-A cycles. This is a **cross-repo** job (`meta/handoff` ↔ envctl), which is why it
+is a distinct agent from the envctl-engine-first `rust-implementer`.
 
 **Epic C routing (kasetto absorption / agent-env).** When the item's scope is the agent-env crate
 or kasetto absorption (backlog Epic C, TASK-0011…0018), route **all three** crew members at

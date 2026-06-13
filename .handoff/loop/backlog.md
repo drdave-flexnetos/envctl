@@ -49,8 +49,10 @@ verify env health.
   emit `export META_ROOT=…` + meta tool dirs on PATH; `--toolchains`/`--materialize` (merged from
   feat/envctl-env, 2026-06-12).
 - [ ] **TASK-0004 (P0):** Wire `META_ROOT` into the env Claude inherits (login/session env envctl owns).
-- [ ] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
+- [~] **TASK-0005 (P1):** Heal the 3 hardcoded `home/.claude/settings.json` refs via `$META_ROOT`/
   per-machine templating: statusline script + 2 plugin-marketplace dirs (HIGH — live source-of-truth file).
+  - IN REVIEW (2026-06-13, per rtk-tokenkill session): delivered as `home/.claude/settings.json.tmpl` +
+    `claude-global-links` per-machine render (byte-identical, non-breaking); PR **envctl#37 → develop**. Merge to close.
 - [ ] **TASK-0006 (P2):** Point global `home/.config/kasetto/kasetto.yaml` mcps source at in-meta
   agent-skills (not `github.com/FlexNetOS/agent-skills`); genericize MED shell/nushell hardcodes
   (`shell_nu.nu`, `shell_bash.sh`, `config.nu`). Fix stale `Documentation=` URL in `manifest/env-ctl.toml`.
@@ -59,9 +61,11 @@ verify env health.
 - [ ] **TASK-0008 (P2):** Relocate **meta-mcp** → `meta/meta_mcp` (lowest risk; first proof of procedure).
 - [!] **TASK-0009 (P2):** Relocate **kasetto + kst** — superseded by Epic C (kasetto becomes built-in;
   no external binary to relocate once absorbed). Until C lands: meta source v3.0.0 < installed v3.1.0.
-- [!!] **TASK-0010 (P2):** Relocate **rtk + rtk-monitor** — SUPERVISED/CRITICAL (live `rtk hook claude`
-  PreToolUse path; meta v0.42.0 < installed v0.42.2). Sync rtk-tokenkill ≥0.42.2 first; swap with
-  immediate rollback test from a session not dependent on the rtk hook. Owner-flagged.
+- [x] **TASK-0010 (P2):** Relocate **rtk + rtk-monitor** — DONE 2026-06-13 (human-supervised session,
+  per rtk-tokenkill weave report). `FlexNetOS/rtk-tokenkill#1` (sync upstream 0.42.4, rusqlite 0.40 kept)
+  MERGED → develop; rtk built canonically → `meta/target/release/rtk`; `~/.local/bin/rtk` now a SYMLINK
+  into meta (0.42.4); live hook verified; old 0.42.2 archived; meta `Cargo.lock` locked to 0.42.4.
+  (Was `- [!!]` SUPERVISED — correctly NOT auto-run by the loop; resolved by a human, as designed.)
 
 ## Epic C — Kasetto full-feature unification into envctl (no downgrade)
 
