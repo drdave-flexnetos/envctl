@@ -17,8 +17,12 @@
 //! head to the proxy. [`handle`] wraps the matching receiver in a `StreamBody` for the hyper
 //! response, so the body streams to the child concurrently — bounded by the channel capacity.
 //!
-//! PR-2a scope: the BaseUrlRepoint egress path. `CONNECT`/MITM (`HTTPS_PROXY`) is answered `501`
-//! and deferred to PR-3 (it needs the local CA stack).
+//! PR-2a scope: the BaseUrlRepoint egress path (origin/absolute-form requests on a plain loopback
+//! connection). PR-3b adds the `CONNECT`/MITM (`HTTPS_PROXY`) ingress (feature `mitm-ca`): the proxy
+//! terminates the child's TLS with an engine-minted per-host leaf, reads the plaintext request, and
+//! reuses the SAME `relay_swap` egress. The MITM path changes only the INGRESS; everything after the
+//! bearer is read (`DaemonUpstream`, the per-request body channel, the task-local) is unchanged.
+//! With `--no-default-features` (no `mitm-ca`) the CONNECT branch falls back to the historical `501`.
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -84,6 +88,12 @@ fn upstream_root_store() -> rustls::RootCertStore {
 fn build_upstream_client() -> reqwest::Client {
     reqwest::ClientBuilder::new()
         .use_preconfigured_tls(upstream_tls_config())
+        // The daemon sets `HTTPS_PROXY` in CHILD environments (the MITM injection). `.no_proxy()`
+        // ensures the daemon's OWN upstream client never honors an ambient `HTTPS_PROXY`/`http_proxy`
+        // from its own environment — otherwise the real-key egress could be looped back through the
+        // very proxy it published for children (an egress-hijack / SSRF foothold). Fail-safe: the
+        // upstream always goes DIRECT to the provider over the frozen webpki-roots TLS.
+        .no_proxy()
         .build()
         .expect("reqwest client with preconfigured webpki-roots TLS must build")
 }
@@ -212,6 +222,28 @@ tokio::task_local! {
     static EGRESS_CTX: std::cell::RefCell<Option<RequestEgress>>;
 }
 
+/// Test-only hook: from inside a test `Upstream::send` (which runs in the same task as the proxy's
+/// `EGRESS_CTX.scope`), pump a complete response body into THIS request's body sink so the proxy
+/// streams it back to the client — exactly as `DaemonUpstream::send`'s detached pump does for a real
+/// upstream. Returns `false` if no per-request context is present (misuse). This lets an integration
+/// test exercise the full ingress→swap→streamed-response path with a recording upstream, WITHOUT
+/// making a real network call. It carries no key material and is inert in production (never called).
+#[doc(hidden)]
+pub async fn __test_pump_response_body(body: Bytes) -> bool {
+    let tx = EGRESS_CTX
+        .try_with(|c| c.borrow_mut().take().map(|e| e.body_tx))
+        .ok()
+        .flatten();
+    let Some(tx) = tx else {
+        return false;
+    };
+    if !body.is_empty() {
+        let _ = tx.send(Ok(Frame::data(body))).await;
+    }
+    // Dropping `tx` ends the ReceiverStream → the hyper response body completes.
+    true
+}
+
 /// The long-lived engine `Upstream` seam installed at daemon startup. It holds ONLY the shared
 /// reqwest client (webpki-roots TLS); the per-request provider + body sink come from the
 /// `EGRESS_CTX` task-local set by the handling task. The engine calls `send` ONLY on an `Allowed`
@@ -336,13 +368,23 @@ struct ProxyCtx {
     peer_uid: Option<u32>,
 }
 
-/// Handle one inbound proxy request: extract the bearer, build the `EgressReq`, drive `relay_swap`,
-/// and map the `SwapOutcome` to a hyper response. NEVER echoes a body or header on a refusal (no
-/// oracle); NEVER logs request/response bodies or the auth header.
+/// Handle one inbound proxy request on a PLAIN loopback connection (the BaseUrlRepoint ingress).
+/// `CONNECT` is dispatched to the MITM ingress (feature `mitm-ca`) or the historical `501` fallback;
+/// every other method is an origin/absolute-form request resolved here. NEVER echoes a body or
+/// header on a refusal (no oracle); NEVER logs request/response bodies or the auth header.
 async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyBody>, Infallible> {
-    // CONNECT / MITM is deferred to PR-3 (needs the local CA): answer 501, swap nothing.
+    // CONNECT establishes an HTTPS_PROXY tunnel: terminate the child's TLS with an engine-minted leaf
+    // (PR-3b) and serve the decrypted requests through the SAME relay_swap. When the `mitm-ca` feature
+    // is off there is no local CA, so we fall back to the historical 501 (swap nothing).
     if req.method() == hyper::Method::CONNECT {
-        return Ok(bare(StatusCode::NOT_IMPLEMENTED));
+        #[cfg(feature = "mitm-ca")]
+        {
+            return Ok(mitm::handle_connect(ctx, req).await);
+        }
+        #[cfg(not(feature = "mitm-ca"))]
+        {
+            return Ok(bare(StatusCode::NOT_IMPLEMENTED));
+        }
     }
 
     // Determine the target host. For a base-URL repoint the child sends an origin-form request whose
@@ -362,17 +404,39 @@ async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyB
         .map(|pq| pq.as_str().to_string())
         .unwrap_or_else(|| "/".to_string());
 
+    // Plain ingress: no TLS is terminated here, so there is no observed SNI (`None`). The non-MITM
+    // swap modes ignore SNI; a `ProxyMitm` policy presented over this plain path fails closed.
+    let (parts, body) = req.into_parts();
+    Ok(swap_and_respond(&ctx, method, host, path, &parts.headers, body, None).await)
+}
+
+/// The shared egress core: from a verified-host request (plain OR MITM-decrypted), extract the
+/// bearer, build the `EgressReq`, drive `relay_swap`, and map the `SwapOutcome` to a hyper response.
+/// `observed_sni` is `Some(host)` for the MITM ingress (the TLS handshake name, pinned to the
+/// CONNECT target) and `None` for the plain ingress. The real key never enters this function — it is
+/// confined entirely to the engine's `Upstream::send`.
+async fn swap_and_respond<B>(
+    ctx: &ProxyCtx,
+    method: Method,
+    host: String,
+    path: String,
+    headers_in: &hyper::HeaderMap,
+    body: B,
+    observed_sni: Option<String>,
+) -> Response<ProxyBody>
+where
+    B: hyper::body::Body<Data = Bytes>,
+{
     let provider = provider_for_host(&host);
-    let bearer = match extract_bearer(req.headers(), provider) {
+    let bearer = match extract_bearer(headers_in, provider) {
         Some(b) => b,
         // No bearer => the engine would refuse as UnknownBearer; short-circuit to a bare 403 without
         // touching the vault.
-        None => return Ok(bare(StatusCode::FORBIDDEN)),
+        None => return bare(StatusCode::FORBIDDEN),
     };
 
     // Snapshot the forwarded request headers (the auth header is dropped inside `send`).
-    let headers: Vec<(String, String)> = req
-        .headers()
+    let headers: Vec<(String, String)> = headers_in
         .iter()
         .filter_map(|(k, v)| {
             v.to_str()
@@ -383,9 +447,9 @@ async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyB
 
     // Drain the inbound body (the swap is for control-plane-sized requests; collect bounds it). The
     // bytes_out feeds the engine's byte-budget quota. A body read error => bad request.
-    let body_bytes = match req.into_body().collect().await {
+    let body_bytes = match body.collect().await {
         Ok(c) => c.to_bytes(),
-        Err(_) => return Ok(bare(StatusCode::BAD_REQUEST)),
+        Err(_) => return bare(StatusCode::BAD_REQUEST),
     };
     let bytes_out = body_bytes.len() as u64;
 
@@ -401,6 +465,7 @@ async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyB
         // checks pid only when bound, so a pid-bound bearer would `PeerMismatch`-deny every egress
         // here. Same-uid trust is the local boundary; the bearer stays short-lived + scoped + USB-gated.
         peer_pid: None,
+        observed_sni,
     };
 
     // Per-request body channel. Its sender goes into the task-local egress context that the
@@ -430,14 +495,14 @@ async fn handle(ctx: ProxyCtx, req: Request<Incoming>) -> Result<Response<ProxyB
                     builder = builder.header(k, v);
                 }
             }
-            Ok(builder
+            builder
                 .body(stream_body(body_rx))
-                .unwrap_or_else(|_| bare(StatusCode::BAD_GATEWAY)))
+                .unwrap_or_else(|_| bare(StatusCode::BAD_GATEWAY))
         }
         // Fail-closed: a deny or an internal refusal is a BARE status with NO body and NO header echo
         // (no oracle, no key/error leak). The engine already fetched no key on a deny.
-        SwapOutcome::Denied(_) => Ok(bare(StatusCode::FORBIDDEN)),
-        SwapOutcome::InternalRefused(_) => Ok(bare(StatusCode::BAD_GATEWAY)),
+        SwapOutcome::Denied(_) => bare(StatusCode::FORBIDDEN),
+        SwapOutcome::InternalRefused(_) => bare(StatusCode::BAD_GATEWAY),
     }
 }
 
@@ -479,6 +544,230 @@ fn request_host(req: &Request<Incoming>) -> Option<String> {
         None
     } else {
         Some(host.to_string())
+    }
+}
+
+/// Parse the bare host from a `CONNECT host[:port]` target (the request-target of a CONNECT is an
+/// `authority`, e.g. `api.anthropic.com:443`). Accepts ANY port (OQ4: the per-request swap re-fences
+/// the host against the provider allowlist regardless of the tunnel port), strips it to the host,
+/// and lowercases nothing (the engine compares case-insensitively). `None` for an empty/garbled
+/// target so the CONNECT is refused before any leaf is minted. Only the MITM ingress (feature
+/// `mitm-ca`) parses CONNECT targets; gated so a non-MITM build has no dead code.
+#[cfg(feature = "mitm-ca")]
+fn connect_host_from_target(target: &str) -> Option<String> {
+    // Strip a userinfo prefix defensively, then the `:port` suffix. IPv6 literals are not a real
+    // upstream here (the canonical providers are DNS names), so the simple rsplit on ':' is safe.
+    let host = target.split('@').next_back().unwrap_or(target);
+    let host = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    let host = host.trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+// ============================================================================================
+// MITM ingress (HTTPS_PROXY / CONNECT) — feature `mitm-ca`
+// ============================================================================================
+
+/// The CONNECT/MITM ingress: terminate the child's TLS with an engine-minted per-host leaf and serve
+/// the decrypted requests through the SAME `relay_swap`. The proxy holds ONLY the short-lived,
+/// in-RAM leaf key for the CONNECT-target host; it never sees the CA key (sealed in the engine) nor
+/// the real provider key (confined to `Upstream::send`). Fail-closed: an uncovered/locked host is
+/// minted NO leaf and the tunnel is refused BEFORE any TLS handshake (no oracle, no half-MITM).
+#[cfg(feature = "mitm-ca")]
+mod mitm {
+    use super::{bare, connect_host_from_target, swap_and_respond, ProxyBody, ProxyCtx};
+    use envctl_secrets::EventSink;
+    use hyper::body::Incoming;
+    use hyper::service::service_fn;
+    use hyper::{Request, Response, StatusCode};
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use std::sync::Arc;
+
+    /// Per-host MITM cert resolver. Holds the CONNECT-target host plus the cached `CertifiedKey`
+    /// built from the engine-minted leaf chain + ephemeral leaf key. Anti-fronting: if the inbound
+    /// ClientHello carries a genuine SNI that differs from the CONNECT host, it returns `None` and the
+    /// handshake fails — a child cannot CONNECT to one host and then TLS-front to another.
+    ///
+    /// NOTE: this type is the `ResolvesServerCert` impl and is deliberately named WITHOUT the
+    /// `edge`/`relay_tls`/`inbound` tokens (shape FS-S25), since it lives in the MITM ingress and must
+    /// not be confused with the (forbidden) edge/relay-TLS inbound termination surface.
+    pub(super) struct MitmCertResolver {
+        host: String,
+        certified: Arc<rustls::sign::CertifiedKey>,
+    }
+
+    impl std::fmt::Debug for MitmCertResolver {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // Never print key material; the host is already public (it is the CONNECT target).
+            f.debug_struct("MitmCertResolver")
+                .field("host", &self.host)
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl MitmCertResolver {
+        /// Build the resolver from the engine's `issue_leaf_for_covered_host` output: the leaf chain
+        /// (leaf-then-CA) and the ephemeral ECDSA leaf key (rcgen ring → PKCS#8). The key is turned
+        /// into a ring `SigningKey` via `any_ecdsa_type`; a non-ECDSA key (should never happen for our
+        /// rcgen ring leaves) is an `Err` so we fail closed rather than serve a broken cert.
+        pub(super) fn new(
+            host: String,
+            chain: Vec<rustls::pki_types::CertificateDer<'static>>,
+            key: rustls::pki_types::PrivateKeyDer<'static>,
+        ) -> anyhow::Result<Self> {
+            let signing_key = rustls::crypto::ring::sign::any_ecdsa_type(&key)
+                .map_err(|e| anyhow::anyhow!("leaf key is not a usable ECDSA signing key: {e}"))?;
+            let certified = Arc::new(rustls::sign::CertifiedKey::new(chain, signing_key));
+            Ok(MitmCertResolver { host, certified })
+        }
+    }
+
+    impl rustls::server::ResolvesServerCert for MitmCertResolver {
+        fn resolve(
+            &self,
+            client_hello: rustls::server::ClientHello<'_>,
+        ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+            // Anti-fronting: a genuine SNI that disagrees with the CONNECT target is refused (None →
+            // the handshake fails with no cert). An absent SNI (some clients omit it on an IP/CONNECT
+            // tunnel) is allowed against the CONNECT-target leaf — the egress swap re-fences the host.
+            if let Some(sni) = client_hello.server_name() {
+                if !sni.eq_ignore_ascii_case(&self.host) {
+                    return None;
+                }
+            }
+            Some(self.certified.clone())
+        }
+    }
+
+    /// Handle a CONNECT: mint the per-host leaf (fail-closed), reply `200`, upgrade the tunnel,
+    /// terminate the child's TLS, and serve the decrypted requests through `relay_swap` (keep-alive
+    /// across multiple requests per tunnel). Returns the response sent to the child for the CONNECT
+    /// itself (`200` to proceed, or a bare `502` refusal with NO upgrade).
+    pub(super) async fn handle_connect(
+        ctx: ProxyCtx,
+        req: Request<Incoming>,
+    ) -> Response<ProxyBody> {
+        // 1. Parse the CONNECT target host (accept any port; strip to host). A garbled target is a
+        //    bare 400 with no leaf, no upgrade.
+        let target = req
+            .uri()
+            .authority()
+            .map(|a| a.as_str().to_string())
+            .or_else(|| req.uri().host().map(|h| h.to_string()));
+        let host = match target.as_deref().and_then(connect_host_from_target) {
+            Some(h) => h,
+            None => return bare(StatusCode::BAD_REQUEST),
+        };
+
+        // 2. Mint the per-host leaf BEFORE any handshake. Fail-closed: an uncovered host / locked
+        //    vault / absent CA yields NO leaf and a bare 502 with NO upgrade — the child's TLS is
+        //    never terminated, so there is no MITM and no oracle. The mint side-effects (audit) live
+        //    in the engine; the proxy passes a null sink (no secrets in logs).
+        let sink = EventSink::null();
+        let (chain, key) = match ctx.engine.issue_leaf_for_covered_host(&host, &sink) {
+            Ok(pair) => pair,
+            Err(_) => return bare(StatusCode::BAD_GATEWAY),
+        };
+
+        // 3. Build the per-connection rustls ServerConfig from the minted leaf via the anti-fronting
+        //    resolver. ring provider + safe protocol versions, no client auth. A build failure (e.g.
+        //    a non-ECDSA key) fails closed with a bare 502, no upgrade.
+        let resolver = match MitmCertResolver::new(host.clone(), chain, key) {
+            Ok(r) => r,
+            Err(_) => return bare(StatusCode::BAD_GATEWAY),
+        };
+        let server_config = match rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        {
+            Ok(b) => b
+                .with_no_client_auth()
+                .with_cert_resolver(Arc::new(resolver)),
+            Err(_) => return bare(StatusCode::BAD_GATEWAY),
+        };
+        let server_config = Arc::new(server_config);
+
+        // 4. Spawn the tunnel: after we return `200`, hyper hands us the raw upgraded stream; we
+        //    terminate TLS on it and serve the decrypted requests. The CONNECT response itself is the
+        //    empty-bodied 200; the upgrade future resolves once the child sees it.
+        let connect_host = host;
+        tokio::spawn(async move {
+            let upgraded = match hyper::upgrade::on(req).await {
+                Ok(u) => u,
+                Err(e) => {
+                    tracing::debug!(error = %e, "mitm CONNECT upgrade failed");
+                    return;
+                }
+            };
+            let acceptor = tokio_rustls::TlsAcceptor::from(server_config);
+            let tls_stream = match acceptor.accept(TokioIo::new(upgraded)).await {
+                Ok(s) => s,
+                Err(e) => {
+                    // A handshake failure (incl. the anti-fronting None → no cert) ends the tunnel
+                    // with no plaintext ever read. No key material is in scope here.
+                    tracing::debug!(error = %e, "mitm TLS handshake failed");
+                    return;
+                }
+            };
+
+            // Serve the decrypted requests with the auto (HTTP/1+2) builder so keep-alive / multiple
+            // requests per tunnel work. The host is PINNED to the CONNECT target: the decrypted
+            // requests arrive in origin-form, and we do NOT trust a divergent inner Host header.
+            let svc_ctx = ctx.clone();
+            let svc_host = connect_host.clone();
+            let service =
+                service_fn(move |dreq| handle_decrypted(svc_ctx.clone(), svc_host.clone(), dreq));
+            if let Err(e) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(tls_stream), service)
+                .await
+            {
+                tracing::debug!(error = %e, "mitm decrypted connection ended");
+            }
+        });
+
+        // The 200 has no body; the upgrade carries the tunnel.
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(super::empty_body())
+            .expect("200 Connection Established with empty body is always constructible")
+    }
+
+    /// Serve ONE decrypted request from inside a MITM tunnel. The host is pinned to the CONNECT
+    /// target (`connect_host`), NOT read from the request (origin-form URIs + an untrusted inner Host
+    /// must not redirect the egress). Everything after the host pin is the SHARED `swap_and_respond`
+    /// core — same bearer extraction, `relay_swap`, body streaming, and fail-closed mapping as the
+    /// plain ingress. `observed_sni` is `Some(connect_host)`: the handshake matched it (anti-fronting),
+    /// so the engine's `ProxyMitm` SNI==Host check passes against a real, TLS-observed name.
+    async fn handle_decrypted(
+        ctx: ProxyCtx,
+        connect_host: String,
+        req: Request<Incoming>,
+    ) -> Result<Response<ProxyBody>, std::convert::Infallible> {
+        let method = match super::method_from_hyper(req.method()) {
+            Some(m) => m,
+            None => return Ok(bare(StatusCode::METHOD_NOT_ALLOWED)),
+        };
+        let path = req
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_else(|| "/".to_string());
+        let observed_sni = Some(connect_host.clone());
+        let (parts, body) = req.into_parts();
+        Ok(swap_and_respond(
+            &ctx,
+            method,
+            connect_host,
+            path,
+            &parts.headers,
+            body,
+            observed_sni,
+        )
+        .await)
     }
 }
 
@@ -532,8 +821,11 @@ pub async fn serve_proxy(
                     let io = TokioIo::new(stream);
                     tokio::spawn(async move {
                         let service = service_fn(move |req| handle(ctx.clone(), req));
+                        // `_with_upgrades` so a CONNECT handler can `hyper::upgrade::on(req)` the raw
+                        // stream for the MITM TLS termination (PR-3b). Non-upgrading requests are
+                        // served exactly as before; the historical 501 CONNECT path never upgrades.
                         if let Err(e) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
-                            .serve_connection(io, service)
+                            .serve_connection_with_upgrades(io, service)
                             .await
                         {
                             tracing::debug!(error = %e, "relay proxy connection ended");
@@ -634,5 +926,162 @@ mod tests {
         let refused = bare(StatusCode::BAD_GATEWAY);
         assert_eq!(refused.status(), StatusCode::BAD_GATEWAY);
         assert_eq!(refused.body().size_hint().exact(), Some(0));
+    }
+
+    // ---- PR-3b MITM ingress unit coverage ----------------------------------------------------
+
+    #[cfg(feature = "mitm-ca")]
+    #[test]
+    fn connect_host_strips_port_and_userinfo() {
+        // ANY port is accepted and stripped to the bare host (OQ4: the swap re-fences the host).
+        assert_eq!(
+            connect_host_from_target("api.anthropic.com:443").as_deref(),
+            Some("api.anthropic.com")
+        );
+        assert_eq!(
+            connect_host_from_target("api.openai.com:8443").as_deref(),
+            Some("api.openai.com")
+        );
+        // No port: the whole authority is the host.
+        assert_eq!(
+            connect_host_from_target("api.github.com").as_deref(),
+            Some("api.github.com")
+        );
+        // Defensive userinfo strip.
+        assert_eq!(
+            connect_host_from_target("user@host.example:443").as_deref(),
+            Some("host.example")
+        );
+        // Empty / garbled → None (the CONNECT is refused before any leaf is minted).
+        assert!(connect_host_from_target("").is_none());
+        assert!(connect_host_from_target(":443").is_none());
+    }
+
+    #[cfg(feature = "mitm-ca")]
+    mod mitm_unit {
+        use super::super::mitm::MitmCertResolver;
+        use envctl_secrets::broker::{Method, Provider, RelayKind};
+        use envctl_secrets::seam::{NoMint, SystemClock, UpstreamError, UsbProbe};
+        use envctl_secrets::vault::InMemStore;
+        use envctl_secrets::{
+            paths::Paths, EgressReq, EgressResp, Engine, EventSink, RelayPolicy, SwapMode, Unlock,
+            Upstream,
+        };
+        use zeroize::Zeroizing;
+
+        const USB_UUID: &str = "MITM-UNIT-USB";
+
+        struct PresentUsb(Zeroizing<Vec<u8>>);
+        impl UsbProbe for PresentUsb {
+            fn keyfile_for(&self, uuid: &str) -> Option<Zeroizing<Vec<u8>>> {
+                (uuid == USB_UUID).then(|| self.0.clone())
+            }
+        }
+
+        struct NullUpstream;
+        #[async_trait::async_trait]
+        impl Upstream for NullUpstream {
+            async fn send(
+                &self,
+                _req: EgressReq,
+                _real_key: &Zeroizing<Vec<u8>>,
+            ) -> Result<EgressResp, UpstreamError> {
+                Err(UpstreamError::Io("not wired in mitm unit test".into()))
+            }
+        }
+
+        /// An unlocked engine with a CA + a covering `ProxyMitm` policy for `host`, so
+        /// `issue_leaf_for_covered_host(host)` mints a real leaf. Mirrors the e2e seam.
+        fn covered_engine(host: &str) -> (Engine, EventSink) {
+            let root = std::env::temp_dir().join(format!(
+                "envctl-mitm-unit-{}-{}",
+                std::process::id(),
+                host.replace('.', "_")
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            let paths = Paths::under(root);
+            std::fs::create_dir_all(&paths.runtime).unwrap();
+            let keyfile = Zeroizing::new(vec![0x42u8; 64]);
+            let engine = Engine::with_seams(
+                paths,
+                Box::new(InMemStore::new()),
+                Box::new(SystemClock),
+                Box::new(PresentUsb(keyfile.clone())),
+                Box::new(NoMint),
+                Box::new(NullUpstream),
+            )
+            .expect("with_seams");
+            let sink = EventSink::null();
+            engine
+                .init_vault(
+                    Zeroizing::new("correct horse battery staple".to_string()),
+                    Some(USB_UUID.to_string()),
+                    Some(keyfile),
+                    Default::default(),
+                    &sink,
+                )
+                .expect("init_vault");
+            engine
+                .unlock(
+                    Unlock::Passphrase(Zeroizing::new("correct horse battery staple".to_string())),
+                    &sink,
+                )
+                .expect("unlock");
+            engine.ca_init(true, &sink).expect("ca_init");
+            // Mint a bearer under a covering ProxyMitm policy — the mint persists the policy, which is
+            // what the relay-coverage gate of issue_leaf_for_covered_host consults.
+            let spec = RelayPolicy {
+                relay_id: "mitm-unit".to_string(),
+                kind: RelayKind::Named,
+                provider: Provider::Anthropic,
+                secret_name: "anthropic".to_string(),
+                swap: SwapMode::ProxyMitm,
+                host_allow: vec![host.to_string()],
+                path_allow: vec!["/".to_string()],
+                method_allow: vec![Method::Post, Method::Get],
+                policy_ttl_secs: 3600,
+                rate_per_min: None,
+                quota_total_requests: None,
+                quota_total_bytes: None,
+                enabled: true,
+                revoked: false,
+            };
+            let uid = Some(rustix::process::getuid().as_raw());
+            engine
+                .relay_mint(spec, 3600, uid, None, &sink)
+                .expect("relay_mint persists the covering policy");
+            (engine, sink)
+        }
+
+        #[test]
+        fn resolver_builds_from_minted_leaf_and_caches_chain() {
+            let host = "api.anthropic.com";
+            let (engine, sink) = covered_engine(host);
+            let (chain, key) = engine
+                .issue_leaf_for_covered_host(host, &sink)
+                .expect("covered host mints a leaf");
+            // leaf + CA → a 2-cert chain.
+            assert_eq!(chain.len(), 2, "leaf chain is leaf-then-CA");
+            // The resolver builds from the ECDSA leaf (rcgen ring) without error and caches it.
+            let resolver = MitmCertResolver::new(host.to_string(), chain, key)
+                .expect("ECDSA leaf builds a CertifiedKey");
+            // Debug must not panic and must carry the host (public) but no key material.
+            let dbg = format!("{resolver:?}");
+            assert!(dbg.contains(host));
+        }
+
+        #[test]
+        fn uncovered_host_mints_no_leaf() {
+            // The covering policy is for api.anthropic.com; an UNCOVERED host is refused with NO leaf
+            // (fail-closed) — there is nothing to build a resolver from, so the CONNECT yields a 502.
+            let (engine, sink) = covered_engine("api.anthropic.com");
+            let err = engine
+                .issue_leaf_for_covered_host("evil.example.com", &sink)
+                .unwrap_err();
+            assert!(
+                format!("{err}").contains("not covered"),
+                "uncovered host must be refused, got {err}"
+            );
+        }
     }
 }

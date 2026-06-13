@@ -82,6 +82,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 rustls-pemfile = "2.2"
 rustls-pki-types = "1"
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+# MITM TLS termination (PR-3b, secretd `mitm-ca` only). default-features=false is MANDATORY: a bare
+# `tokio-rustls = "0.26"` pulls aws-lc-rs and FAILS no-c. ring-only keeps the single pinned rustls 0.23.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 x509-parser = "0.16"
 async-trait = "0.1"
 # --- internal path deps: keep envctl's + add the three secrets path deps ---
