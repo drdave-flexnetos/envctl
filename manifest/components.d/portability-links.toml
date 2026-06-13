@@ -185,6 +185,16 @@ script = '''
 set -e
 T="${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}"
 ARCH="$HOME/Desktop/_archives/home-links-$(date +%Y-%m-%d)"
+# TASK-0005: render the LIVE settings.json from its portable .tmpl, substituting
+# ${META_ROOT} -> this machine's meta root (= the home tree's grandparent). The
+# .tmpl is the committed source of truth; settings.json is a rendered artifact so
+# no meta path is ever hardcoded. Equivalent to `envctl env --materialize`, but
+# dependency-free for the install hook. EDIT settings.json.tmpl, never settings.json.
+if [ -f "$T/.claude/settings.json.tmpl" ]; then
+  MR="$(cd "$T/../.." && pwd)"
+  sed "s|\${META_ROOT}|$MR|g" "$T/.claude/settings.json.tmpl" > "$T/.claude/settings.json"
+  echo "rendered .claude/settings.json from tmpl (META_ROOT=$MR)"
+fi
 for p in .claude/settings.json .claude/CLAUDE.md .claude/RTK.md .claude/commands/recall.md .claude/commands/remember.md .claude/commands/speak.md; do
   src="$T/$p"; dst="$HOME/$p"
   [ -e "$src" ] || { echo "SKIP missing source: $p"; continue; }
