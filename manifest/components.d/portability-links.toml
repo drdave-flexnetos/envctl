@@ -106,10 +106,15 @@ args = ["-lc", "T=\"${ENVCTL_HOME_TREE:-$HOME/Desktop/meta/envctl/home}\"; [ -L 
 id = "meta-tool-links"
 name = "meta tool binaries -> workspace builds"
 description = "Replaces ~/.local/bin (and ~/.cargo/bin duplicate) COPIES of meta-member tools with symlinks into the owning repo's target/release. Version-guarded: never downgrades; skips and reports when the repo build is missing or version-mismatched."
+# detect = ALL always-buildable meta-owned tools are symlinks (not just `meta`).
+# Excludes the version-guarded externals (rtk/kasetto/kst), which may legitimately
+# remain copies when the repo build is behind the installed binary — including them
+# would wedge detect false forever. Checking the full set means adding a newly-built
+# meta tool re-triggers convergence instead of short-circuiting on `meta` alone.
 [component.detect]
 kind = "command"
 command = "bash"
-args = ["-lc", "[ -L \"$HOME/.local/bin/meta\" ]"]
+args = ["-lc", "for b in meta meta-mcp loop lane grit; do [ -L \"$HOME/.local/bin/$b\" ] || exit 1; done"]
 [component.install]
 kind = "script"
 script = '''

@@ -21,12 +21,12 @@ fi
 # === rtk monitor pane (live coverage + savings) ===========================
 # `rtk-mon` opens it on demand; it also auto-opens ONCE per zellij session.
 # Opt out: export RTK_MONITOR_AUTOSTART=0 before bash starts.
-alias rtk-mon='zellij run --name rtk --direction down -- /home/drdave/.local/bin/rtk-monitor'
+alias rtk-mon='zellij run --name rtk --direction down -- "$HOME/.local/bin/rtk-monitor"'
 if [ -n "${ZELLIJ_SESSION_NAME:-}" ] && [ "${RTK_MONITOR_AUTOSTART:-1}" != "0" ]; then
   _rtk_marker="/tmp/rtk-monitor-${ZELLIJ_SESSION_NAME}.lock"
   if [ ! -e "$_rtk_marker" ]; then
     : > "$_rtk_marker"
-    zellij run --name rtk --direction down -- /home/drdave/.local/bin/rtk-monitor >/dev/null 2>&1 || true
+    zellij run --name rtk --direction down -- "$HOME/.local/bin/rtk-monitor" >/dev/null 2>&1 || true
   fi
   unset _rtk_marker
 fi
