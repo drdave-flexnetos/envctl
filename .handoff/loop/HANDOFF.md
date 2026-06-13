@@ -1,22 +1,28 @@
-# Feature Forge HANDOFF — 2026-06-13 · refreshed after cycles 1–5 (resume session)
+# Feature Forge HANDOFF — 2026-06-13 · refreshed after cycles 1–8 (resume session)
 
 > Loop: **agenticOS-consolidation** (`forge-loop` over `.handoff/loop/backlog.md`, Epics A–E).
-> **STATE @ develop=master=`6617ed9`:** Epic A is **UNBLOCKED and progressing** (NOT blocked — the
-> earlier FINDING-0002 framing is superseded). DONE + MERGED: TASK-0001 (`hf` built+installed),
-> TASK-0005 (settings.json de-hardcoded), **TASK-0004** (META_ROOT wired into the env Claude inherits,
-> PR #47), **TASK-0002** (envctl `.handoff` Tier-A seeded **git-text only**, PR #49). **FINDING-0002
-> RESOLVED (Option A)** — a concurrent `meta/handoff` session shipped the fleet/sync verbs (#17 +
-> `000e4c0`); `hf fleet render envctl` compiles `packets/latest.md` from the FLEET ledger
-> (`meta/.handoff/ledger.db`) with **no per-repo `ledger.db`**. Cycle 5 reconciled the continuity
-> files after the #47/#48/#49 three-way merge silently concatenated (not conflicted) their headers.
-> This file is the markdown-fallback cold-start package; the LIVE packet is `packets/latest.md`. Read
-> this + `.handoff/loop/{backlog,loop_state}.md` (authoritative for cycles 3–5) +
-> `.handoff/decisions/FINDING-0002-*.md` to resume cold. (The "Cycle ledger"/"Landed" sections below
-> still describe cycles 1–2 — loop_state.md supersedes them.)
+> **STATE @ develop=`66b334e` (master mirrors via sync-master):** **Epic A is essentially COMPLETE.**
+> DONE + MERGED: TASK-0001 (`hf` built+installed), TASK-0002 (`.handoff` Tier-A seeded **git-text only**,
+> #49), TASK-0003 (p7-conformance gate `ci/gates/p7.sh`, #56), TASK-0004 (META_ROOT wired into the env
+> Claude inherits, #47), TASK-0005 (settings.json de-hardcoded), TASK-0024 (`hf sync` `.kb` auto-sync
+> **GO-LIVE** in the checkpoint hook, #62). **FINDING-0002 RESOLVED** (Option A — kernel fleet/sync verbs,
+> meta/handoff #17); `hf fleet render envctl` compiles `packets/latest.md` from the FLEET ledger
+> (`meta/.handoff/ledger.db`) with **no per-repo `ledger.db`**.
+> **TASK-0025 (#59): envctl `develop` now has FAIL-CLOSED CI** — branch protection requires
+> `rustfmt`/`clippy`/`test`/`gates`; repo `allow_auto_merge` ON; `push → PR → gh pr merge --auto` self-
+> merges on green (proven live: #62 auto-merged). **CI caveat for the `test` check: NEVER `--test-threads=1`
+> — argon2 (memory-hard KDF) crypto tests take 20–50s EACH, serial balloons the job to ~25–30 min; CI
+> runs parallel with `timeout-minutes`.**
+> This file is the markdown-fallback cold-start package; the LIVE packet is `packets/latest.md`. Read this
+> + `.handoff/loop/{backlog,loop_state}.md` (**authoritative, cycles 6–8**) to resume cold. (The "Cycle
+> ledger"/"Landed" sections below describe cycles 1–2 — loop_state.md supersedes them.)
 >
-> **NEXT PICK = Epic A TASK-0003** (p7-conformance gate + `hf sync` `.kb` GO-LIVE, run at `$META_ROOT`)
-> — natural follow-on — or **Epic C TASK-0012** (`crates/agent-env`, large, fresh context). Budget 3/3
-> this session → resume in a FRESH session/worktree off `develop`; reset cycles to 0.
+> **NEXT PICK = Epic C TASK-0012** (`crates/agent-env` — kasetto full-feature absorption: 6-key+extends
+> model, multi-host resolver, SHA-256, lock; **drop `mimalloc`**; no-c gate clean; gates TASK-0013..0018).
+> LARGE keystone — route `feature-architect` → `rust-implementer` → `invariant-guardian`; benefits from a
+> fresh context. Smaller alts: Epic B TASK-0006/0007/0008. Card-minting (TASK-0024 tail) is conditional on
+> envctl `.kb` task docs existing. Budget 3/3 this session → resume in a FRESH session/worktree off
+> `develop` after `git fetch`; **reset `cycles_this_session` to 0.**
 
 ## Mission (north star)
 Owner directive (2026-06-12): treat **envctl as an agenticOS** — it owns the meta environment
