@@ -1,35 +1,35 @@
-# Loop state — env-ownership + Phase-2 tool relocation
+# Loop state — envctl agenticOS consolidation (Epics A–E)
 
-session_started: 2026-06-12
-loop: runaway-containment Phase-2 (env-ownership build-out -> tool relocation)
-branch: fix/dashboard-auto-claude-opt-in   # envctl working branch carrying the mission commits
-worktree: /home/drdave/Desktop/meta/envctl  (main checkout)
-status: ACTIVE — backlog seeded, not yet started
-mission: runaway-session containment (2026-06-12). See context/capsule.json next_command.
-
-## Done before this loop (shipped + verified)
-- ICM recursion root cause fixed + live: detect_provider clamps Claude->None inside Claude Code;
-  spawn-site guard; extract-pending flock. icm 9da001d (main), 232 tests. Proven live.
-- SessionEnd hook re-enabled safely (envctl 757707c); tool-hooks de-hardcoded to bare names
-  via PATH (envctl 2bf6a28). Settings source-of-truth = envctl/home/.claude (mirrors verified).
-- .handoff repaired: real envctl capsule, _workspace migrated here (P7/ADR-0004), envctl d131148.
+# --- forge-loop ledger (schema fields the loop reads in Phase-0) ---
+session_started: 2026-06-13
+loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .handoff/decisions/ADR-0001)
+branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
+worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
+cycle_budget: 3
+cycles_this_session: 0
+cycles_total: 0
+last_item: (none yet — backlog reconciled, loop not yet started this session)
+status: READY — backlog + cards pending; next pick = TASK-0001 (build hf, the keystone)
 
 ## Next safe step
-- Phase 0 of backlog.md: build `envctl env` (export META_ROOT from .meta.yaml marker). This
-  unblocks healing the 3 hardcoded settings refs and the per-machine symlink regeneration that
-  the relocation depends on.
+- Epic A TASK-0001 (P0): build & install the `hf` kernel from `meta/handoff` (markdown-fallback pick;
+  hf not yet on PATH). Run via the `handoff-kernel-engineer` agent + `handoff-sync` skill. This
+  unlocks hf-rendered packets + witnessed checkpoints for every later cycle, and TASK-0002 (mint
+  cards) which then becomes the ordering authority.
 
-## Order
-Phase 0 (env-ownership) -> meta-mcp (proof) -> kasetto (after source-sync to 3.1.0) ->
-rtk SUPERVISED last (hook-critical + downgrade). git-kb/forge are NOT targets (external/vendor).
+## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
+Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).
+Epic C: TASK-0012 (crates/agent-env) gates TASK-0013..0018.
+Epic B: TASK-0005 healed (settings tmpl on develop); TASK-0008 meta-mcp (proof) before others.
+SUPERVISED (never auto-run): TASK-0010 was `- [!!]` (now DONE by a human session — see backlog).
 
 ## Gates (non-negotiable)
-- never-downgrade (sync meta source UP first) · archive-first (never delete) · build+verify
-  before swap · rollback on failure · verify env health each slice · rtk = supervised only.
+- never-downgrade (sync meta source UP first) · archive-first (never delete) · build+verify before
+  swap · rollback on failure · ledger-residency ($META_ROOT only, no per-repo ledger.db) ·
+  packets-rendered-never-hand-written · `- [!!]` items refuse auto-run -> NEEDS-HUMAN.
 
 ## needs_human / supervised
-- rtk + rtk-monitor relocation (owner-flagged critical; on the live rtk hook path).
-- Decision: bring GitKB into meta as a `.meta.yaml` project (git-kb is currently external)?
-- Old loop's remaining item (dashboard GUI smoke-test) — see _done/, HUMAN-ONLY.
+- Decision: bring GitKB into meta as a `.meta.yaml` project (git-kb currently external)?
+- Old dashboard-forge-loop GUI smoke-test (loop/_done/, HUMAN-ONLY).
 
-last_update: 2026-06-12
+last_update: 2026-06-13
