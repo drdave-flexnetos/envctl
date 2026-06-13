@@ -1,11 +1,19 @@
-# Feature Forge HANDOFF — 2026-06-13T00:00Z (UTC)
+# Feature Forge HANDOFF — 2026-06-13T08:00Z (UTC) · refreshed after cycles 1–2
 
 > Loop: **agenticOS-consolidation** (`forge-loop` over `.handoff/loop/backlog.md`, Epics A–E).
-> `hf` is **ABSENT from PATH** → this is the **markdown-fallback cold-start package** (authoritative,
-> not a kernel-rendered packet). A debug `hf` exists at `meta/handoff/target/debug/hf` but is NOT
-> installed; until TASK-0001 builds+relocates it, packets are NOT rendered and the wired
-> `.handoff` auto-checkpoint hook stays DORMANT. Read ONLY this file + `.handoff/loop/backlog.md`
-> to resume cold.
+> **UPDATE 2026-06-13 (cycles 1–2 landed on develop=master=`8b7e2c8`):** `hf` is now **BUILT +
+> INSTALLED** on PATH (`~/.local/bin/hf` → `meta/handoff/target/release/hf`, cycle 1 / TASK-0001).
+> The Stop/PreCompact `hf-checkpoint` hook is **LIVE** but its witnessed-event WRITE is a no-op
+> until a task is active in the shared ledger (that closure is gated on the now-BLOCKED TASK-0002).
+> This file is still the **markdown-fallback cold-start package** — per-repo packets are NOT yet
+> hf-rendered (see TASK-0002 blocker below). Read this file + `.handoff/loop/{backlog,loop_state}.md`
+> + `.handoff/decisions/FINDING-0002-*.md` to resume cold.
+>
+> **Epic A is BLOCKED pending an OWNER/KERNEL decision (`FINDING-0002`).** TASK-0001 DONE;
+> TASK-0002 (seed Tier-A) + TASK-0003 (p7 gate) `[!]` blocked — the shipped `hf` is strictly
+> CWD-relative (no `--ledger`/`HANDOFF_DIR`), so envctl's Tier-A layer can't be hf-rendered against
+> the shared meta ledger without a forbidden per-repo `ledger.db`. Fix = a kernel feature in
+> `meta/handoff`. **Next unblocked pick = Epic C TASK-0012** (`crates/agent-env`).
 
 ## Mission (north star)
 Owner directive (2026-06-12): treat **envctl as an agenticOS** — it owns the meta environment
@@ -20,9 +28,12 @@ boundary · ledger-residency ($META_ROOT only) · packets rendered, never hand-w
 ## Resume command
 ```
 /forge-loop resume from .handoff/loop/HANDOFF.md (branch <new-slug> off develop) — verify baseline
-green, then run TASK-0001 (build hf) via the handoff-kernel-engineer agent + handoff-sync skill
+green; FIRST surface FINDING-0002 (Epic A blocker) for an owner decision, then run the next
+UNBLOCKED pick TASK-0012 (crates/agent-env) via feature-architect → rust-implementer →
+invariant-guardian. (TASK-0001 DONE, TASK-0002/0003 BLOCKED — do NOT retry them until FINDING-0002
+is decided. cycles_this_session resets to 0 on resume.)
 ```
-Do NOT work in this `relay-handoff` worktree. Create a FRESH worktree off `develop`:
+Do NOT work in any stale worktree. Create a FRESH worktree off `develop`:
 `git worktree add ../envctl-<slug> -b <slug> develop` (or `meta git worktree create <slug>`),
 PR to `develop` → auto-promotes to `master` via `.github/workflows/sync-master.yml`.
 
@@ -40,17 +51,16 @@ PR to `develop` → auto-promotes to `master` via `.github/workflows/sync-master
 **Source of truth = `.handoff/loop/backlog.md`. Cards do NOT yet exist** (`hf task mint` lands in
 TASK-0002); until then this markdown backlog owns ordering.
 
-- *** TASK-0001 (P0, Epic A) — NEXT PICK: build & install `hf` kernel** from `meta/handoff`.
-  Keystone blocker. Build `--release`, relocate per Epic B (archive-first, symlink into meta),
-  verify `hf resume/claim/checkpoint/handoff` run **from $META_ROOT** against
-  `meta/.handoff/ledger.db` (NOT a per-repo ledger). Activates the DORMANT hf-checkpoint hook
-  (Stop+PreCompact `hf checkpoint --auto --quiet`). Route to **handoff-kernel-engineer** agent +
-  **handoff-sync** skill.
-- TASK-0002 (P0, A) — seed envctl `.handoff` via `hf` (policy.toml, hooks, rules, active.md,
-  packets/latest.md, skills) + `hf task mint` Tier-A cards (cards then own ordering); land `hf sync`
-  `.kb` write-back. NO per-repo `ledger.db`; NEVER hand-write packets.
-- TASK-0003 (P1, A) — `p7-conformance` CI gate (schema validation + `hf resume --json` emits
-  `handoff.packet.v2`).
+- **[x] TASK-0001 (P0, Epic A) — DONE (cycle 1).** `hf` built `--release` + installed
+  (`~/.local/bin/hf` → `meta/handoff/target/release/hf`). On PATH; residency-correct (shared ledger
+  only); the Stop/PreCompact hf-checkpoint hook is LIVE (witnessed-event write defers to TASK-0002).
+- **[!] TASK-0002 (P0, A) — BLOCKED (cycle 2, NEEDS-DECISION → `FINDING-0002`).** Shipped `hf` is
+  strictly CWD-relative (no `--ledger`/`HANDOFF_DIR` env), so it can't render envctl's Tier-A layer
+  against the shared meta ledger without a forbidden per-repo `ledger.db`; `mint --from-kb` needs
+  CWD=child-repo; `hf seed` writes the kernel's own HFTASK cards. Fix = kernel feature in
+  `meta/handoff`. **Do not retry until FINDING-0002 is decided** (Option A recommended).
+- **[!] TASK-0003 (P1, A) — BLOCKED with TASK-0002** (p7 gate needs a seeded layer; residency
+  portion landable independently). Unblocks when FINDING-0002 is decided.
 - TASK-0004 (P0, B) — wire `META_ROOT` into the env Claude inherits.
 - TASK-0005 (P1, B) — settings.json `$META_ROOT` heal. **STATUS CONFLICT — see Open findings.**
 - TASK-0006 / TASK-0007 / TASK-0008 (P2, B) — kasetto.yaml mcps source + shell hardcodes + stale
@@ -69,18 +79,23 @@ TASK-0002); until then this markdown backlog owns ordering.
 - TASK-0023 (E) — develop→master auto-sync action + master protection. **Effectively DONE**
   (workflow live, 4 clean runs) — confirm/close.
 
-**Order:** A: 0001→0002→0003. C: 0012 gates 0013..0018. B: 0008 (meta-mcp) is the first
-relocation proof. After Epic A: Epic C (TASK-0012 first), then Epic B remainder, then Epic D.
+**Order (updated):** Epic A is BLOCKED at 0002/0003 (FINDING-0002). **Next unblocked pick = Epic C
+TASK-0012** (`crates/agent-env`, gates 0013..0018) — large crate, wants fresh-context architect.
+Smaller unblocked alternatives if budget/context is tight: TASK-0004 (P0, wire `META_ROOT` into the
+env Claude inherits — via the `settings.json.tmpl` per-machine render path) or TASK-0011 (P1, docs
+refresh, supports Epic C no-downgrade checklist). After FINDING-0002 is decided, return to Epic A.
 
 ## Cycle ledger
-0 cycles this session; 0 total (`loop_state.md`: `cycle_budget: 3`, `cycles_this_session: 0`).
-This is a **clean pre-start handoff** — the loop was reconciled but **never ran a cycle** this
-session. On resume, reset/confirm `cycles_this_session: 0`.
+**2 cycles this session; 2 total** (`loop_state.md`: `cycle_budget: 3`, `cycles_this_session: 2`).
+- cycle 1: TASK-0001 DONE/PASS-WITH-NOTES (landed develop `88e09ed`→merge `7dd2443`, PR #41).
+- cycle 2: TASK-0002 + TASK-0003 BLOCKED/NEEDS-DECISION (landed develop `c8fb3b9`→merge `8b7e2c8`,
+  PR #43; wrote `FINDING-0002`).
+Session **stopped at 2/3 (early, deliberate)** — Epic A blocked on an owner decision + the next item
+is a large fresh-context crate. **On resume, reset `cycles_this_session: 0`.**
 
 ## In-flight cycle
-**None — clean boundary.** No architect/implementer/guardian cycle was mid-run; no
-`.handoff/loop/cycle/0{1,2,3}_*.md` artifacts. The handoff was authored to capture reconciliation
-state before the first cycle, not to interrupt one.
+**None — clean boundary.** Both cycles fully committed + merged to develop=master=`8b7e2c8`; the
+cycle-3 item (TASK-0012) was deliberately NOT started. No `.handoff/loop/cycle/03_*.md` in flight.
 
 ## Landed this session (already on develop — do NOT redo)
 - `3b1d41e` Merge PR #40 / `048e750` harness: wire `.handoff` auto-checkpoint hook (DORMANT until
