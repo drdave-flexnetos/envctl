@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/agent-env",
   "crates/engine",
   "crates/cli",
   "crates/gui",
@@ -58,6 +59,10 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy"] 
 http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
 webpki-roots = "0.26"
+# agent-env (kasetto absorption, Epic C): pure-Rust gzip via miniz_oxide — NEVER zlib/zlib-ng C
+# (`rust_backend`). `tar` is pure-Rust. Both proven C-free by ci/gates/no-c.sh Gate 3.5.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = "0.4"
 # store backend (OI-1 (a)): libSQL `remote` only — default-features=false drops the bundled
 # C-SQLite `core` (libsql-ffi/libsql-sys) so nothing C is linked (proven by ci/gates/no-c.sh Gate 3a).
 libsql = { version = "0.9.30", default-features = false, features = ["remote"] }
