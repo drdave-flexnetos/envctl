@@ -56,7 +56,8 @@ pub fn gate_absent_since_ms(state: GateState, now_ms: i64) -> Option<i64> {
 
 /// Profile S — the **Cognitum Seed** presence gate. Possession is proven *freshly* on each
 /// `resolve()`: a random 32-byte challenge is signed by the Seed's Ed25519 device key (over the
-/// documented SSH path, via [`crate::seam::seed_factor::sign_hex`]) and the returned signature is
+/// REST custody API, TLS-pinned to the Cognitum CA, via [`crate::seam::seed_factor::sign_hex`])
+/// and the returned signature is
 /// verified with `ring` against the operator-pinned device public key. A fresh nonce each call
 /// makes the check replay-proof; verification against the pinned key authenticates the responder.
 ///

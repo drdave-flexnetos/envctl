@@ -15,7 +15,7 @@ inmem-store = []                       # RAM-only vault for tests/CI (envctl Dry
 mitm-ca = ["dep:rcgen", "dep:x509-parser", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types"]
 provider-github = ["dep:rsa", "dep:base64"]   # RS256 App-JWT → installation token (src/mint_github.rs)
 provider-openai = []
-seed-factor = ["dep:ring"]             # Cognitum Seed USB possession factor (opt-in; shells to system `ssh` + ring Ed25519 verify for Profile S — ring is the sanctioned pure-Rust verifier, no-C gate stays green). See PLAN-cognitum-seed-envctl-vault-factor.md
+seed-factor = ["dep:ring", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types"]   # Cognitum Seed USB possession factor (opt-in). Direct pure-Rust HTTPS to the Seed's REST custody API, TLS validated against the PINNED Cognitum CA (ring-only rustls — already in the resolved graph, so no-C gate stays green) + ring Ed25519 verify for Profile S. No `ssh`/subprocess (systemd-sandbox-safe). See PLAN-cognitum-seed-envctl-vault-factor.md
 
 [dependencies]
 serde = { workspace = true }
