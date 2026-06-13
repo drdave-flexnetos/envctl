@@ -15,6 +15,7 @@ inmem-store = []                       # RAM-only vault for tests/CI (envctl Dry
 mitm-ca = ["dep:rcgen", "dep:x509-parser", "dep:rustls", "dep:rustls-pemfile", "dep:rustls-pki-types"]
 provider-github = ["dep:rsa", "dep:base64"]   # RS256 App-JWT → installation token (src/mint_github.rs)
 provider-openai = []
+seed-factor = ["dep:ring"]             # Cognitum Seed USB possession factor (opt-in; shells to system `ssh` + ring Ed25519 verify for Profile S — ring is the sanctioned pure-Rust verifier, no-C gate stays green). See PLAN-cognitum-seed-envctl-vault-factor.md
 
 [dependencies]
 serde = { workspace = true }
@@ -44,6 +45,9 @@ x509-parser = { workspace = true, optional = true }
 # GitHub App-JWT mint (provider-github) — pure-Rust RustCrypto; no C in the trust boundary
 rsa = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
+# Cognitum Seed (seed-factor) — Ed25519 challenge verification for Profile S. ring is the sanctioned
+# verifier (same crate rustls already pins on); already in the resolved graph, so no-C stays green.
+ring = { version = "0.17", optional = true }
 # the one async seam
 async-trait = { workspace = true }
 

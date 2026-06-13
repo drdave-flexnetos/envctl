@@ -110,6 +110,13 @@ struct EngineInner {
     provider: Box<dyn ProviderMint>,
     upstream: Box<dyn Upstream>, // pins frozen webpki roots in the daemon impl (FS-S7)
     owner_uid: u32,
+    /// Short-TTL cache for the **network** presence factor (Profile S, the Cognitum Seed):
+    /// `(proven, resolved_at_wall_ms)`. The per-request egress path (`relay_swap`) must not do a
+    /// ~1-2s SSH probe per request; a live challenge runs at most once per `PRESENCE_GATE_TTL_MS`.
+    /// Only present under `seed-factor` — the fast on-box USB probe (Profile A) is never cached, so
+    /// default builds keep the no-grace gate unchanged. See [`Engine::seed_presence_cached`].
+    #[cfg(feature = "seed-factor")]
+    presence_cache: std::sync::Mutex<Option<(bool, i64)>>,
 }
 
 /// Which unlock factor the operator is presenting.
@@ -194,6 +201,8 @@ impl Engine {
                 provider,
                 upstream,
                 owner_uid,
+                #[cfg(feature = "seed-factor")]
+                presence_cache: std::sync::Mutex::new(None),
             }),
         })
     }
@@ -755,7 +764,7 @@ impl Engine {
         // touching any key material. A UUID match alone is not possession (CF-4) — `keyfile_for`
         // must actually return the bytes. Absence is a REFUSAL (durable Refused row + GuardRefused
         // event), then a typed `UsbAbsent` Err; the real key is never derived.
-        if !self.usb_possession_proven()? {
+        if !self.presence_proven()? {
             drop(v);
             self.refuse(
                 sink,
@@ -913,7 +922,7 @@ impl Engine {
         let inner = &self.inner;
         let now_ms = inner.clock.now().timestamp_millis();
         // USB possession (operator gate), same as mint — registering a remote principal is privileged.
-        if !self.usb_possession_proven()? {
+        if !self.presence_proven()? {
             self.refuse(
                 sink,
                 "register_remote_client",
@@ -1321,11 +1330,13 @@ impl Engine {
         let relay_id = policy_row.policy.relay_id.clone();
         let secret_name = policy_row.policy.secret_name.clone();
 
-        // Presence gate snapshot (F14, SERVER-MODE §5.1): Profile A resolves the egress gate from
-        // the on-box USB probe. `decide()` treats Unproven EXACTLY like AbsentSince(now), so an
-        // absent/unproven factor fails closed with no grace (REQ-SEC-13). A Profile-B daemon injects
-        // an operator-box `PresenceGate` through this same single choke point.
-        let gate_state = if self.usb_possession_proven()? {
+        // Presence gate snapshot (F14, SERVER-MODE §5.1): `presence_proven` resolves the egress gate
+        // through one choke point — Profile A (on-box USB keyfile probe) by default, Profile S (the
+        // Cognitum Seed: fresh-challenge Ed25519 verify) under `seed-factor` — behind a short-TTL
+        // cache so this per-request path never probes the network factor live per request. `decide()`
+        // treats Unproven EXACTLY like AbsentSince(now); absence fails closed (REQ-SEC-13), subject to
+        // at most one TTL of presence staleness for the network factor.
+        let gate_state = if self.presence_proven()? {
             crate::broker::GateState::Present
         } else {
             crate::broker::GateState::Unproven
@@ -1484,6 +1495,63 @@ impl Engine {
         .to_vec();
         drop(row_mac_key);
         Ok(())
+    }
+
+    /// The egress/relay presence gate, as the relay paths consume it.
+    ///
+    /// **Profile A** (default build, or `seed-factor` with no pinned `ENVCTL_SEED_PUBKEY`): the fast
+    /// on-box USB keyfile probe ([`Self::usb_possession_proven`]) — **uncached, immediate, no grace**
+    /// (unchanged from before; default builds are byte-identical).
+    ///
+    /// **Profile S** (`seed-factor` + `ENVCTL_SEED_PUBKEY`): a fresh random-challenge Ed25519 verify
+    /// against the Cognitum Seed, behind a short-TTL cache ([`Self::seed_presence_cached`]) — only
+    /// the *network* factor is cached, because the per-request egress path can't afford a ~1-2s SSH
+    /// probe per request.
+    fn presence_proven(&self) -> anyhow::Result<bool> {
+        #[cfg(feature = "seed-factor")]
+        {
+            if std::env::var_os("ENVCTL_SEED_PUBKEY").is_some() {
+                return self.seed_presence_cached();
+            }
+        }
+        self.usb_possession_proven()
+    }
+
+    /// Profile S (Cognitum Seed) presence behind a short-TTL cache. A live random-challenge verify
+    /// runs at most once per `PRESENCE_GATE_TTL_MS`; within the window the last result is reused (≤
+    /// one TTL of presence staleness — the owner-approved grace for a network factor, the only
+    /// deviation from the no-grace rule). Vacuously `true` when no USB keyslot is enrolled (a
+    /// passphrase-only vault is not USB-gated). Fails closed on a poisoned cache lock.
+    #[cfg(feature = "seed-factor")]
+    fn seed_presence_cached(&self) -> anyhow::Result<bool> {
+        const PRESENCE_GATE_TTL_MS: i64 = 5_000;
+        let now_ms = self.inner.clock.now().timestamp_millis();
+        {
+            let cache = self
+                .inner
+                .presence_cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("presence cache lock poisoned"))?;
+            if let Some((proven, at)) = *cache {
+                if now_ms.saturating_sub(at) < PRESENCE_GATE_TTL_MS {
+                    return Ok(proven);
+                }
+            }
+        }
+        let slots = self.inner.store.load_keyslots()?;
+        let proven = if !slots.iter().any(|s| s.enabled && s.factor == Factor::Usb) {
+            true // vacuous: no USB keyslot enrolled
+        } else {
+            use crate::broker::{GateState, PresenceGate, SeedPresenceGate};
+            matches!(SeedPresenceGate::from_env().resolve(), GateState::Present)
+        };
+        let mut cache = self
+            .inner
+            .presence_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("presence cache lock poisoned"))?;
+        *cache = Some((proven, now_ms));
+        Ok(proven)
     }
 
     /// Whether USB possession is currently PROVEN: some enabled USB keyslot's keyfile is obtainable

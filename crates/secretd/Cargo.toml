@@ -13,6 +13,12 @@ path = "src/lib.rs"
 name = "secretd"
 path = "src/main.rs"
 
+[features]
+# Build the daemon with the Cognitum Seed USB possession factor. Forwards to the engine feature;
+# the USB keyslot (init + unlock) is then backed by the Seed's deterministic Ed25519 signature.
+# Off by default — a stock secretd has no USB backend and refuses USB enrollment cleanly.
+seed-factor = ["envctl-secrets-engine/seed-factor"]
+
 [dependencies]
 envctl-secrets-engine = { workspace = true }
 envctl-secrets-proto = { workspace = true }
