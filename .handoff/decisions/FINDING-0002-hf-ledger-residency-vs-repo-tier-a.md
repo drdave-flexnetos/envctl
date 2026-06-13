@@ -1,5 +1,12 @@
 # FINDING-0002 — TASK-0002 blocked: installed `hf` is the S1 spike, missing the fleet verbs
 
+- **Status:** **RESOLVED 2026-06-13 (Option A) — UNBLOCKS TASK-0002/0003.** The kernel built the
+  missing fleet verbs in `meta/handoff` PR **#17** (`feat: fleet verbs hf fleet status/render, hf
+  sync` + handoff-loop harness; handoff HEAD `1adbb13`); installed `hf` rebuilt 2026-06-13 04:29.
+  Verified live from `$META_ROOT` on resume (owner "check now"): `hf fleet status` (fleet ledger
+  present, 64 members enumerated), `hf fleet render envctl` (wrote `packets/latest.md`),
+  `hf sync --dry-run` (one-way `.kb` mirror). The S1-spike gap is closed; TASK-0002 is executable as
+  written. (Was: NEEDS-DECISION (owner / kernel team) — blocked TASK-0002, Epic A.)
 > **RESOLVED 2026-06-13.** The blocker is cleared: a concurrent `meta/handoff` session BUILT the
 > missing verbs — `hf fleet status`/`fleet render` + `hf sync` (PR #17), and `hf drift` + `hf policy`
 > + `FLEET_GUIDE.md` (commit `000e4c0`). The installed `~/.local/bin/hf` was rebuilt and verified:
