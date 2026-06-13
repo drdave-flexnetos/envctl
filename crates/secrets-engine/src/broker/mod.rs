@@ -9,6 +9,8 @@ pub mod token;
 
 pub use decide::RemotePeer;
 pub use decide::{decide, CanonRequest, DenyReason, RelayDecision, VerifiedBearer};
+#[cfg(feature = "seed-factor")]
+pub use gate::SeedPresenceGate;
 pub use gate::{gate_absent_since_ms, GateState, PresenceGate};
 pub use policy::{
     canonical_upstreams, clamp_ttl, Bearer, Method, Provider, RelayId, RelayKind, RelayPolicy,
