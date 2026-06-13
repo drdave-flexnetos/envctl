@@ -6,6 +6,16 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
+cycles_this_session: 2   # RESUME 2026-06-13 (reset to 0 on resume): cycle 3 (TASK-0004) + cycle 4 (TASK-0002)
+cycles_total: 4
+last_item: TASK-0002 (seed envctl .handoff Tier-A) — DONE 2026-06-13 (cycle 4, resume)
+status: ACTIVE (resumed) 2026-06-13 @ 2/3 — cycle 3 TASK-0004 DONE (PR #47), cycle 4 TASK-0002 DONE
+  (PR stacked on #47). FINDING-0002 RESOLVED (Option A; kernel fleet verbs, meta/handoff #17). Epic A
+  Tier-A seed landed git-text-only (capsule refresh + OPTIONAL hooks/policies/skills + rendered
+  packet via `hf fleet render envctl`; 0 per-repo ledger, hf fleet status P7-clean). Next pick:
+  **Epic A TASK-0003** (p7-conformance CI gate + `hf sync` `.kb` GO-LIVE, run at $META_ROOT) — natural
+  follow-on — or **Epic C TASK-0012** (crates/agent-env, large, fresh context). Budget 2/3: ONE more
+  cycle then HAND OFF. Resume via `/forge-loop resume`; reset cycles to 0.
 cycles_this_session: 1   # RESUME 2026-06-13: counter reset to 0 on resume; cycle 3 (TASK-0004) ran
 cycles_total: 3
 last_item: TASK-0004 (wire META_ROOT into the env Claude inherits) — DONE 2026-06-13 (cycle 3, resume)
@@ -57,15 +67,26 @@ status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 
   `cargo test -p envctl` 7 pass, no-c/shape/enable PASS. (Pre-existing, out-of-scope: clippy
   `items_after_test_module` on crates/cli/src/main.rs — present on develop, not gated by CI.)
 
+- cycle 4 (2026-06-13, TASK-0002, DONE — resume session, stacked on #47): seeded envctl `.handoff`
+  Tier-A as **git-text only** per ADR-0004 §7 (kernel-source verified that `hf init`/`hf seed` would
+  plant a per-repo `ledger.db`/irrelevant HFTASK cards — avoided). Refreshed `context/capsule.json`
+  next_command; seeded OPTIONAL `hooks/hooks.toml` + `policies/rules.toml` +
+  `skills/session-resume.skill.md` from the design-bundle templates (with a `$META_ROOT`-residency
+  header); **compiled** `packets/latest.md` via `hf fleet render envctl` (not hand-written); fixed
+  `.handoff/README.md` (FLEET ledger = `meta/.handoff/ledger.db`; member packets via `hf fleet
+  render`; active loop). Residency: 0 `*.db` under `.handoff`, `.gitignore` guard present, `hf fleet
+  status` P7-clean for envctl. Gates: no-c/shape/enable PASS; drift test green. `tasks/` left empty
+  (no kb task docs to `hf task mint --from-kb` yet) → tracked under TASK-0003.
+
 ## Next safe step
-- **Epic A is now UNBLOCKED** (FINDING-0002 resolved). Next pick = **TASK-0002 (P0, Epic A)**:
-  seed envctl's OPTIONAL `hooks/policies/skills` text + run `hf fleet render envctl` and `hf sync`
-  inside a worktree cycle and commit the rendered artifacts (no per-repo `ledger.db`; packets
-  rendered, never hand-written). Then TASK-0003 (p7-conformance gate). Route via the envctl crew or
-  `handoff-kernel-engineer` where kernel verbs are exercised.
+- **Epic A Tier-A seed landed.** Next pick = **TASK-0003 (P1, Epic A)**: add the `p7-conformance` CI
+  gate (validate capsule/policy/task schemas + `hf resume --json` → `handoff.packet.v2`; assert no
+  per-repo `ledger.db` tracked) AND the `hf sync` `.kb` GO-LIVE (one-way write-back, run at
+  `$META_ROOT`/orchestration home — NEVER in-member, which would create a ledger). Natural follow-on.
 - Alt: **Epic C TASK-0012 (P0)** — new pure-Rust crate `crates/agent-env` (6-key+extends model,
   multi-host resolver, SHA-256, lock; drop `mimalloc`; no-c clean). Large; gates TASK-0013..0018.
   Route `feature-architect` → `rust-implementer` → `invariant-guardian`. Benefits from fresh context.
+- **Budget: 2/3 cycles this session — ONE more cycle, then HAND OFF** (session-relay) and reset to 0.
 
 ## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
 Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).

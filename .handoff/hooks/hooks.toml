@@ -1,0 +1,46 @@
+# envctl .handoff Tier-A — autonomous-loop hook descriptors (ADR-0004 §2, OPTIONAL).
+#
+# RESIDENCY (ADR-0004 §3 / META-ORG-POLICY P7): this file is git-committed TEXT ONLY and the
+# kernel never parses it — it documents the loop's lifecycle contract. Any ledger-MUTATING verb
+# below (checkpoint/handoff/claim/...) MUST execute at the orchestration home ($META_ROOT, whose
+# witnessed FLEET ledger is meta/.handoff/ledger.db), NEVER with CWD inside this member repo —
+# running them here would materialize a forbidden per-repo .handoff/ledger.db. envctl's live wiring
+# (.claude/hooks/hf-checkpoint.sh) already resolves $META_ROOT and runs from there.
+
+schema = "handoff.hooks.v1"
+
+[[hooks]]
+event = "SessionStart"
+command = "hf resume --compact"
+timeout_seconds = 10
+fail_mode = "warn"
+
+[[hooks]]
+event = "TaskClaim"
+command = "hf policy check-claim --json"
+timeout_seconds = 15
+fail_mode = "block"
+
+[[hooks]]
+event = "PreEdit"
+command = "hf policy check-edit --json"
+timeout_seconds = 5
+fail_mode = "block"
+
+[[hooks]]
+event = "PostEdit"
+command = "hf checkpoint --auto --changed-files"
+timeout_seconds = 30
+fail_mode = "warn"
+
+[[hooks]]
+event = "PreHandoff"
+command = "hf drift --json && hf policy check-handoff --json"
+timeout_seconds = 30
+fail_mode = "block"
+
+[[hooks]]
+event = "SessionStop"
+command = "hf checkpoint --auto && hf handoff --auto"
+timeout_seconds = 60
+fail_mode = "warn"
