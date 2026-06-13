@@ -1,19 +1,22 @@
-# Feature Forge HANDOFF — 2026-06-13T08:00Z (UTC) · refreshed after cycles 1–2
+# Feature Forge HANDOFF — 2026-06-13 · refreshed after cycles 1–5 (resume session)
 
 > Loop: **agenticOS-consolidation** (`forge-loop` over `.handoff/loop/backlog.md`, Epics A–E).
-> **UPDATE 2026-06-13 (cycles 1–2 landed on develop=master=`8b7e2c8`):** `hf` is now **BUILT +
-> INSTALLED** on PATH (`~/.local/bin/hf` → `meta/handoff/target/release/hf`, cycle 1 / TASK-0001).
-> The Stop/PreCompact `hf-checkpoint` hook is **LIVE** but its witnessed-event WRITE is a no-op
-> until a task is active in the shared ledger (that closure is gated on the now-BLOCKED TASK-0002).
-> This file is still the **markdown-fallback cold-start package** — per-repo packets are NOT yet
-> hf-rendered (see TASK-0002 blocker below). Read this file + `.handoff/loop/{backlog,loop_state}.md`
-> + `.handoff/decisions/FINDING-0002-*.md` to resume cold.
+> **STATE @ develop=master=`6617ed9`:** Epic A is **UNBLOCKED and progressing** (NOT blocked — the
+> earlier FINDING-0002 framing is superseded). DONE + MERGED: TASK-0001 (`hf` built+installed),
+> TASK-0005 (settings.json de-hardcoded), **TASK-0004** (META_ROOT wired into the env Claude inherits,
+> PR #47), **TASK-0002** (envctl `.handoff` Tier-A seeded **git-text only**, PR #49). **FINDING-0002
+> RESOLVED (Option A)** — a concurrent `meta/handoff` session shipped the fleet/sync verbs (#17 +
+> `000e4c0`); `hf fleet render envctl` compiles `packets/latest.md` from the FLEET ledger
+> (`meta/.handoff/ledger.db`) with **no per-repo `ledger.db`**. Cycle 5 reconciled the continuity
+> files after the #47/#48/#49 three-way merge silently concatenated (not conflicted) their headers.
+> This file is the markdown-fallback cold-start package; the LIVE packet is `packets/latest.md`. Read
+> this + `.handoff/loop/{backlog,loop_state}.md` (authoritative for cycles 3–5) +
+> `.handoff/decisions/FINDING-0002-*.md` to resume cold. (The "Cycle ledger"/"Landed" sections below
+> still describe cycles 1–2 — loop_state.md supersedes them.)
 >
-> **Epic A is BLOCKED pending an OWNER/KERNEL decision (`FINDING-0002`).** TASK-0001 DONE;
-> TASK-0002 (seed Tier-A) + TASK-0003 (p7 gate) `[!]` blocked — the shipped `hf` is strictly
-> CWD-relative (no `--ledger`/`HANDOFF_DIR`), so envctl's Tier-A layer can't be hf-rendered against
-> the shared meta ledger without a forbidden per-repo `ledger.db`. Fix = a kernel feature in
-> `meta/handoff`. **Next unblocked pick = Epic C TASK-0012** (`crates/agent-env`).
+> **NEXT PICK = Epic A TASK-0003** (p7-conformance gate + `hf sync` `.kb` GO-LIVE, run at `$META_ROOT`)
+> — natural follow-on — or **Epic C TASK-0012** (`crates/agent-env`, large, fresh context). Budget 3/3
+> this session → resume in a FRESH session/worktree off `develop`; reset cycles to 0.
 
 ## Mission (north star)
 Owner directive (2026-06-12): treat **envctl as an agenticOS** — it owns the meta environment

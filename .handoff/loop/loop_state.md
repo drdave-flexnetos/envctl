@@ -6,38 +6,16 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 2   # RESUME 2026-06-13 (reset to 0 on resume): cycle 3 (TASK-0004) + cycle 4 (TASK-0002)
-cycles_total: 4
-last_item: TASK-0002 (seed envctl .handoff Tier-A) — DONE 2026-06-13 (cycle 4, resume)
-status: ACTIVE (resumed) 2026-06-13 @ 2/3 — cycle 3 TASK-0004 DONE (PR #47), cycle 4 TASK-0002 DONE
-  (PR stacked on #47). FINDING-0002 RESOLVED (Option A; kernel fleet verbs, meta/handoff #17). Epic A
-  Tier-A seed landed git-text-only (capsule refresh + OPTIONAL hooks/policies/skills + rendered
-  packet via `hf fleet render envctl`; 0 per-repo ledger, hf fleet status P7-clean). Next pick:
-  **Epic A TASK-0003** (p7-conformance CI gate + `hf sync` `.kb` GO-LIVE, run at $META_ROOT) — natural
-  follow-on — or **Epic C TASK-0012** (crates/agent-env, large, fresh context). Budget 2/3: ONE more
-  cycle then HAND OFF. Resume via `/forge-loop resume`; reset cycles to 0.
-cycles_this_session: 1   # RESUME 2026-06-13: counter reset to 0 on resume; cycle 3 (TASK-0004) ran
-cycles_total: 3
-last_item: TASK-0004 (wire META_ROOT into the env Claude inherits) — DONE 2026-06-13 (cycle 3, resume)
-status: ACTIVE (resumed) 2026-06-13 — cycle 3 TASK-0004 DONE. On resume (owner "check now") confirmed
-  the Epic A blocker FINDING-0002 is RESOLVED (Option A): the kernel built the fleet verbs in
-  meta/handoff PR #17 (hf fleet status/render, hf sync), verified live → TASK-0002/0003 UNBLOCKED.
-  Then ran the owner-chosen item TASK-0004: env block in settings.json.tmpl + drift-guard test;
-  gate green. PR → develop (auto-promotes to master). Next pick: Epic A TASK-0002 (now executable:
-  seed OPTIONAL hooks/policies/skills + hf fleet render envctl + hf sync inside a worktree cycle),
-  or Epic C TASK-0012 (crates/agent-env, large). Resume via `/forge-loop resume`; reset cycles to 0.
-cycles_this_session: 2
-cycles_total: 2
-last_item: TASK-0002 — was BLOCKED cycle 2, now UNBLOCKED 2026-06-13 (hf fleet/sync verbs built); NEXT PICK
-status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 2 TASK-0002/0003 were
-  BLOCKED on missing hf fleet/sync verbs. **FINDING-0002 now RESOLVED:** a concurrent meta/handoff
-  session BUILT those verbs (PR #17 fleet/sync; commit 000e4c0 drift/policy + FLEET_GUIDE) and the
-  installed hf was rebuilt + verified. TASK-0002/0003 are UNBLOCKED. Owner deferred execution to the
-  NEXT session (let the kernel session settle). Resume: `/forge-loop resume from
-  .handoff/loop/HANDOFF.md` → NEXT PICK = TASK-0002 (seed Tier-A via hf fleet render + sync). Reset
-  cycles to 0. CAUTION: concurrent session may still be active in meta/handoff — use installed hf,
-  don't commit/build there.
-  Next unblocked pick: Epic C TASK-0012 (crates/agent-env) — or decide FINDING-0002 to unblock Epic A.
+cycles_this_session: 3   # RESUME 2026-06-13 (reset to 0 on resume): cycle 3 (TASK-0004) + 4 (TASK-0002) + 5 (continuity repair)
+cycles_total: 5
+last_item: continuity merge-dup repair — DONE 2026-06-13 (cycle 5); collapsed triplicated loop_state header + dup TASK-0002/0003 (backlog) + dup FINDING-0002 status from the #47/#48/#49 concurrent merge
+status: ACTIVE (resumed) 2026-06-13 @ 3/3 (AT BUDGET → HAND OFF next). MERGED to develop=6617ed9:
+  TASK-0004 (PR #47), TASK-0002 Tier-A seed (PR #49), plus a concurrent session's FINDING-0002 unblock
+  (PR #48). FINDING-0002 RESOLVED (Option A; kernel fleet verbs, meta/handoff #17). The three-way merge
+  TRIPLICATED this header + duplicated backlog TASK-0002/0003 + FINDING-0002 status; cycle 5 reconciled
+  them to a single coherent state (git-text only). Next pick: **Epic A TASK-0003** (p7-conformance gate
+  + `hf sync` `.kb` GO-LIVE at $META_ROOT) — natural follow-on — or **Epic C TASK-0012** (crates/agent-env,
+  large, fresh context). HAND OFF now (budget 3/3); resume via `/forge-loop resume`; reset cycles to 0.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
@@ -78,6 +56,16 @@ status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 
   status` P7-clean for envctl. Gates: no-c/shape/enable PASS; drift test green. `tasks/` left empty
   (no kb task docs to `hf task mint --from-kb` yet) → tracked under TASK-0003.
 
+- cycle 5 (2026-06-13, continuity merge-dup repair, DONE — owner "pick what's next; verify not
+  claimed"): the concurrent three-way merge of #47 (TASK-0004) + #48 (a parallel session's
+  FINDING-0002 unblock) + #49 (TASK-0002 seed) onto develop=6617ed9 **silently concatenated** the
+  continuity files instead of conflicting: `loop_state.md` header TRIPLICATED, `backlog.md` had a
+  duplicate TASK-0002 (`[x]` + stale `[ ]`) and TASK-0003 (two fragments), `FINDING-0002` had two
+  `Status:` lines. Reconciled all three to a single coherent state (git-text only): one cycle-5
+  header; one TASK-0002 `[x]` + one TASK-0003 `[ ]` (GO-LIVE + card-minting folded in); one
+  FINDING-0002 RESOLVED status (preserved the `000e4c0`/FLEET_GUIDE detail). Verified-not-claimed
+  first: 0 open PRs, 0 remote feature branches, grit `.grit/` empty, FLEET ledger 0 events.
+
 ## Next safe step
 - **Epic A Tier-A seed landed.** Next pick = **TASK-0003 (P1, Epic A)**: add the `p7-conformance` CI
   gate (validate capsule/policy/task schemas + `hf resume --json` → `handoff.packet.v2`; assert no
@@ -86,7 +74,8 @@ status: STOPPED 2026-06-13 @ 2/3 (deliberate) — cycle 1 TASK-0001 DONE; cycle 
 - Alt: **Epic C TASK-0012 (P0)** — new pure-Rust crate `crates/agent-env` (6-key+extends model,
   multi-host resolver, SHA-256, lock; drop `mimalloc`; no-c clean). Large; gates TASK-0013..0018.
   Route `feature-architect` → `rust-implementer` → `invariant-guardian`. Benefits from fresh context.
-- **Budget: 2/3 cycles this session — ONE more cycle, then HAND OFF** (session-relay) and reset to 0.
+- **Budget: 3/3 cycles this session — AT BUDGET. HAND OFF now** (session-relay), reset cycles to 0,
+  and resume the next session at TASK-0003 (or TASK-0012) off a fresh worktree from develop.
 
 ## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
 Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).
