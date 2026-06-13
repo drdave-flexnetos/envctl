@@ -54,9 +54,23 @@ are **rendered by `hf`, never hand-written**.
     **`rusqlite`/`libsqlite3-sys` (bundled C SQLite, statically linked)**. Does NOT violate
     envctl's `no-c.sh` (separate `meta/handoff` workspace, not an envctl crate), but is relevant to
     Epic A's "pure-Rust, no C in the trust boundary" north star if the kernel itself must be C-free.
-- [ ] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
+- [x] **TASK-0002 (P0):** Seed envctl `.handoff` via `hf` — render `policy.toml`, `hooks/hooks.toml`,
   `policies/rules.toml`, `active.md`, `packets/latest.md`, `skills/`. Do NOT create a per-repo
   `ledger.db`; do NOT hand-write packets.
+  - **DONE 2026-06-13 (resume cycle 4).** Per ADR-0004 §7 the Tier-A layer is authored as git-text
+    (NOT via `hf init`/`hf seed` — both would plant a per-repo `ledger.db` / irrelevant HFTASK cards;
+    kernel-source verified). Landed: refreshed `context/capsule.json` `next_command`; seeded the
+    OPTIONAL autonomous-loop descriptors `hooks/hooks.toml` + `policies/rules.toml` +
+    `skills/session-resume.skill.md` from the design-bundle templates (residency-safe text, with a
+    `$META_ROOT`-residency header so ledger-mutating verbs never run in-member); **compiled**
+    `packets/latest.md` via `hf fleet render envctl` (rendered, not hand-written); corrected
+    `.handoff/README.md` (FLEET ledger = `meta/.handoff/ledger.db`, member packets via `hf fleet
+    render`, active loop). Residency verified: 0 `*.db` under `.handoff`, `.gitignore`
+    `.handoff/**/ledger.db` guard present, `hf fleet status` shows envctl with **no `⚠ stray
+    ledger.db (P7)`**. Gates: no-c/shape/enable PASS; drift test green. `tasks/` stays empty — cards
+    are minted via `hf task mint --from-kb` once kb task docs exist for envctl (packet degrades to
+    "no open cards"); that + the `hf sync` `.kb` GO-LIVE (run at `$META_ROOT`, never in-member) are
+    follow-ups, tracked under TASK-0003.
   - **BLOCKED 2026-06-13 (cycle 2, REVISED): installed `hf` is the S1 spike, missing the fleet
     verbs → NEEDS-DECISION.** The design is SETTLED (ADR-0004 §2/§3/§4 + PRD v2): per-repo
     `.handoff/` is **text-only, no `ledger.db`**; events live in the **fleet** ledger
