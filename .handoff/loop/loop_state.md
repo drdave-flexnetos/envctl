@@ -6,16 +6,15 @@ loop: agenticOS-consolidation (.handoff/loop/backlog.md, Epics A–E; design = .
 branch: develop   # work happens in FRESH worktrees off develop -> PR -> auto-promote to master
 worktree: (per-cycle: meta/.worktrees/<slug>/envctl off develop)
 cycle_budget: 3
-cycles_this_session: 3   # RESUME 2026-06-13 (reset to 0 on resume): cycle 3 (TASK-0004) + 4 (TASK-0002) + 5 (continuity repair)
-cycles_total: 5
-last_item: continuity merge-dup repair — DONE 2026-06-13 (cycle 5); collapsed triplicated loop_state header + dup TASK-0002/0003 (backlog) + dup FINDING-0002 status from the #47/#48/#49 concurrent merge
-status: ACTIVE (resumed) 2026-06-13 @ 3/3 (AT BUDGET → HAND OFF next). MERGED to develop=6617ed9:
-  TASK-0004 (PR #47), TASK-0002 Tier-A seed (PR #49), plus a concurrent session's FINDING-0002 unblock
-  (PR #48). FINDING-0002 RESOLVED (Option A; kernel fleet verbs, meta/handoff #17). The three-way merge
-  TRIPLICATED this header + duplicated backlog TASK-0002/0003 + FINDING-0002 status; cycle 5 reconciled
-  them to a single coherent state (git-text only). Next pick: **Epic A TASK-0003** (p7-conformance gate
-  + `hf sync` `.kb` GO-LIVE at $META_ROOT) — natural follow-on — or **Epic C TASK-0012** (crates/agent-env,
-  large, fresh context). HAND OFF now (budget 3/3); resume via `/forge-loop resume`; reset cycles to 0.
+cycles_this_session: 1   # NEW SESSION 2026-06-13 (reset to 0 on resume): cycle 6 (TASK-0003 p7 gate)
+cycles_total: 6
+last_item: TASK-0003 (p7-conformance gate) — DONE 2026-06-13 (cycle 6); added ci/gates/p7.sh
+status: ACTIVE (new session) 2026-06-13 — cycle 6 TASK-0003 DONE: added `ci/gates/p7.sh` (fail-closed
+  grep-based gate — Tier-A schema tags + ledger residency + packet v2; positive PASS + 3 negative
+  tests fail closed), wired into HANDOFF verify-on-resume + CLAUDE.md. Verified-not-claimed first
+  (only unrelated PR #53 libsql-baton-fix open; grit empty). The GO-LIVE (`hf sync` `.kb`) + envctl
+  card-minting were SPLIT into the new **TASK-0024** (P2, Epic A). Next pick: **TASK-0024** (hf sync
+  go-live, needs $META_ROOT) or **Epic C TASK-0012** (crates/agent-env, large). Budget 1/3.
 
 ## Progress log
 - cycle 1 (2026-06-13, TASK-0001, PASS-WITH-NOTES): built+installed `hf` from meta/handoff
@@ -66,16 +65,24 @@ status: ACTIVE (resumed) 2026-06-13 @ 3/3 (AT BUDGET → HAND OFF next). MERGED 
   FINDING-0002 RESOLVED status (preserved the `000e4c0`/FLEET_GUIDE detail). Verified-not-claimed
   first: 0 open PRs, 0 remote feature branches, grit `.grit/` empty, FLEET ledger 0 events.
 
+- cycle 6 (2026-06-13, TASK-0003 p7-conformance gate, DONE — owner "Epic A, proceed"): added
+  `ci/gates/p7.sh` — a fail-closed, dependency-free grep gate (mirrors `ci/gates/{shape,enable}.sh`)
+  that validates the COMMITTED `.handoff/` Tier-A: schema tags (capsule v1 / policy v1 / hooks v1 /
+  task v1 / packet **v2**) + ledger residency (no tracked OR on-disk `*.db` under `.handoff`, and the
+  `.gitignore` guard present). Deliberately runs NO ledger-mutating `hf` verb in-member (would itself
+  create a ledger). Wired into HANDOFF verify-on-resume + CLAUDE.md gate list. Verified: positive PASS
+  on the seeded Tier-A; negatives (stray `*.db`, broken packet/capsule schema) fail closed (exit 1).
+  Split the `hf sync` `.kb` GO-LIVE + envctl card-minting into new **TASK-0024** (need `$META_ROOT`
+  execution / kb task docs). Verified-not-claimed: only unrelated PR #53 (libsql-baton-fix) open.
+
 ## Next safe step
-- **Epic A Tier-A seed landed.** Next pick = **TASK-0003 (P1, Epic A)**: add the `p7-conformance` CI
-  gate (validate capsule/policy/task schemas + `hf resume --json` → `handoff.packet.v2`; assert no
-  per-repo `ledger.db` tracked) AND the `hf sync` `.kb` GO-LIVE (one-way write-back, run at
-  `$META_ROOT`/orchestration home — NEVER in-member, which would create a ledger). Natural follow-on.
+- **TASK-0003 gate landed.** Next pick = **TASK-0024 (P2, Epic A)** — the `hf sync` `.kb` GO-LIVE
+  (one-way write-back, run at `$META_ROOT`/orchestration home — NEVER in-member) + envctl card-minting
+  once kb task docs exist. Smaller, but needs `$META_ROOT`-context execution.
 - Alt: **Epic C TASK-0012 (P0)** — new pure-Rust crate `crates/agent-env` (6-key+extends model,
   multi-host resolver, SHA-256, lock; drop `mimalloc`; no-c clean). Large; gates TASK-0013..0018.
   Route `feature-architect` → `rust-implementer` → `invariant-guardian`. Benefits from fresh context.
-- **Budget: 3/3 cycles this session — AT BUDGET. HAND OFF now** (session-relay), reset cycles to 0,
-  and resume the next session at TASK-0003 (or TASK-0012) off a fresh worktree from develop.
+- **Budget: 1/3 cycles this session.** Can take 2 more before HAND OFF.
 
 ## Order (dependency-aware; cards own ordering once TASK-0002 mints them)
 Epic A: TASK-0001 (build hf) -> TASK-0002 (seed Tier-A + mint cards) -> TASK-0003 (p7 gate).
