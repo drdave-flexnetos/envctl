@@ -24,6 +24,7 @@
 pub mod agent;
 pub mod command;
 pub mod config;
+pub mod config_edit;
 pub mod extend;
 pub mod fsops;
 pub mod hash;
@@ -41,6 +42,10 @@ pub use command::{apply_command, destination_path, ensure_parent_dirs, parse, re
 pub use config::{
     git_pin_of, Agent, AgentField, CommandEntry, CommandSourceSpec, CommandsField, Config, GitPin,
     McpEntry, McpSourceSpec, McpsField, Scope, SkillTarget, SkillsField, SourceSpec, AGENT_PRESETS,
+};
+pub use config_edit::{
+    ensure_local_config, insert_item, is_remote_source, item_exists, remove_item, remove_names,
+    split_at_ref, Pin, RemoveOutcome, Section, Selector, SourceItem,
 };
 pub use extend::{extract_extends, load_config_recursive, merge_yaml, MAX_EXTENDS_DEPTH};
 pub use fsops::SettingsFile;
