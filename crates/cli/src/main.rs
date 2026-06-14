@@ -3,9 +3,10 @@
 //! `--apply` to act. `auto-detect` is read-only and prints a real EnvReport.
 use clap::{Parser, Subcommand};
 use envctl_engine::{
-    AddRepoSpec, AiAgent, BuildStrategy, BuildSystem, DashboardSpec, DriftSummary, Engine,
-    EnvReport, Event, EventSink, OpStatus, Phase, Refactor, RefactorGoal, RenameRule, ResetGates,
-    RunPlan, Severity,
+    AddRepoSpec, AgentAddSpec, AgentCleanSpec, AgentListKind, AgentListSpec, AgentLockMode,
+    AgentLockSpec, AgentRemoveSpec, AgentScope, AgentSectionSel, AgentSyncSpec, AiAgent,
+    BuildStrategy, BuildSystem, DashboardSpec, DriftSummary, Engine, EnvReport, Event, EventSink,
+    OpStatus, Phase, Refactor, RefactorGoal, RenameRule, ResetGates, RunPlan, Severity,
 };
 
 #[derive(Parser)]
@@ -197,6 +198,189 @@ enum Cmd {
         #[arg(long, value_name = "FILE")]
         materialize: Option<std::path::PathBuf>,
     },
+    /// Manage agent assets (skills / MCP servers / commands) declaratively over the
+    /// shared `Engine::agent_*` API. Mutating verbs (sync/add/remove/clean) are
+    /// PREVIEW by default; pass `--apply` to write. `--json` (global) emits the typed
+    /// return value. `list`/`lock --check` are read-only.
+    Agent {
+        #[command(subcommand)]
+        cmd: AgentCmd,
+    },
+}
+
+/// Serializable scope selector (clap) → `AgentScope`.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum ScopeArg {
+    Global,
+    Project,
+}
+
+impl From<ScopeArg> for AgentScope {
+    fn from(s: ScopeArg) -> Self {
+        match s {
+            ScopeArg::Global => AgentScope::Global,
+            ScopeArg::Project => AgentScope::Project,
+        }
+    }
+}
+
+/// Which asset kinds `agent list` shows (clap) → `AgentListKind`.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum ListKindArg {
+    All,
+    Skills,
+    Mcps,
+    Commands,
+}
+
+impl From<ListKindArg> for AgentListKind {
+    fn from(k: ListKindArg) -> Self {
+        match k {
+            ListKindArg::All => AgentListKind::All,
+            ListKindArg::Skills => AgentListKind::Skills,
+            ListKindArg::Mcps => AgentListKind::Mcps,
+            ListKindArg::Commands => AgentListKind::Commands,
+        }
+    }
+}
+
+/// Map the `--locked` / `--update [names]` flags to the engine `AgentLockMode`.
+/// `--locked` wins (zero-network audit); `--update [names]` re-resolves the named
+/// packages (empty = all); otherwise the default `Plain` (verify+fetch, write lock).
+fn lock_mode_from(locked: bool, update: Option<Vec<String>>) -> AgentLockMode {
+    if locked {
+        AgentLockMode::Locked
+    } else if let Some(only) = update {
+        AgentLockMode::Update { only }
+    } else {
+        AgentLockMode::Plain
+    }
+}
+
+/// The six agent-asset verbs. Each maps field-by-field to its `Agent*Spec`.
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// Reconcile installed assets with the config. PREVIEW by default; `--apply` writes.
+    Sync {
+        /// Config file path (else the default-config resolution / `$ENVCTL_AGENT_CONFIG`).
+        #[arg(long)]
+        config: Option<String>,
+        /// Override the scope resolved from the config.
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Write changes (else preview / zero writes).
+        #[arg(long)]
+        apply: bool,
+        /// Audit the lock with ZERO network fetch (fail-closed if unsatisfied).
+        #[arg(long)]
+        locked: bool,
+        /// Re-resolve the named packages' refs (no names = all) and rewrite the lock.
+        #[arg(long, num_args = 0.., value_name = "NAME")]
+        update: Option<Vec<String>>,
+    },
+    /// Add a source to the config (then sync, unless `--no-sync`). PREVIEW by default.
+    Add {
+        /// The source (git URL / local path) to add.
+        source: String,
+        /// Restrict to named skills (repeatable).
+        #[arg(long = "skill")]
+        skill: Vec<String>,
+        /// Restrict to named MCP servers (repeatable).
+        #[arg(long = "mcp")]
+        mcp: Vec<String>,
+        /// Restrict to named commands (repeatable).
+        #[arg(long = "command")]
+        command: Vec<String>,
+        /// Pin the source to a git ref (mutually exclusive with `--branch`).
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
+        /// Track a git branch (mutually exclusive with `--ref`).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Sub-directory within the source to draw assets from.
+        #[arg(long)]
+        sub_dir: Option<String>,
+        #[arg(long)]
+        config: Option<String>,
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Write changes (else preview / zero writes).
+        #[arg(long)]
+        apply: bool,
+        /// Edit the manifest only; do NOT sync afterwards.
+        #[arg(long)]
+        no_sync: bool,
+        /// Skip post-add verification.
+        #[arg(long)]
+        no_verify: bool,
+        /// Zero-network mode (requires `--no-sync` on `add`).
+        #[arg(long)]
+        locked: bool,
+        #[arg(long, num_args = 0.., value_name = "NAME")]
+        update: Option<Vec<String>>,
+    },
+    /// Remove a source from the config (then sync, unless `--no-sync`). PREVIEW by default.
+    Remove {
+        /// The source to remove.
+        source: String,
+        #[arg(long = "skill")]
+        skill: Vec<String>,
+        #[arg(long = "mcp")]
+        mcp: Vec<String>,
+        #[arg(long = "command")]
+        command: Vec<String>,
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        sub_dir: Option<String>,
+        #[arg(long)]
+        config: Option<String>,
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Write changes (else preview / zero writes).
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        no_sync: bool,
+        #[arg(long)]
+        locked: bool,
+        #[arg(long, num_args = 0.., value_name = "NAME")]
+        update: Option<Vec<String>>,
+    },
+    /// Write/verify `agent-env.lock`. `--check` audits (exit 1 on drift); else rewrite.
+    Lock {
+        #[arg(long)]
+        config: Option<String>,
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Verify the lock matches the config without writing (exit 1 on drift).
+        #[arg(long)]
+        check: bool,
+        /// Restrict the re-resolve to sources providing these skills (repeatable).
+        #[arg(long = "upgrade-package", value_name = "NAME")]
+        upgrade_package: Vec<String>,
+        /// With `--check`: make the audit zero-network.
+        #[arg(long)]
+        locked: bool,
+    },
+    /// Read-only inventory of installed assets (skills + MCP servers + commands).
+    List {
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Filter the inventory by kind.
+        #[arg(long, value_enum, default_value = "all")]
+        kind: ListKindArg,
+    },
+    /// Prune assets orphaned from the config. PREVIEW by default; `--apply` writes.
+    Clean {
+        #[arg(long, value_enum)]
+        scope: Option<ScopeArg>,
+        /// Write changes (else preview / zero writes).
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -338,6 +522,7 @@ fn main() -> anyhow::Result<()> {
             toolchains,
             materialize,
         } => run_env(meta_file, toolchains, materialize, json),
+        Cmd::Agent { cmd } => run_agent(engine, cmd, json),
         // Interactive add-repo connect: handled on the MAIN thread so the agent
         // attaches to the real terminal.
         other if matches!(&other, Cmd::AddRepo { connect: true, .. }) => {
@@ -535,6 +720,39 @@ mod env_cmd_tests {
     }
 }
 
+#[cfg(test)]
+mod agent_cmd_tests {
+    use super::{lock_mode_from, AgentLockMode, AgentScope, ScopeArg};
+
+    #[test]
+    fn lock_mode_from_maps_each_flag() {
+        // default: no --locked, no --update -> Plain
+        assert_eq!(lock_mode_from(false, None), AgentLockMode::Plain);
+        // --locked wins (zero-network audit)
+        assert_eq!(lock_mode_from(true, None), AgentLockMode::Locked);
+        // --locked beats --update if both somehow set
+        assert_eq!(lock_mode_from(true, Some(vec![])), AgentLockMode::Locked);
+        // --update with no names -> Update { only: [] } (= all)
+        assert_eq!(
+            lock_mode_from(false, Some(vec![])),
+            AgentLockMode::Update { only: vec![] }
+        );
+        // --update foo bar -> Update { only: [foo, bar] }
+        assert_eq!(
+            lock_mode_from(false, Some(vec!["foo".into(), "bar".into()])),
+            AgentLockMode::Update {
+                only: vec!["foo".into(), "bar".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn scope_arg_converts_to_agent_scope() {
+        assert_eq!(AgentScope::from(ScopeArg::Global), AgentScope::Global);
+        assert_eq!(AgentScope::from(ScopeArg::Project), AgentScope::Project);
+    }
+}
+
 /// Mutating verbs: run on a worker thread, drain+print events on the main thread
 /// (the same shape the GUI uses), exit nonzero iff something failed/was refused.
 fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
@@ -630,7 +848,8 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
             | Cmd::Lock { .. }
             | Cmd::Doctor
             | Cmd::Dashboard { .. }
-            | Cmd::Env { .. } => {
+            | Cmd::Env { .. }
+            | Cmd::Agent { .. } => {
                 unreachable!("handled in main")
             }
         };
@@ -649,6 +868,192 @@ fn run_action(engine: Engine, cmd: Cmd, json: bool) -> anyhow::Result<()> {
         .join()
         .map_err(|_| anyhow::anyhow!("worker panicked"))??;
     if !ok {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// The exit decision for an agent run: which serialized return value to print under
+/// `--json`, and whether to exit nonzero. The worker builds it from the engine return;
+/// the main thread renders + exits. This keeps the failure→exit policy a pure decision
+/// the unit tests can exercise without a live network fetch.
+enum AgentResult {
+    /// `sync` / `clean` — nonzero iff `report.summary.failed > 0`.
+    Report(envctl_engine::AgentReport),
+    /// `add` / `remove` — nonzero iff the follow-up sync had `summary.failed > 0`.
+    Edit(envctl_engine::AgentEditOutcome),
+    /// `lock` — nonzero iff `--check` reported non-empty drift.
+    Lock(envctl_engine::AgentLockOutcome),
+    /// `list` — always exit 0.
+    List(envctl_engine::AgentList),
+}
+
+impl AgentResult {
+    /// Pretty-print the serialized return value (uniform across all six verbs,
+    /// matching `auto-detect`/`graph`/`lock`).
+    fn to_json(&self) -> anyhow::Result<String> {
+        Ok(match self {
+            AgentResult::Report(r) => serde_json::to_string_pretty(r)?,
+            AgentResult::Edit(o) => serde_json::to_string_pretty(o)?,
+            AgentResult::Lock(o) => serde_json::to_string_pretty(o)?,
+            AgentResult::List(l) => serde_json::to_string_pretty(l)?,
+        })
+    }
+
+    /// The fail-closed exit decision (`true` = success / exit 0).
+    fn ok(&self) -> bool {
+        match self {
+            AgentResult::Report(r) => r.summary.failed == 0,
+            AgentResult::Edit(o) => o.sync.as_ref().map_or(true, |s| s.summary.failed == 0),
+            AgentResult::Lock(o) => !o.check || o.drift.is_empty(),
+            AgentResult::List(_) => true,
+        }
+    }
+}
+
+/// `envctl agent {sync,add,remove,lock,list,clean}` — a THIN adapter over the shared
+/// `Engine::agent_*` API. Builds the `Agent*Spec`, runs the engine on a worker thread
+/// (draining the same EventSink the GUI uses), renders human/`--json`, and maps the
+/// engine return to the fail-closed exit code. No business logic lives here.
+fn run_agent(engine: Engine, cmd: AgentCmd, json: bool) -> anyhow::Result<()> {
+    let (sink, rx) = EventSink::channel();
+    let eng = engine.clone();
+    let handle = std::thread::spawn(move || -> anyhow::Result<AgentResult> {
+        let result = match cmd {
+            AgentCmd::Sync {
+                config,
+                scope,
+                apply,
+                locked,
+                update,
+            } => {
+                let spec = AgentSyncSpec {
+                    config_path: config,
+                    scope_override: scope.map(AgentScope::from),
+                    apply,
+                    lock_mode: lock_mode_from(locked, update),
+                };
+                AgentResult::Report(eng.agent_sync(spec, &sink)?)
+            }
+            AgentCmd::Add {
+                source,
+                skill,
+                mcp,
+                command,
+                git_ref,
+                branch,
+                sub_dir,
+                config,
+                scope,
+                apply,
+                no_sync,
+                no_verify,
+                locked,
+                update,
+            } => {
+                let spec = AgentAddSpec {
+                    source,
+                    section: AgentSectionSel {
+                        skills: skill,
+                        mcps: mcp,
+                        commands: command,
+                    },
+                    git_ref,
+                    branch,
+                    sub_dir,
+                    config_path: config,
+                    scope_override: scope.map(AgentScope::from),
+                    apply,
+                    no_sync,
+                    no_verify,
+                    lock_mode: lock_mode_from(locked, update),
+                };
+                AgentResult::Edit(eng.agent_add(spec, &sink)?)
+            }
+            AgentCmd::Remove {
+                source,
+                skill,
+                mcp,
+                command,
+                git_ref,
+                branch,
+                sub_dir,
+                config,
+                scope,
+                apply,
+                no_sync,
+                locked,
+                update,
+            } => {
+                let spec = AgentRemoveSpec {
+                    source,
+                    section: AgentSectionSel {
+                        skills: skill,
+                        mcps: mcp,
+                        commands: command,
+                    },
+                    git_ref,
+                    branch,
+                    sub_dir,
+                    config_path: config,
+                    scope_override: scope.map(AgentScope::from),
+                    apply,
+                    no_sync,
+                    lock_mode: lock_mode_from(locked, update),
+                };
+                AgentResult::Edit(eng.agent_remove(spec, &sink)?)
+            }
+            AgentCmd::Lock {
+                config,
+                scope,
+                check,
+                upgrade_package,
+                locked,
+            } => {
+                let spec = AgentLockSpec {
+                    config_path: config,
+                    scope_override: scope.map(AgentScope::from),
+                    check,
+                    upgrade_only: upgrade_package,
+                    lock_mode: lock_mode_from(locked, None),
+                };
+                AgentResult::Lock(eng.agent_lock(spec, &sink)?)
+            }
+            AgentCmd::List { scope, kind } => {
+                let spec = AgentListSpec {
+                    scope_override: scope.map(AgentScope::from),
+                    kind: AgentListKind::from(kind),
+                };
+                AgentResult::List(eng.agent_list(spec, &sink)?)
+            }
+            AgentCmd::Clean { scope, apply } => {
+                let spec = AgentCleanSpec {
+                    scope_override: scope.map(AgentScope::from),
+                    apply,
+                };
+                AgentResult::Report(eng.agent_clean(spec, &sink)?)
+            }
+        };
+        Ok(result) // sink drops here -> the main-thread rx.iter() terminates
+    });
+
+    // In `--json` mode the EventSink is silent (the uniform serialized RETURN value is
+    // the machine output, matching `auto-detect`/`graph`/`lock`); human mode streams the
+    // per-action tree via `print_event`.
+    for ev in rx.iter() {
+        if !json {
+            print_event(&ev);
+        }
+    }
+
+    let result = handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("worker panicked"))??;
+
+    if json {
+        println!("{}", result.to_json()?);
+    }
+    if !result.ok() {
         std::process::exit(1);
     }
     Ok(())
@@ -767,6 +1172,56 @@ fn print_event(ev: &Event) {
         },
         Event::GuardRefused { component, reason } => {
             println!("\x1b[1;31m  ⛔ REFUSED {component}: {reason}\x1b[0m")
+        }
+        Event::AgentRunStarted {
+            verb,
+            scope,
+            dry_run,
+            lock_mode,
+        } => {
+            let mode = if *dry_run { " (preview)" } else { "" };
+            println!("\x1b[1;36m==> agent {verb:?} :: {scope:?} [{lock_mode}]{mode}\x1b[0m");
+        }
+        Event::AgentAction {
+            source,
+            asset,
+            status,
+            error,
+        } => {
+            let who = match (source, asset) {
+                (Some(s), Some(a)) => format!("{s}::{a}"),
+                (Some(s), None) => s.clone(),
+                (None, Some(a)) => a.clone(),
+                (None, None) => String::new(),
+            };
+            match error {
+                Some(e) => println!("\x1b[1;31m  ✗ {status} {who}: {e}\x1b[0m"),
+                None => println!("  {status} {who}"),
+            }
+        }
+        Event::AgentRunFinished { report } => {
+            let s = &report.summary;
+            if s.failed == 0 {
+                println!(
+                    "\x1b[1;32mdone: {} installed, {} updated, {} removed, {} unchanged.\x1b[0m",
+                    s.installed, s.updated, s.removed, s.unchanged
+                );
+            } else {
+                println!(
+                    "\x1b[1;33mdone with {} failed ({} installed, {} updated, {} removed).\x1b[0m",
+                    s.failed, s.installed, s.updated, s.removed
+                );
+            }
+        }
+        Event::AgentLockChecked { drift } => {
+            if drift.is_empty() {
+                println!("\x1b[1;32m✓ agent-env.lock is up to date\x1b[0m");
+            } else {
+                println!("\x1b[1;33m✗ lock drift ({}):\x1b[0m", drift.len());
+                for d in drift {
+                    println!("  {}  {}", d.status, d.id);
+                }
+            }
         }
         Event::RunFinished { summary } => {
             if summary.ok() {
