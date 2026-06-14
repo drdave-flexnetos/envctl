@@ -11,13 +11,18 @@
 //! `.handoff/loop/rust-port/parity-ledger.md` (and merge-ledger.md).
 
 use envctl_agent_env::{
-    all_command_global_targets, archive_url, derive_browse_url, discover, discover_commands,
-    discover_mcps, discover_with_root_name, extract_extends, git_pin_of, hash_dir, hash_file,
-    hash_str, materialize_source, merge_mcp_config, merge_yaml, now_unix, now_unix_str, parse,
-    parse_repo_url, render, resolve_command_entry, resolve_mcp_entry, Agent, CommandEntry,
-    CommandFormat, Config, GitPin, McpEntry, McpSettingsFormat, McpSettingsTarget, RepoUrl,
-    SkillsField, SourceSpec,
+    all_command_global_targets, all_mcp_project_targets, all_mcp_settings_targets, archive_url,
+    command_global_targets, command_project_targets, derive_browse_url, discover,
+    discover_commands, discover_mcps, discover_with_root_name, extract_extends, git_pin_of,
+    hash_dir, hash_file, hash_str, load_config_any, load_config_recursive, materialize_source,
+    merge_mcp_config, merge_yaml, now_unix, now_unix_str, parse, parse_repo_url, render,
+    resolve_command_entry, resolve_mcp_entry, Action, Agent, AgentField, AgentLockEntry,
+    AgentLockFile, AssetEntry, CommandEntry, CommandFormat, CommandSourceSpec, Config, GitPin,
+    InstalledSkill, LockMode, McpEntry, McpSettingsFormat, McpSettingsTarget, McpSourceSpec,
+    McpsField, RepoUrl, Report, Scope, SkillTarget, SkillsField, SourceSpec, Summary, SyncFailure,
+    AGENT_PRESETS, LOCK_VERSION,
 };
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -993,4 +998,1055 @@ fn parity_now_unix() {
     let parsed: u64 = s.parse().expect("decimal");
     // The two calls straddle at most one second.
     assert!(now_unix() - parsed <= 1);
+}
+
+// ═════════════════════════════ PASS-2: model-schema + 21-preset path table ═════════════════════════════
+// + config loader + SHA-256 asset lock. Vectors VERBATIM from kasetto v3.2.0 certified tests.
+
+// ───────────────────────────── M-01 · Scope serde (global/project, #[default]=Global) ─────────────────────────────
+// Oracle: kasetto src/model/config.rs (Scope enum) — serde renames `global`/`project`,
+// #[default]=Global. Observed through Config::resolved_scope + a direct serde round-trip.
+#[test]
+fn parity_scope_serde_and_default() {
+    // `scope: global` / `scope: project` deserialize to the renamed variants.
+    let g: Config = serde_yaml::from_str("scope: global\nskills: []\n").unwrap();
+    assert_eq!(g.resolved_scope(), Scope::Global);
+    let p: Config = serde_yaml::from_str("scope: project\nskills: []\n").unwrap();
+    assert_eq!(p.resolved_scope(), Scope::Project);
+    // Absent scope → #[default] = Global (resolved_scope = scope.unwrap_or_default()).
+    let none: Config = serde_yaml::from_str("skills: []\n").unwrap();
+    assert_eq!(none.resolved_scope(), Scope::Global);
+    assert_eq!(Scope::default(), Scope::Global);
+    // serde rename round-trips: Global serializes to "global".
+    assert_eq!(
+        serde_yaml::to_string(&Scope::Global).unwrap().trim(),
+        "global"
+    );
+    assert_eq!(
+        serde_yaml::to_string(&Scope::Project).unwrap().trim(),
+        "project"
+    );
+}
+
+// ───────────────────────────── M-03 · Config::agents / resolved_scope ─────────────────────────────
+// Oracle: kasetto src/model/config.rs::tests (agent_field_parses_one_and_many implied by
+// AgentField) + config.rs resolved_scope. One→vec![a]; Many→clone; None→[]; resolved_scope =
+// scope.unwrap_or_default() = Global.
+#[test]
+fn parity_config_agents_and_resolved_scope() {
+    // One
+    let one: Config = serde_yaml::from_str("agent: claude-code\nskills: []\n").unwrap();
+    assert_eq!(one.agents(), vec![Agent::ClaudeCode]);
+    assert!(matches!(
+        one.agent,
+        Some(AgentField::One(Agent::ClaudeCode))
+    ));
+    // Many (clone preserves order)
+    let many: Config = serde_yaml::from_str("agent:\n  - codex\n  - cursor\nskills: []\n").unwrap();
+    assert_eq!(many.agents(), vec![Agent::Codex, Agent::Cursor]);
+    assert!(matches!(many.agent, Some(AgentField::Many(_))));
+    // None → []
+    let none: Config = serde_yaml::from_str("skills: []\n").unwrap();
+    assert!(none.agents().is_empty());
+    assert!(none.agent.is_none());
+    // resolved_scope default
+    assert_eq!(none.resolved_scope(), Scope::Global);
+}
+
+// ───────────────────────────── M-04 · SourceSpec schema (ref/sub-dir renames, alias) ─────────────────────────────
+// Oracle: kasetto src/model/config.rs::tests (skills_parses_wildcard_list_and_objects +
+// git_pin tests) — `ref` rename, `sub-dir`/`sub_dir` alias, SkillsField wildcard/list.
+#[test]
+fn parity_source_spec_schema() {
+    let cfg: Config = serde_yaml::from_str(
+        "skills:\n  - source: https://github.com/me/a\n    skills: \"*\"\n  - source: https://github.com/me/b\n    sub-dir: pack\n    skills:\n      - one\n      - name: two\n        path: nested\n",
+    )
+    .unwrap();
+    assert_eq!(cfg.skills.len(), 2);
+    assert!(matches!(cfg.skills[0].skills, SkillsField::Wildcard(_)));
+    assert_eq!(cfg.skills[1].sub_dir.as_deref(), Some("pack"));
+    let SkillsField::List(ref items) = cfg.skills[1].skills else {
+        panic!("list");
+    };
+    assert!(matches!(&items[0], SkillTarget::Name(n) if n == "one"));
+    assert!(
+        matches!(&items[1], SkillTarget::Obj { name, path: Some(p) } if name == "two" && p == "nested")
+    );
+    // `ref` rename + `sub_dir` underscore alias both honored.
+    let cfg2: Config = serde_yaml::from_str(
+        "skills:\n  - source: https://x/a\n    ref: v9\n    sub_dir: deep/pack\n    skills: \"*\"\n",
+    )
+    .unwrap();
+    assert_eq!(cfg2.skills[0].git_ref.as_deref(), Some("v9"));
+    assert_eq!(cfg2.skills[0].sub_dir.as_deref(), Some("deep/pack"));
+    assert_eq!(cfg2.skills[0].branch, None);
+}
+
+// ───────────────────────────── M-06 · SourceSpec::expected_revision ─────────────────────────────
+// Oracle: kasetto src/model/config.rs::tests::{git_pin_precedence_ref_beats_branch,
+// git_pin_branch_then_default, local_source_revision_is_local}.
+#[test]
+fn parity_expected_revision() {
+    let mk = |yaml: &str| -> Config { serde_yaml::from_str(yaml).unwrap() };
+    // ref wins → ref:<r>
+    let c =
+        mk("skills:\n  - source: https://x/a\n    branch: dev\n    ref: v9\n    skills: \"*\"\n");
+    assert_eq!(c.skills[0].expected_revision(), "ref:v9");
+    // branch → branch:<b>
+    let c = mk("skills:\n  - source: https://x/a\n    branch: dev\n    skills: \"*\"\n");
+    assert_eq!(c.skills[0].expected_revision(), "branch:dev");
+    // default remote → branch:main
+    let c = mk("skills:\n  - source: https://x/a\n    skills: \"*\"\n");
+    assert_eq!(c.skills[0].expected_revision(), "branch:main");
+    // local (no "://") → local
+    let c = mk("skills:\n  - source: ./local/pack\n    skills: \"*\"\n");
+    assert_eq!(c.skills[0].expected_revision(), "local");
+}
+
+// ───────────────────────────── M-07 · McpSourceSpec/CommandSourceSpec + as_source_spec ─────────────────────────────
+// Oracle: kasetto src/model/config.rs (McpSourceSpec/CommandSourceSpec::as_source_spec).
+// MCP source forces sub_dir=None; command source carries sub_dir; both project to a
+// wildcard-skills SourceSpec.
+#[test]
+fn parity_source_spec_projections() {
+    // McpSourceSpec: no sub_dir field, mcps: McpsField; as_source_spec forces sub_dir=None.
+    let cfg: Config = serde_yaml::from_str(
+        "skills: []\nmcps:\n  - source: https://x/m\n    ref: v2\n    branch: dev\n    mcps: \"*\"\n",
+    )
+    .unwrap();
+    let m: &McpSourceSpec = &cfg.mcps[0];
+    assert!(matches!(m.mcps, McpsField::Wildcard(_)));
+    let proj = m.as_source_spec();
+    assert_eq!(proj.source, "https://x/m");
+    assert_eq!(proj.git_ref.as_deref(), Some("v2"));
+    assert_eq!(proj.branch.as_deref(), Some("dev"));
+    assert_eq!(proj.sub_dir, None, "MCP projection forces sub_dir=None");
+    assert!(matches!(proj.skills, SkillsField::Wildcard(ref s) if s == "*"));
+
+    // CommandSourceSpec: carries sub_dir, commands: CommandsField; projection keeps sub_dir.
+    let cfg: Config = serde_yaml::from_str(
+        "skills: []\ncommands:\n  - source: https://x/c\n    sub-dir: cmds\n    commands: \"*\"\n",
+    )
+    .unwrap();
+    let c: &CommandSourceSpec = &cfg.commands[0];
+    let proj = c.as_source_spec();
+    assert_eq!(proj.source, "https://x/c");
+    assert_eq!(proj.sub_dir.as_deref(), Some("cmds"));
+    assert!(matches!(proj.skills, SkillsField::Wildcard(ref s) if s == "*"));
+}
+
+// ───────────────────────────── M-09 · Agent 21-preset enum + AGENT_PRESETS (serde renames) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs (Agent enum serde renames) +
+// src/model/config.rs::tests (agent_presets_count_is_twenty_one). All 21 kebab/lower renames
+// must round-trip through the public AgentField deserializer.
+#[test]
+fn parity_agent_enum_serde_all_21() {
+    assert_eq!(AGENT_PRESETS.len(), 21);
+    // Each serde rename string → the matching Agent variant (kasetto's #[serde(rename=...)]).
+    let cases: &[(&str, Agent)] = &[
+        ("amp", Agent::Amp),
+        ("antigravity", Agent::Antigravity),
+        ("augment", Agent::Augment),
+        ("claude-code", Agent::ClaudeCode),
+        ("cline", Agent::Cline),
+        ("codex", Agent::Codex),
+        ("continue", Agent::Continue),
+        ("cursor", Agent::Cursor),
+        ("gemini-cli", Agent::GeminiCli),
+        ("github-copilot", Agent::GithubCopilot),
+        ("goose", Agent::Goose),
+        ("junie", Agent::Junie),
+        ("kiro-cli", Agent::KiroCli),
+        ("openclaw", Agent::OpenClaw),
+        ("opencode", Agent::OpenCode),
+        ("openhands", Agent::OpenHands),
+        ("replit", Agent::Replit),
+        ("roo", Agent::Roo),
+        ("trae", Agent::Trae),
+        ("warp", Agent::Warp),
+        ("windsurf", Agent::Windsurf),
+    ];
+    assert_eq!(cases.len(), 21);
+    for (rename, expected) in cases {
+        let cfg: Config = serde_yaml::from_str(&format!("agent: {rename}\nskills: []\n")).unwrap();
+        assert_eq!(cfg.agents(), vec![*expected], "serde rename `{rename}`");
+        // and it is present in AGENT_PRESETS
+        assert!(AGENT_PRESETS.contains(expected), "preset {expected:?}");
+    }
+}
+
+// ───────────────────────────── M-10 · AgentField untagged One|Many ─────────────────────────────
+// Oracle: kasetto src/model/config.rs::tests::agent_field_parses_one_and_many.
+#[test]
+fn parity_agent_field_one_and_many() {
+    let one: Config = serde_yaml::from_str("agent: claude-code\nskills: []\n").unwrap();
+    assert_eq!(one.agents(), vec![Agent::ClaudeCode]);
+    let many: Config = serde_yaml::from_str("agent:\n  - codex\n  - cursor\nskills: []\n").unwrap();
+    assert_eq!(many.agents(), vec![Agent::Codex, Agent::Cursor]);
+    let none: Config = serde_yaml::from_str("skills: []\n").unwrap();
+    assert!(none.agents().is_empty());
+}
+
+// ───────────────────────────── M-11 · Agent::global_path (all 21 presets) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs Agent::global_path — the per-preset global SKILLS dir.
+// Every preset's exact path string ported verbatim (the no-downgrade path table).
+#[test]
+fn parity_global_path_all_21() {
+    let h = Path::new("/h");
+    let cases: &[(Agent, &str)] = &[
+        (Agent::Amp, ".config/agents/skills"),
+        (Agent::Antigravity, ".gemini/antigravity/skills"),
+        (Agent::Augment, ".augment/skills"),
+        (Agent::ClaudeCode, ".claude/skills"),
+        (Agent::Cline, ".agents/skills"),
+        (Agent::Codex, ".codex/skills"),
+        (Agent::Continue, ".continue/skills"),
+        (Agent::Cursor, ".cursor/skills"),
+        (Agent::GeminiCli, ".gemini/skills"),
+        (Agent::GithubCopilot, ".copilot/skills"),
+        (Agent::Goose, ".config/goose/skills"),
+        (Agent::Junie, ".junie/skills"),
+        (Agent::KiroCli, ".kiro/skills"),
+        (Agent::OpenClaw, ".openclaw/skills"),
+        (Agent::OpenCode, ".config/opencode/skills"),
+        (Agent::OpenHands, ".openhands/skills"),
+        (Agent::Replit, ".config/agents/skills"),
+        (Agent::Roo, ".roo/skills"),
+        (Agent::Trae, ".trae/skills"),
+        (Agent::Warp, ".agents/skills"),
+        (Agent::Windsurf, ".codeium/windsurf/skills"),
+    ];
+    assert_eq!(cases.len(), AGENT_PRESETS.len());
+    for (a, rel) in cases {
+        assert_eq!(a.global_path(h), h.join(rel), "global_path {a:?}");
+    }
+}
+
+// ───────────────────────────── M-12 · Agent::project_path (all 21 presets) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs Agent::project_path — diverges from global for
+// amp|replit (.agents/skills), goose (.goose/skills), opencode (.opencode/skills),
+// windsurf (.windsurf/skills).
+#[test]
+fn parity_project_path_all_21() {
+    let p = Path::new("/p");
+    let cases: &[(Agent, &str)] = &[
+        (Agent::Amp, ".agents/skills"),
+        (Agent::Antigravity, ".gemini/antigravity/skills"),
+        (Agent::Augment, ".augment/skills"),
+        (Agent::ClaudeCode, ".claude/skills"),
+        (Agent::Cline, ".agents/skills"),
+        (Agent::Codex, ".codex/skills"),
+        (Agent::Continue, ".continue/skills"),
+        (Agent::Cursor, ".cursor/skills"),
+        (Agent::GeminiCli, ".gemini/skills"),
+        (Agent::GithubCopilot, ".copilot/skills"),
+        (Agent::Goose, ".goose/skills"),
+        (Agent::Junie, ".junie/skills"),
+        (Agent::KiroCli, ".kiro/skills"),
+        (Agent::OpenClaw, ".openclaw/skills"),
+        (Agent::OpenCode, ".opencode/skills"),
+        (Agent::OpenHands, ".openhands/skills"),
+        (Agent::Replit, ".agents/skills"),
+        (Agent::Roo, ".roo/skills"),
+        (Agent::Trae, ".trae/skills"),
+        (Agent::Warp, ".agents/skills"),
+        (Agent::Windsurf, ".windsurf/skills"),
+    ];
+    assert_eq!(cases.len(), AGENT_PRESETS.len());
+    for (a, rel) in cases {
+        assert_eq!(a.project_path(p), p.join(rel), "project_path {a:?}");
+    }
+}
+
+// ───────────────────────────── M-13 · Agent::mcp_settings_target (global, all 21) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs Agent::mcp_settings_target — per-preset native global
+// MCP config path + McpSettingsFormat. github-copilot OS-branches (Linux on CI).
+#[test]
+fn parity_mcp_settings_target_all_21() {
+    let h = Path::new("/h");
+    let kcfg = Path::new("/h/kasetto.yaml"); // reserved/unused arg, threaded verbatim.
+    let cases: &[(Agent, &str, McpSettingsFormat)] = &[
+        (
+            Agent::ClaudeCode,
+            ".claude.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Cursor,
+            ".cursor/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::GeminiCli,
+            ".gemini/settings.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Roo,
+            ".roo/mcp_settings.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Windsurf,
+            ".codeium/windsurf/mcp_config.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Cline,
+            ".cline/data/settings/cline_mcp_settings.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Continue,
+            ".continue/mcpServers/kasetto.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Amp,
+            ".config/agents/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Replit,
+            ".config/agents/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Antigravity,
+            ".gemini/antigravity/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Augment,
+            ".augment/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (Agent::Warp, ".warp/mcp.json", McpSettingsFormat::McpServers),
+        (
+            Agent::Codex,
+            ".codex/config.toml",
+            McpSettingsFormat::CodexToml,
+        ),
+        (
+            Agent::Goose,
+            ".config/goose/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Junie,
+            ".junie/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::KiroCli,
+            ".kiro/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::OpenClaw,
+            ".openclaw/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::OpenCode,
+            ".config/opencode/opencode.json",
+            McpSettingsFormat::OpenCode,
+        ),
+        (
+            Agent::OpenHands,
+            ".openhands/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (Agent::Trae, ".trae/mcp.json", McpSettingsFormat::McpServers),
+    ];
+    for (a, rel, fmt) in cases {
+        let t = a.mcp_settings_target(h, kcfg);
+        assert_eq!(t.path, h.join(rel), "mcp_settings_target path {a:?}");
+        assert_eq!(t.format, *fmt, "mcp_settings_target format {a:?}");
+    }
+    // github-copilot: VsCodeServers format, OS-branched user mcp.json (Linux on CI host).
+    let copilot = Agent::GithubCopilot.mcp_settings_target(h, kcfg);
+    assert_eq!(copilot.format, McpSettingsFormat::VsCodeServers);
+    assert_eq!(copilot.path, h.join(".config/Code/User/mcp.json"));
+}
+
+// ───────────────────────────── M-14 · Agent::mcp_project_target (all 21) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs Agent::mcp_project_target — per-preset PROJECT MCP path;
+// 7 fallthrough presets collapse to ".mcp.json" McpServers.
+#[test]
+fn parity_mcp_project_target_all_21() {
+    let p = Path::new("/p");
+    let cases: &[(Agent, &str, McpSettingsFormat)] = &[
+        (
+            Agent::ClaudeCode,
+            ".mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Cursor,
+            ".cursor/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::GithubCopilot,
+            ".vscode/mcp.json",
+            McpSettingsFormat::VsCodeServers,
+        ),
+        (
+            Agent::GeminiCli,
+            ".gemini/settings.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (Agent::Roo, ".roo/mcp.json", McpSettingsFormat::McpServers),
+        (
+            Agent::Windsurf,
+            ".windsurf/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Cline,
+            ".cline_mcp_servers.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Continue,
+            ".continue/mcpServers/kasetto.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::Codex,
+            ".codex/config.toml",
+            McpSettingsFormat::CodexToml,
+        ),
+        (Agent::Amp, ".amp/mcp.json", McpSettingsFormat::McpServers),
+        (Agent::Trae, ".trae/mcp.json", McpSettingsFormat::McpServers),
+        (
+            Agent::Junie,
+            ".junie/mcp/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::KiroCli,
+            ".kiro/settings/mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (
+            Agent::OpenCode,
+            ".opencode/opencode.json",
+            McpSettingsFormat::OpenCode,
+        ),
+        // 7 fallthrough presets → ".mcp.json" McpServers.
+        (
+            Agent::Antigravity,
+            ".mcp.json",
+            McpSettingsFormat::McpServers,
+        ),
+        (Agent::Augment, ".mcp.json", McpSettingsFormat::McpServers),
+        (Agent::Goose, ".mcp.json", McpSettingsFormat::McpServers),
+        (Agent::OpenClaw, ".mcp.json", McpSettingsFormat::McpServers),
+        (Agent::OpenHands, ".mcp.json", McpSettingsFormat::McpServers),
+        (Agent::Replit, ".mcp.json", McpSettingsFormat::McpServers),
+        (Agent::Warp, ".mcp.json", McpSettingsFormat::McpServers),
+    ];
+    assert_eq!(cases.len(), AGENT_PRESETS.len());
+    for (a, rel, fmt) in cases {
+        let t = a.mcp_project_target(p);
+        assert_eq!(t.path, p.join(rel), "mcp_project_target path {a:?}");
+        assert_eq!(t.format, *fmt, "mcp_project_target format {a:?}");
+    }
+}
+
+// ───────────────────────────── M-17 · all_mcp_{settings,project}_targets (dedup + sort) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs::tests (all_mcp_*_targets dedupe/sort, the `clean`
+// manifest wipe). amp|replit collapse to one settings path; 7 presets collapse to one
+// project ".mcp.json".
+#[test]
+fn parity_all_mcp_targets_dedup_sort() {
+    let h = Path::new("/h");
+    let kcfg = Path::new("/h/kasetto.yaml");
+    let settings = all_mcp_settings_targets(h, kcfg);
+    assert!(!settings.is_empty());
+    // strictly sorted + deduped by path
+    for w in settings.windows(2) {
+        assert!(w[0].path < w[1].path, "settings strictly sorted+deduped");
+    }
+    // amp & replit share ".config/agents/mcp.json" → exactly one entry.
+    let amp = h.join(".config/agents/mcp.json");
+    assert_eq!(settings.iter().filter(|t| t.path == amp).count(), 1);
+
+    let p = Path::new("/p");
+    let project = all_mcp_project_targets(p);
+    assert!(!project.is_empty());
+    for w in project.windows(2) {
+        assert!(w[0].path < w[1].path);
+    }
+    // 7 fallthrough presets collapse to a single ".mcp.json".
+    let mcp_json = p.join(".mcp.json");
+    assert_eq!(project.iter().filter(|t| t.path == mcp_json).count(), 1);
+}
+
+// ───────────────────────────── M-19 · command_{global,project}_targets (scoped, doctor) ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs (command_*_targets over a SPECIFIC agent set) — dedup
+// over the given agents only; empty set → empty.
+#[test]
+fn parity_scoped_command_targets() {
+    let h = Path::new("/h");
+    let p = Path::new("/p");
+    // Cursor has NO global command surface but DOES have a project one → global yields only
+    // the ClaudeCode dir; project yields both.
+    let g = command_global_targets(h, &[Agent::Cursor, Agent::ClaudeCode]);
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].path, h.join(".claude/commands"));
+    let pr = command_project_targets(p, &[Agent::Cursor, Agent::ClaudeCode]);
+    assert_eq!(pr.len(), 2);
+    // empty agent set → empty scoped targets.
+    assert!(command_global_targets(h, &[]).is_empty());
+    assert!(command_project_targets(p, &[]).is_empty());
+}
+
+// ───────────────────────────── M-20 · vscode_user_mcp_json OS-branch + dedup helpers ─────────────────────────────
+// Oracle: kasetto src/model/agent.rs (vscode_user_mcp_json OS-branch via github-copilot;
+// dedup_targets/dedup_command_targets via all_* sorting). The private helpers are observed
+// through the public seams (github-copilot target + all_command_global_targets ordering).
+#[test]
+fn parity_private_helpers_via_public_seams() {
+    let h = Path::new("/h");
+    let kcfg = Path::new("/h/kasetto.yaml");
+    // vscode_user_mcp_json (Linux CI branch) surfaces via the github-copilot global target.
+    let copilot = Agent::GithubCopilot.mcp_settings_target(h, kcfg);
+    assert_eq!(copilot.path, h.join(".config/Code/User/mcp.json"));
+    // mcp_servers_target ctor → McpServers format (e.g. cursor).
+    assert_eq!(
+        Agent::Cursor.mcp_settings_target(h, kcfg).format,
+        McpSettingsFormat::McpServers
+    );
+    // dedup_command_targets: all_command_global_targets is strictly sorted + deduped.
+    let all = all_command_global_targets(h);
+    assert!(!all.is_empty());
+    for w in all.windows(2) {
+        assert!(w[0].path < w[1].path, "command targets strictly deduped");
+    }
+}
+
+// ───────────────────────────── M-21 · resolve_scope (CLI > cfg > Global; non-fallback arms) ─────────────────────────────
+// Oracle: kasetto src/model/config.rs::tests::resolve_scope_prefers_cli_override (+ the
+// cfg-then-default arm). The file-read fallback (M-22) is DEFERRED — not asserted here.
+#[test]
+fn parity_resolve_scope_precedence() {
+    use envctl_agent_env::config::resolve_scope;
+    // CLI override wins regardless of cfg.
+    assert_eq!(resolve_scope(Some(Scope::Project), None), Scope::Project);
+    assert_eq!(resolve_scope(Some(Scope::Global), None), Scope::Global);
+    let cfg_proj: Config = serde_yaml::from_str("scope: project\nskills: []\n").unwrap();
+    assert_eq!(
+        resolve_scope(Some(Scope::Global), Some(&cfg_proj)),
+        Scope::Global,
+        "CLI override beats cfg"
+    );
+    // No CLI override → cfg scope.
+    assert_eq!(resolve_scope(None, Some(&cfg_proj)), Scope::Project);
+    // No CLI, no cfg → Global default (the non-file-read arm).
+    assert_eq!(resolve_scope(None, None), Scope::Global);
+}
+
+// ───────────────────────────── M-23/M-24 · AgentLockEntry fields + LOCK_VERSION ─────────────────────────────
+// Oracle: kasetto src/model/types.rs (SkillEntry fields, LOCK_VERSION=2). envctl folds
+// SkillEntry → AgentLockEntry; State{version,skills} is engine-folded (see BLOCKED note).
+#[test]
+fn parity_lock_entry_fields_and_version() {
+    assert_eq!(LOCK_VERSION, 2);
+    // SkillEntry's 7 fields, including the Option<Scope> skip-if-none + default description.
+    let e = AgentLockEntry {
+        destination: ".claude/skills/a".into(),
+        hash: "abc".into(),
+        skill: "a".into(),
+        description: "desc".into(),
+        source: "src".into(),
+        source_revision: "branch:main".into(),
+        scope: Some(Scope::Project),
+    };
+    // serde round-trip preserves every field; scope present serializes.
+    let y = serde_yaml::to_string(&e).unwrap();
+    let back: AgentLockEntry = serde_yaml::from_str(&y).unwrap();
+    assert_eq!(back, e);
+    // scope = None is skipped on serialize (skip_serializing_if = Option::is_none).
+    let no_scope = AgentLockEntry {
+        scope: None,
+        ..e.clone()
+    };
+    let y2 = serde_yaml::to_string(&no_scope).unwrap();
+    assert!(!y2.contains("scope"), "None scope must be skipped: {y2}");
+    // description defaults to "" when absent (legacy-tolerant).
+    let legacy: AgentLockEntry = serde_yaml::from_str(
+        "destination: d\nhash: h\nskill: s\nsource: src\nsource_revision: local\n",
+    )
+    .unwrap();
+    assert_eq!(legacy.description, "");
+    assert_eq!(legacy.scope, None);
+}
+
+// ───────────────────────────── M-25 · Summary/Action/Report/InstalledSkill/SyncFailure ─────────────────────────────
+// Oracle: kasetto src/model/types.rs (the sync-result value types + their serde field names).
+#[test]
+fn parity_report_value_types() {
+    // Summary default = all zero.
+    let s = Summary::default();
+    assert_eq!(
+        (
+            s.installed,
+            s.updated,
+            s.removed,
+            s.unchanged,
+            s.broken,
+            s.failed
+        ),
+        (0, 0, 0, 0, 0, 0)
+    );
+    // Report serializes with kasetto's exact field names; Action.error stays null (not skipped).
+    let report = Report {
+        run_id: "run-1".into(),
+        config: "kasetto.yaml".into(),
+        destination: "/dest".into(),
+        dry_run: true,
+        summary: Summary {
+            installed: 2,
+            ..Default::default()
+        },
+        actions: vec![Action {
+            source: Some("github.com/a/b".into()),
+            skill: Some("review".into()),
+            status: "installed".into(),
+            error: None,
+        }],
+    };
+    let v: serde_json::Value = serde_json::to_value(&report).unwrap();
+    assert_eq!(v["run_id"], "run-1");
+    assert_eq!(v["dry_run"], true);
+    assert_eq!(v["summary"]["installed"], 2);
+    assert_eq!(v["actions"][0]["status"], "installed");
+    assert!(v["actions"][0]["error"].is_null());
+    // InstalledSkill carries scope + updated_ago (list view).
+    let is = InstalledSkill {
+        id: "src::a".into(),
+        scope: Scope::Global,
+        name: "a".into(),
+        description: "d".into(),
+        source: "src".into(),
+        skill: "a".into(),
+        destination: ".claude/skills/a".into(),
+        hash: "h".into(),
+        source_revision: "local".into(),
+        updated_at: "111".into(),
+        updated_ago: "2h ago".into(),
+    };
+    let iv: serde_json::Value = serde_json::to_value(&is).unwrap();
+    assert_eq!(iv["scope"], "global");
+    assert_eq!(iv["updated_ago"], "2h ago");
+    // SyncFailure 3-field record.
+    let f = SyncFailure {
+        name: "n".into(),
+        source: "s".into(),
+        reason: "boom".into(),
+    };
+    let fv: serde_json::Value = serde_json::to_value(&f).unwrap();
+    assert_eq!(fv["name"], "n");
+    assert_eq!(fv["reason"], "boom");
+}
+
+// ───────────────────────────── M-26 · McpSettingsFormat + McpSettingsTarget (4 formats) ─────────────────────────────
+// Oracle: kasetto src/model/mod.rs (McpSettingsFormat 4 variants + McpSettingsTarget{path,format}).
+// Each variant is reached via a representative preset.
+#[test]
+fn parity_mcp_settings_format_variants() {
+    let h = Path::new("/h");
+    let kcfg = Path::new("/h/kasetto.yaml");
+    // McpServers (claude-code), CodexToml (codex), OpenCode (opencode), VsCodeServers (copilot).
+    assert_eq!(
+        Agent::ClaudeCode.mcp_settings_target(h, kcfg).format,
+        McpSettingsFormat::McpServers
+    );
+    assert_eq!(
+        Agent::Codex.mcp_settings_target(h, kcfg).format,
+        McpSettingsFormat::CodexToml
+    );
+    assert_eq!(
+        Agent::OpenCode.mcp_settings_target(h, kcfg).format,
+        McpSettingsFormat::OpenCode
+    );
+    assert_eq!(
+        Agent::GithubCopilot.mcp_settings_target(h, kcfg).format,
+        McpSettingsFormat::VsCodeServers
+    );
+    // McpSettingsTarget{path, format} constructed directly round-trips its fields.
+    let t = McpSettingsTarget {
+        path: PathBuf::from("/x/mcp.json"),
+        format: McpSettingsFormat::McpServers,
+    };
+    assert_eq!(t.path, PathBuf::from("/x/mcp.json"));
+    assert_eq!(t.format, McpSettingsFormat::McpServers);
+}
+
+// ───────────────────────────── CFG-01 · load_config_any (top-level loader) ─────────────────────────────
+// Oracle: kasetto src/fsops/config.rs::tests::load_config_any_resolves_extends_relative_to_parent.
+// extends resolved relative to the PARENT config's dir; scalars override, lists append.
+#[test]
+fn parity_load_config_any_extends_relative() {
+    let root = tmp("cfg-extends-rel");
+    let base = root.join("base.yaml");
+    let child = root.join("child.yaml");
+    fs::write(
+        &base,
+        "agent: cursor\nscope: global\nskills:\n  - source: https://x/a\n    ref: v1\n    skills: \"*\"\n",
+    )
+    .unwrap();
+    fs::write(
+        &child,
+        "extends: ./base.yaml\nscope: project\nskills:\n  - source: https://x/b\n    skills: \"*\"\n",
+    )
+    .unwrap();
+
+    let (cfg, _, _) = load_config_any(child.to_str().unwrap()).unwrap();
+    assert_eq!(cfg.scope, Some(Scope::Project)); // child scalar overrides base
+    assert_eq!(cfg.skills.len(), 2); // base + child sources appended
+    assert!(cfg
+        .skills
+        .iter()
+        .any(|s| s.source == "https://x/a" && s.git_ref.as_deref() == Some("v1")));
+    assert!(cfg.skills.iter().any(|s| s.source == "https://x/b"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ───────────────────────────── CFG-02 · load_config_recursive (depth/cycle, chain) ─────────────────────────────
+// Oracle: kasetto src/fsops/config.rs::tests::{load_config_any_chains_extends,
+// load_config_any_detects_cycles, load_config_any_overrides_same_identity_in_extends}.
+#[test]
+fn parity_load_config_recursive_chain_and_cycle() {
+    // 3-deep extends chain a←b←c; deepest child wins scope.
+    let root = tmp("cfg-extends-chain");
+    let a = root.join("a.yaml");
+    let b = root.join("b.yaml");
+    let c = root.join("c.yaml");
+    fs::write(&a, "agent: cursor\nscope: global\nskills: []\n").unwrap();
+    fs::write(&b, "extends: ./a.yaml\nskills: []\n").unwrap();
+    fs::write(&c, "extends: ./b.yaml\nscope: project\nskills: []\n").unwrap();
+    let (cfg, _, _) = load_config_any(c.to_str().unwrap()).unwrap();
+    assert_eq!(cfg.scope, Some(Scope::Project));
+    assert_eq!(cfg.agents().len(), 1); // agent: cursor inherited from a
+    let _ = fs::remove_dir_all(&root);
+
+    // circular extends a↔b → fail-closed with a "circular" error.
+    let root = tmp("cfg-extends-cycle");
+    let a = root.join("a.yaml");
+    let b = root.join("b.yaml");
+    fs::write(&a, "extends: ./b.yaml\nskills: []\n").unwrap();
+    fs::write(&b, "extends: ./a.yaml\nskills: []\n").unwrap();
+    let res = load_config_any(a.to_str().unwrap());
+    assert!(res.is_err(), "cycle must error");
+    assert!(
+        format!("{}", res.err().unwrap()).contains("circular"),
+        "cycle error must mention 'circular'"
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    // override same identity (source+ref) in extends → replaced, not appended.
+    let root = tmp("cfg-extends-override");
+    let base = root.join("base.yaml");
+    let child = root.join("child.yaml");
+    fs::write(
+        &base,
+        "agent: cursor\nskills:\n  - source: https://x/a\n    ref: v1\n    skills: \"*\"\n",
+    )
+    .unwrap();
+    fs::write(
+        &child,
+        "extends: ./base.yaml\nskills:\n  - source: https://x/a\n    ref: v1\n    skills:\n      - one\n",
+    )
+    .unwrap();
+    let (cfg, _, _) = load_config_any(child.to_str().unwrap()).unwrap();
+    assert_eq!(cfg.skills.len(), 1);
+    assert!(matches!(&cfg.skills[0].skills, SkillsField::List(items) if items.len() == 1));
+    let _ = fs::remove_dir_all(&root);
+
+    // load_config_recursive public seam: depth guard fires past MAX_EXTENDS_DEPTH.
+    // (Reachable directly; a non-existent ref past the limit errors on the depth check.)
+    let mut visited = HashSet::new();
+    let deep = load_config_recursive("/nonexistent/over.yaml", None, &mut visited, 9);
+    assert!(deep.is_err(), "depth > MAX_EXTENDS_DEPTH must error");
+    assert!(format!("{}", deep.err().unwrap()).contains("depth limit"));
+}
+
+// ───────────────────────────── CFG-03 · fetch_config_text (local arm via load_config_any) ─────────────────────────────
+// Oracle: kasetto src/fsops/config.rs (fetch_config_text local arm — canonicalize, "config
+// not found" on miss). `fetch_config_text` is private in BOTH kasetto and envctl; its local
+// arm is observed through the public load_config_any (the only public seam). The http(s) arm
+// is network/private — see BLOCKED note for the remote sub-path.
+#[test]
+fn parity_fetch_config_text_local_arm() {
+    // canonicalize + read a real local file (parent becomes base_dir).
+    let root = tmp("cfg-fetch-local");
+    let f = root.join("kasetto.yaml");
+    fs::write(&f, "agent: codex\nscope: project\nskills: []\n").unwrap();
+    let (cfg, base_dir, label) = load_config_any(f.to_str().unwrap()).unwrap();
+    assert_eq!(cfg.agents(), vec![Agent::Codex]);
+    assert!(label.ends_with("kasetto.yaml"));
+    // base_dir is the canonicalized parent dir of the config file.
+    assert_eq!(base_dir, fs::canonicalize(&root).unwrap());
+    let _ = fs::remove_dir_all(&root);
+
+    // missing local config → "config not found" error (fail-closed).
+    let missing = load_config_any("/no/such/dir/kasetto.yaml");
+    assert!(missing.is_err());
+    assert!(
+        format!("{}", missing.err().unwrap()).contains("config not found"),
+        "missing config must report 'config not found'"
+    );
+}
+
+// ───────────────────────────── L-01 · AssetEntry (CSV destination, skip-empty revision) ─────────────────────────────
+// Oracle: kasetto src/lock.rs (AssetEntry fields; source_revision default + skip_if_empty).
+#[test]
+fn parity_asset_entry_fields() {
+    let a = AssetEntry {
+        kind: "mcp".into(),
+        name: "pack.json".into(),
+        hash: "h1".into(),
+        source: "src".into(),
+        destination: "srv1,srv2".into(), // CSV: MCP server names
+        source_revision: "branch:main".into(),
+    };
+    let back: AssetEntry = serde_yaml::from_str(&serde_yaml::to_string(&a).unwrap()).unwrap();
+    assert_eq!(back, a);
+    // empty source_revision is skipped on serialize (skip_serializing_if = String::is_empty).
+    let empty_rev = AssetEntry {
+        source_revision: String::new(),
+        ..a.clone()
+    };
+    let y = serde_yaml::to_string(&empty_rev).unwrap();
+    assert!(
+        !y.contains("source_revision"),
+        "empty revision must be skipped: {y}"
+    );
+    // default-tolerant: a lock written before the revision field omits it.
+    let legacy: AssetEntry = serde_yaml::from_str(
+        "kind: command\nname: deploy\nhash: h\nsource: s\ndestination: .claude/commands/deploy.md\n",
+    )
+    .unwrap();
+    assert_eq!(legacy.source_revision, "");
+}
+
+// ───────────────────────────── L-02 · AgentLockFile + Default + default_version ─────────────────────────────
+// Oracle: kasetto src/lock.rs::tests::round_trip_empty_lock_file + LockFile::Default.
+#[test]
+fn parity_lock_file_default_and_version() {
+    let lf = AgentLockFile::default();
+    assert_eq!(lf.version, 2); // default_version = LOCK_VERSION = 2
+    assert!(lf.skills.is_empty());
+    assert!(lf.assets.is_empty());
+    // version field defaults to 2 when absent (unknown fields ignored / legacy-tolerant).
+    let parsed: AgentLockFile = serde_yaml::from_str("skills: {}\nassets: {}\n").unwrap();
+    assert_eq!(parsed.version, 2);
+    // unknown top-level fields are tolerated (legacy v1 carried extra keys).
+    let legacy: AgentLockFile =
+        serde_yaml::from_str("version: 1\nlast_run: '111'\nskills: {}\nassets: {}\n").unwrap();
+    assert_eq!(legacy.version, 1);
+}
+
+// ───────────────────────────── L-03 · AgentLockFile state methods (asset CRUD) ─────────────────────────────
+// Oracle: kasetto src/lock.rs::tests::{list_tracked_asset_ids_filters_by_kind,
+// remove_tracked_asset_deletes_entry, list_installed_mcps_deduplicates, clear_all_empties_everything}.
+// NOTE: kasetto's list_installed_{commands,mcps} + state/apply_state are NOT on envctl's
+// public lock API (engine-folded) — see BLOCKED note. The asset-CRUD subset is verified here.
+#[test]
+fn parity_lock_state_asset_crud() {
+    let mk = |kind: &str, name: &str, dest: &str| AssetEntry {
+        kind: kind.into(),
+        name: name.into(),
+        hash: "h".into(),
+        source: "s".into(),
+        destination: dest.into(),
+        source_revision: "rev".into(),
+    };
+    let mut lock = AgentLockFile::default();
+    lock.save_tracked_asset("mcp::a", mk("mcp", "a", "srv1,srv2"));
+    lock.save_tracked_asset("other::b", mk("other", "b", "d2"));
+
+    // get_tracked_asset returns (hash, destination) only when the kind matches.
+    assert_eq!(
+        lock.get_tracked_asset("mcp", "mcp::a"),
+        Some(("h".into(), "srv1,srv2".into()))
+    );
+    assert_eq!(
+        lock.get_tracked_asset("command", "mcp::a"),
+        None,
+        "kind filter"
+    );
+
+    // list_tracked_asset_ids filters by kind.
+    let mcps = lock.list_tracked_asset_ids("mcp");
+    assert_eq!(mcps, vec![("mcp::a", "srv1,srv2")]);
+
+    // remove deletes the entry.
+    lock.remove_tracked_asset("mcp::a");
+    assert!(lock.get_tracked_asset("mcp", "mcp::a").is_none());
+
+    // clear_all empties skills + assets.
+    lock.skills.insert("k".into(), AgentLockEntry::default());
+    lock.clear_all();
+    assert!(lock.skills.is_empty() && lock.assets.is_empty());
+}
+
+// ───────────────────────────── L-04 · lock_path (scope-keyed) ─────────────────────────────
+// Oracle: kasetto src/lock.rs::lock_path — Project→project_root/<lock>, Global→data/<lock>.
+// envctl threads the global data dir explicitly (kasetto reads dirs_kasetto_data()).
+#[test]
+fn parity_lock_path_by_scope() {
+    use envctl_agent_env::lock::lock_path;
+    let proj = Path::new("/proj");
+    let data = Path::new("/data");
+    // Project → <project_root>/<LOCK_FILENAME>
+    let p = lock_path(Scope::Project, proj, data);
+    assert_eq!(p, proj.join("agent-env.lock"));
+    // Global → <global_data_dir>/<LOCK_FILENAME>
+    let g = lock_path(Scope::Global, proj, data);
+    assert_eq!(g, data.join("agent-env.lock"));
+}
+
+// ───────────────────────────── L-05 · load_lock / save_lock (round-trip, legacy restamp) ─────────────────────────────
+// Oracle: kasetto src/lock.rs::tests::{round_trip_with_skills_and_assets,
+// load_returns_default_when_missing, legacy_v1_lock_loads_and_restamps_on_save}.
+#[test]
+fn parity_load_save_lock() {
+    use envctl_agent_env::lock::{load, save};
+    let dir = tmp("lock-roundtrip");
+    let path = dir.join("agent-env.lock");
+
+    // round-trip skills + assets; scope-relative destination preserved verbatim.
+    let mut lock = AgentLockFile::default();
+    lock.skills.insert(
+        "src::skill-a".into(),
+        AgentLockEntry {
+            destination: ".claude/skills/skill-a".into(),
+            hash: "abc".into(),
+            skill: "skill-a".into(),
+            description: "desc".into(),
+            source: "src".into(),
+            source_revision: "rev1".into(),
+            scope: Some(Scope::Project),
+        },
+    );
+    lock.save_tracked_asset(
+        "mcp::src::pack.json",
+        AssetEntry {
+            kind: "mcp".into(),
+            name: "pack.json".into(),
+            hash: "h1".into(),
+            source: "src".into(),
+            destination: "srv1,srv2".into(),
+            source_revision: "rev1".into(),
+        },
+    );
+    save(&mut lock, &path).unwrap();
+    let loaded = load(&path).unwrap();
+    assert_eq!(loaded.version, 2);
+    assert_eq!(loaded.skills.len(), 1);
+    assert_eq!(loaded.skills["src::skill-a"].hash, "abc");
+    assert_eq!(
+        loaded.skills["src::skill-a"].destination,
+        ".claude/skills/skill-a"
+    );
+    assert_eq!(
+        loaded.get_tracked_asset("mcp", "mcp::src::pack.json"),
+        Some(("h1".into(), "srv1,srv2".into()))
+    );
+
+    // missing file → default lock.
+    let missing = load(&dir.join("nope.lock")).unwrap();
+    assert_eq!(missing.version, 2);
+    assert!(missing.skills.is_empty());
+
+    // legacy v1 lock: unknown fields ignored, absolute dest honored, restamped to v2 on save.
+    let legacy_path = dir.join("legacy.lock");
+    let legacy = "version: 1\n\
+last_run: '111'\n\
+skills:\n\
+\x20 src::a:\n\
+\x20\x20\x20 destination: /abs/path/.claude/skills/a\n\
+\x20\x20\x20 hash: h\n\
+\x20\x20\x20 skill: a\n\
+\x20\x20\x20 source: src\n\
+\x20\x20\x20 source_revision: local\n\
+\x20\x20\x20 updated_at: '111'\n\
+assets: {}\n";
+    fs::write(&legacy_path, legacy).unwrap();
+    let mut loaded = load(&legacy_path).unwrap();
+    assert_eq!(loaded.version, 1);
+    assert_eq!(
+        loaded.skills["src::a"].destination,
+        "/abs/path/.claude/skills/a" // legacy absolute dest honored
+    );
+    save(&mut loaded, &legacy_path).unwrap();
+    let resaved = fs::read_to_string(&legacy_path).unwrap();
+    assert!(resaved.starts_with("version: 2"), "restamped to v2");
+    assert!(!resaved.contains("last_run"));
+    assert!(!resaved.contains("updated_at"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ───────────────────────────── L-06 · lock_check + LockMode diff ─────────────────────────────
+// Oracle: kasetto commands/lock.rs diff semantics (added/removed/updated by hash|rev) +
+// the 3-mode allows_fetch/should_resolve logic. (envctl folds these into lock.rs.)
+#[test]
+fn parity_lock_check_and_modes() {
+    use envctl_agent_env::lock::DriftStatus;
+    let mk = |dest: &str, hash: &str, rev: &str| AgentLockEntry {
+        destination: dest.into(),
+        hash: hash.into(),
+        skill: "skill-a".into(),
+        description: "d".into(),
+        source: "src".into(),
+        source_revision: rev.into(),
+        scope: Some(Scope::Project),
+    };
+
+    // added / removed / unchanged.
+    let mut prev = AgentLockFile::default();
+    prev.skills.insert("k::keep".into(), mk("d", "h1", "r1"));
+    prev.skills.insert("k::gone".into(), mk("d", "h2", "r1"));
+    let mut next = AgentLockFile::default();
+    next.skills.insert("k::keep".into(), mk("d", "h1", "r1"));
+    next.skills.insert("k::new".into(), mk("d", "h3", "r1"));
+    let drift = prev.lock_check(&next);
+    assert!(drift
+        .iter()
+        .any(|d| d.status == DriftStatus::Removed && d.id == "k::gone"));
+    assert!(drift
+        .iter()
+        .any(|d| d.status == DriftStatus::Added && d.id == "k::new"));
+    assert!(!drift.iter().any(|d| d.id == "k::keep"), "no spurious keep");
+
+    // updated by hash, updated by revision, and clean-when-identical.
+    let mut p = AgentLockFile::default();
+    p.skills.insert("k::a".into(), mk("d", "h1", "r1"));
+    let mut by_hash = AgentLockFile::default();
+    by_hash.skills.insert("k::a".into(), mk("d", "h2", "r1"));
+    assert_eq!(p.lock_check(&by_hash)[0].status, DriftStatus::Updated);
+    let mut by_rev = AgentLockFile::default();
+    by_rev.skills.insert("k::a".into(), mk("d", "h1", "r2"));
+    assert_eq!(p.lock_check(&by_rev)[0].status, DriftStatus::Updated);
+    let mut same = AgentLockFile::default();
+    same.skills.insert("k::a".into(), mk("d", "h1", "r1"));
+    assert!(p.lock_check(&same).is_empty());
+
+    // LockMode: Locked is zero-network + never resolves; Plain fetches + resolves all;
+    // Update(names) re-resolves only sources providing a named skill.
+    assert!(!LockMode::Locked.allows_fetch());
+    assert!(!LockMode::Locked.should_resolve("src", &p));
+    assert!(LockMode::Plain.allows_fetch());
+    assert!(LockMode::Plain.should_resolve("anything", &p));
+    let upd = LockMode::Update(vec!["skill-a".into()]);
+    assert!(upd.allows_fetch());
+    assert!(upd.should_resolve("src", &p)); // src provides skill-a
+    assert!(!upd.should_resolve("unrelated", &p));
+    assert!(LockMode::Update(vec![]).should_resolve("anything", &p)); // empty = all
 }

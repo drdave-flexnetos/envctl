@@ -13,17 +13,23 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 1   # RESUME 2026-06-14: reset to 0 on resume; cycle = source-resolver parity cluster
-cycles_total: 8
-parity: 33 [x] verified · 33 [~] unproven · 36 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠])
+cycles_this_session: 2   # RESUME 2026-06-14: reset to 0 on resume; cycles = source-resolver, then model/cfg/lock
+cycles_total: 9
+parity: 60 [x] verified · 6 [~] residue/network · 36 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠])
 ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass)
-last_item: PARITY cluster source-resolver — +11 [x] (S-09/10/11/14/16/17/18/19/20/21,XC-04); 4 [~] BLOCKED (S-07/12/13/15 pub(crate)/network-only)
+last_item: PARITY cluster model+cfg+lock — +27 [x] (M-01/03/04/06/07/09-14/17/19/20/21/23-26, CFG-01/02, L-01-06); CFG-03 [~] remote-arm network-only
 status: VERIFY-MERGE MODE — resume 2026-06-14. PARITY-VERIFIER PASS underway: absorption is structurally
-  complete through the Engine (0 to-merge); remaining DONE work = drive the 80 [~]/[ ] parity rows → [x]
-  via verbatim kasetto golden vectors. Cycle (this session, #1): source-resolver auth/discovery cluster —
-  248 agent-env tests pass (+7 fns), no-c PASS, fmt clean. 4 rows left [~] (BLOCKED honest: pub(crate) /
-  network-only — close via Engine integration surface or pub test seam, NOT by faking). NEXT clusters
-  (highest value): M-09..M-14/M-17 (21-preset path table), CFG-01..03 (recursive extends loader),
+  complete through the Engine (0 to-merge); remaining DONE work = drive the [~]/[ ] parity rows → [x]
+  via verbatim kasetto golden vectors. Session cycles: #1 source-resolver (+11 [x], PR #80), #2 model
+  schema + 21-preset path table + config loader + SHA-256 lock (+27 [x], 275 tests pass, PR pending).
+  parity now 60 [x]/6 [~]/36 [ ]/13 [≠]. 6 [~] residue: S-07/12/13/15 (pub(crate)/network), CFG-03
+  (remote arm), + close all via Engine::agent_sync integration cycle or pub test seam — NOT by faking.
+  NOTE: PR #80 (cycle 1) still open at handoff time; cycle 2 STACKED on its branch (d41ba6c) — when #80
+  squash-merges, rebase cycle-2 PR onto fresh develop dropping the already-merged cycle-1 commit.
+  NEXT clusters: F-03..F-10 + FE-01..06 (fsops copy/settings/select_targets + config_edit mutation),
+  C-* command business logic (sync/add/remove/lock/list/clean — exercise via Engine integration tests,
+  which ALSO closes the 6 [~] residue), XC-01/02/03 (error/http/dirs), CP-*/ST-*/P-* leaves.
+  PRIOR NEXT (kept): M-09..M-14/M-17 (21-preset path table), CFG-01..03 (recursive extends loader),
   L-01..06 (SHA-256 asset lock), F-03..F-10+FE-* (fsops/config_edit), C-* command business logic.
   PRIOR (kept for history): strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
   MCP additive-never-clobber merge (MC-01/MC-02, 4 formats — PR #73 MERGED) + command-format transforms
