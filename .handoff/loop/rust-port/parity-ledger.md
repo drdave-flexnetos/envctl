@@ -37,6 +37,21 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
   asserts both `agent_add` and `agent_remove` refuse a remote `--config`. C-12 → `[x]`. Engine non-printing
   + fail-closed preserved; clippy (`--workspace -D warnings`) / no-c / shape green.
 
+## Parity-verifier pass — 2026-06-14 (cluster: residue close — S-07/S-12/S-13/M-22, in-crate + engine)
+
+**+4 rows flipped `→ [x]`** (94→98). These rows are `pub(crate)`/engine-fallback so they use
+**in-crate `#[cfg(test)]` tests** (exactly where kasetto tests them in-module) — NOT the external
+cross-crate harness. No visibility widened, no non-test logic changed, no network. Proven: **S-12**
+auth_env_inline_help (5 in-crate tests in `agent-env/src/source.rs`, per-host env hints + None-all-providers
+arm), **S-13** http_fetch_auth_hint (6 in-crate tests: 4 host vectors + else-empty + 404-if-private arms),
+**S-07** download_extract tar-slip guard (ALREADY covered by `extract_rejects_parent_dir_traversal` +
+`extract_accepts_safe_entry_and_strips_top_dir` — envctl tests a guard kasetto leaves untested, an
+upgrade), **M-22** resolve_scope file-read fallback (ALREADY covered by engine integration test
+`m22_fallback_resolves_default_config_from_cwd` — the fallback lives in `AgentCtx::resolve`, the engine
+layer, deliberately, not the agent-env library). agent-env 311→322; engine 96; clippy/no-c green. 0 BLOCKED.
+**Remaining 4 rows:** XC-01 (error channel) + XC-02 (http_client builder) — NOT network, closeable next;
+**CFG-03 + S-15** — genuinely network (live HTTP retry / remote fetch).
+
 ## Parity-verifier pass — 2026-06-14 (cluster: C-* VERB commands — Engine integration tests)
 
 **+7 rows flipped `→ [x]`** (86→93); **C-12 → `[~]`** (proven-with-gap, see C-12-FIX above). Second
@@ -205,7 +220,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] M-19 · src/model/agent.rs:command_global_targets/command_project_targets · same dedup over a SPECIFIC agent set (for doctor scoping). SEED-DEFERRED. · -> agent-env::config::{command_global_targets,command_project_targets} · deps: M-15,M-16
 - [x] M-20 · src/model/agent.rs:dedup_targets/dedup_command_targets/cmd/vscode_user_mcp_json/mcp_servers_target · private helpers: HashSet path-dedup + sort; `cmd()` builds CommandTarget; `vscode_user_mcp_json` OS-branch; `mcp_servers_target` McpServers ctor. SEED-DEFERRED. · -> agent-env::config (private helpers) · deps: M-09,M-26,M-27
 - [x] M-21 · src/model/config.rs:resolve_scope · CLI override > cfg.resolved_scope() > (file-read fallback) > Global. SEED ports CLI>cfg>Global; **file-read fallback DEFERRED** → see M-22. · -> agent-env::config::resolve_scope · deps: M-03
-- [ ] M-22 · src/model/config.rs:resolve_scope (file-read fallback branch) · when no Config passed, read `load_config_any(default_config_path())` and use its scope. SEED-DEFERRED (a sync-command concern, TASK-0013). MUST be added as a distinct path; not a regression. · -> agent-env::config::resolve_scope (fallback arm) · deps: M-21,X-04,CFG-01
+- [x] M-22 · src/model/config.rs:resolve_scope (file-read fallback branch) · when no Config passed, read `load_config_any(default_config_path())` and use its scope. SEED-DEFERRED (a sync-command concern, TASK-0013). MUST be added as a distinct path; not a regression. · -> agent-env::config::resolve_scope (fallback arm) · deps: M-21,X-04,CFG-01
 - [x] M-23 · src/model/types.rs:SkillEntry · lock skill row: destination(scope-relative, legacy-absolute honored)/hash/skill/description(default)/source/source_revision/scope(Option, skip_if_none). SEED folds these fields into AgentLockEntry. · -> agent-env::lock::AgentLockEntry (folded) · deps: M-01
 - [x] M-24 · src/model/types.rs:State + LOCK_VERSION · State{version,skills:BTreeMap}; LOCK_VERSION=2 (portable format). SEED: crate-local LOCK_VERSION=2 (AgentLockFile). · -> agent-env::lock (version/state) · deps: M-23 ⟨parity 2026-06-14: schema+LOCK_VERSION proven; kasetto `State` type intentionally folded into runtime/driver (no behavior lost)⟩
 - [x] M-25 · src/model/types.rs:Summary/Action/Report/InstalledSkill/SyncFailure · sync result value types: Summary{installed,updated,removed,unchanged,broken,failed}; Action{source,skill,status,error}; Report{run_id,config,destination,dry_run,summary,actions}; InstalledSkill (list view); SyncFailure{name,source,reason}. NOT in seed (sync-result surface). · -> agent-env::report::{Summary,Action,Report,InstalledSkill,SyncFailure} · deps: M-01
@@ -249,13 +264,13 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] S-04 · src/source/remote.rs:remote_repo_archive_branch · GitHub: token→api.github.com tarball (ref %2F-encoded), no-token→web `archive/refs/heads/{branch}.tar.gz`; others delegate to archive_ref. SEED (as archive_url precedence builder; note materialize main→master retry deferred, see S-15). · -> agent-env::source::archive_url (branch arm) · deps: S-02,S-09
 - [x] S-05 · src/source/remote.rs:remote_repo_archive_ref · GitHub token→api tarball / no-token→`archive/{ref}.tar.gz`; GitLab→`api/v4/projects/{enc}/repository/archive.tar.gz?sha={ref}`; Bitbucket→`get/{ref}.tar.gz`; Gitea→`{host}/{owner}/{repo}/archive/{ref}.tar.gz`. SEED. · -> agent-env::source::archive_url (ref arm) · deps: S-02,S-09
 - [x] S-06 · src/source/remote.rs:encode_gitlab_path/encode_github_ref · `/`→`%2F` (GitLab project path & GitHub ref single-segment). SEED. · -> agent-env::source (url encoders) · deps: none
-- [~] S-07 · src/source/remote.rs:download_extract · dst-clean → create → GET(auth) → ERR on unreachable/HTTP-non-2xx(+auth hint)/HTML-instead-of-tar.gz; gzip(flate2)→tar; **tar-slip guard**: strip top dir, ERR "unsafe archive path" on ParentDir; create parent dirs, unpack. SEED (pure-Rust flate2+tar, no C zlib). · -> agent-env::source::download_extract · deps: XC-02,S-08
+- [x] S-07 · src/source/remote.rs:download_extract · dst-clean → create → GET(auth) → ERR on unreachable/HTTP-non-2xx(+auth hint)/HTML-instead-of-tar.gz; gzip(flate2)→tar; **tar-slip guard**: strip top dir, ERR "unsafe archive path" on ParentDir; create parent dirs, unpack. SEED (pure-Rust flate2+tar, no C zlib). · -> agent-env::source::download_extract · deps: XC-02,S-08
 - [x] S-08 · src/source/remote.rs:rewrite_browse_to_raw_url + rewrite_{github_blob,gitea_src,gitlab_raw_url} · github blob|raw→raw.githubusercontent.com; gitea src/{branch|commit|tag}→raw (+query); gitlab `/-/raw|blob/`→api/v4 files raw (or `.`-segment heuristic, default ref main). None for unrecognized/non-http. SEED. · -> agent-env::source::rewrite_browse_to_raw_url · deps: S-01
 - [x] S-09 · src/source/auth.rs:UrlRequestAuth + apply + for_{github,gitlab,bitbucket,gitea}_archive · headers+optional basic; apply: basic_auth then headers. GitHub Bearer; GitLab PRIVATE-TOKEN|JOB-TOKEN; Bitbucket basic; Gitea `token`. SEED. · -> agent-env::source::UrlRequestAuth · deps: S-10
 - [x] S-10 · src/source/auth.rs:{github,gitlab,gitea}_auth_headers/bitbucket_basic_credentials/first_env_var · ENV-ONLY creds (never config/lock): GITHUB_TOKEN|GH_TOKEN→Bearer; GITLAB_TOKEN→PRIVATE-TOKEN else CI_JOB_TOKEN→JOB-TOKEN; BITBUCKET_EMAIL+TOKEN or USERNAME+APP_PASSWORD; GITEA|CODEBERG|FORGEJO_TOKEN→`token`. SEED. · -> agent-env::source (env cred readers) · deps: none
 - [x] S-11 · src/source/auth.rs:auth_for_request_url · classify host → headers/basic for fetching a remote resource (config/archive). SEED. · -> agent-env::source::auth_for_request_url · deps: S-01,S-10
-- [~] S-12 · src/source/auth.rs:auth_env_inline_help · per-host-family env-var hint string (GitHub/GitLab/Bitbucket/Gitea/none). SEED. · -> agent-env::source::auth_env_inline_help · deps: S-01
-- [~] S-13 · src/source/auth.rs:http_fetch_auth_hint · 401|403→" - {help}"; 404→" - if private, {help}"; else "". SEED. · -> agent-env::source::http_fetch_auth_hint · deps: S-12
+- [x] S-12 · src/source/auth.rs:auth_env_inline_help · per-host-family env-var hint string (GitHub/GitLab/Bitbucket/Gitea/none). SEED. · -> agent-env::source::auth_env_inline_help · deps: S-01
+- [x] S-13 · src/source/auth.rs:http_fetch_auth_hint · 401|403→" - {help}"; 404→" - if private, {help}"; else "". SEED. · -> agent-env::source::http_fetch_auth_hint · deps: S-12
 - [x] S-14 · src/source/mod.rs:materialize_source + MaterializedSource · http: parse → git_pin → fetch+extract (ref/branch/Default), source_revision label; **main→master retry on Default** (second download_extract, ERR appends "also tried master"); resolve_source_root(sub_dir); discover_with_root_name(hint). local: resolve_path, no cleanup_dir, rev "local". SEED partial — S-15 covers main→master retry remainder. NOT otherwise in seed. · -> agent-env::source::materialize_source · deps: S-02,S-05,S-07,S-16,S-17,F-05
 - [ ] S-15 · src/source/mod.rs:materialize_source (GitPin::Default main→master retry) · live second HTTP attempt to `master` when `main` 404s; SEED `archive_url(GitPin::Default)` returns the `main` URL only — the RETRY is the materializer's job. SEED-DEFERRED remainder (TASK-0013). · -> agent-env::source::materialize_source (retry arm) · deps: S-14
 - [x] S-16 · src/source/mod.rs:resolve_source_root + repo_name_hint · sub_dir: empty→ERR; absolute→ERR "must be relative"; ParentDir|RootDir→ERR "must not escape"; not-exists→ERR; not-dir→ERR. repo_name_hint: last path segment per host variant. NOT in seed. · -> agent-env::source::{resolve_source_root,repo_name_hint} · deps: S-02
