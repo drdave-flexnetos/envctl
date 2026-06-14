@@ -11,9 +11,12 @@
 //! `.handoff/loop/rust-port/parity-ledger.md` (and merge-ledger.md).
 
 use envctl_agent_env::{
-    all_command_global_targets, archive_url, derive_browse_url, extract_extends, git_pin_of,
-    hash_dir, hash_file, hash_str, merge_mcp_config, merge_yaml, parse, parse_repo_url, render,
-    Agent, CommandFormat, Config, GitPin, McpSettingsFormat, McpSettingsTarget, RepoUrl,
+    all_command_global_targets, archive_url, derive_browse_url, discover, discover_commands,
+    discover_mcps, discover_with_root_name, extract_extends, git_pin_of, hash_dir, hash_file,
+    hash_str, materialize_source, merge_mcp_config, merge_yaml, now_unix, now_unix_str, parse,
+    parse_repo_url, render, resolve_command_entry, resolve_mcp_entry, Agent, CommandEntry,
+    CommandFormat, Config, GitPin, McpEntry, McpSettingsFormat, McpSettingsTarget, RepoUrl,
+    SkillsField, SourceSpec,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -598,4 +601,396 @@ fn parity_command_destination_relpath() {
         rel(CommandFormat::GeminiToml, "git:commit"),
         PathBuf::from("git-commit.toml")
     );
+}
+
+// ───────────────────────────── S-09/S-10/S-11 · env-only auth (no-clobber creds) ─────────────────────────────
+// Oracle: kasetto src/source/remote.rs::tests (github_branch_archive_uses_{refs_heads,api_endpoint}*)
+// + src/source/auth.rs (github/gitlab/bitbucket/gitea cred readers).
+//
+// The env-credential readers + UrlRequestAuth assembly (S-09/S-10) and host-classified
+// auth selection (S-11) are `pub(crate)` in both kasetto and agent-env, so they are NOT
+// directly reachable. They ARE observable through the PUBLIC `archive_url`, whose returned
+// `UrlRequestAuth` carries the env-derived `headers`/`basic` (public fields). kasetto's own
+// remote.rs tests assert the *same* env→header behavior through the same seam (the token
+// flips the GitHub URL to the api.github.com endpoint, proving the Bearer header was built).
+#[test]
+fn parity_auth_env_credentials_via_archive_url() {
+    let _g = ENV_LOCK.lock().unwrap();
+
+    // Save + clear every env var these readers consult, restore at the end (no leak).
+    let keys = [
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GITLAB_TOKEN",
+        "CI_JOB_TOKEN",
+        "BITBUCKET_EMAIL",
+        "BITBUCKET_TOKEN",
+        "BITBUCKET_USERNAME",
+        "BITBUCKET_APP_PASSWORD",
+        "GITEA_TOKEN",
+        "CODEBERG_TOKEN",
+        "FORGEJO_TOKEN",
+    ];
+    let saved: Vec<(&str, Option<String>)> =
+        keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+    for k in keys {
+        std::env::remove_var(k);
+    }
+
+    let gh = RepoUrl::GitHub {
+        host: "github.com".into(),
+        owner: "o".into(),
+        repo: "r".into(),
+    };
+    let gl = RepoUrl::GitLab {
+        host: "gitlab.com".into(),
+        project_path: "g/p".into(),
+    };
+    let bb = RepoUrl::Bitbucket {
+        workspace: "ws".into(),
+        repo_slug: "r".into(),
+    };
+    let gt = RepoUrl::Gitea {
+        host: "codeberg.org".into(),
+        owner: "a".into(),
+        repo: "b".into(),
+    };
+
+    // No creds anywhere → empty headers / no basic (S-09/S-10 absent arm).
+    let (_, auth) = archive_url(&gh, &GitPin::Branch("main".into()));
+    assert!(auth.headers.is_empty() && auth.basic.is_none());
+
+    // GITHUB_TOKEN → Authorization: Bearer <token> (S-10 github_auth_headers).
+    std::env::set_var("GITHUB_TOKEN", "ghtok");
+    let (_, auth) = archive_url(&gh, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.headers,
+        vec![("Authorization".to_string(), "Bearer ghtok".to_string())]
+    );
+    std::env::remove_var("GITHUB_TOKEN");
+
+    // GH_TOKEN is the fallback key (first_env_var order: GITHUB_TOKEN then GH_TOKEN).
+    std::env::set_var("GH_TOKEN", "ghtok2");
+    let (_, auth) = archive_url(&gh, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.headers,
+        vec![("Authorization".to_string(), "Bearer ghtok2".to_string())]
+    );
+    std::env::remove_var("GH_TOKEN");
+
+    // GITLAB_TOKEN → PRIVATE-TOKEN; CI_JOB_TOKEN → JOB-TOKEN (S-10 gitlab_auth_headers).
+    std::env::set_var("GITLAB_TOKEN", "gltok");
+    let (_, auth) = archive_url(&gl, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.headers,
+        vec![("PRIVATE-TOKEN".to_string(), "gltok".to_string())]
+    );
+    std::env::remove_var("GITLAB_TOKEN");
+    std::env::set_var("CI_JOB_TOKEN", "jobtok");
+    let (_, auth) = archive_url(&gl, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.headers,
+        vec![("JOB-TOKEN".to_string(), "jobtok".to_string())]
+    );
+    std::env::remove_var("CI_JOB_TOKEN");
+
+    // BITBUCKET_EMAIL+TOKEN → basic; USERNAME+APP_PASSWORD is the fallback (S-10).
+    std::env::set_var("BITBUCKET_EMAIL", "me@x.io");
+    std::env::set_var("BITBUCKET_TOKEN", "bbtok");
+    let (_, auth) = archive_url(&bb, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.basic,
+        Some(("me@x.io".to_string(), "bbtok".to_string()))
+    );
+    assert!(auth.headers.is_empty());
+    std::env::remove_var("BITBUCKET_EMAIL");
+    std::env::remove_var("BITBUCKET_TOKEN");
+    std::env::set_var("BITBUCKET_USERNAME", "user");
+    std::env::set_var("BITBUCKET_APP_PASSWORD", "pass");
+    let (_, auth) = archive_url(&bb, &GitPin::Branch("main".into()));
+    assert_eq!(auth.basic, Some(("user".to_string(), "pass".to_string())));
+    std::env::remove_var("BITBUCKET_USERNAME");
+    std::env::remove_var("BITBUCKET_APP_PASSWORD");
+
+    // GITEA/CODEBERG/FORGEJO_TOKEN → Authorization: token <t> (S-10 gitea_auth_headers).
+    std::env::set_var("GITEA_TOKEN", "gttok");
+    let (_, auth) = archive_url(&gt, &GitPin::Branch("main".into()));
+    assert_eq!(
+        auth.headers,
+        vec![("Authorization".to_string(), "token gttok".to_string())]
+    );
+    std::env::remove_var("GITEA_TOKEN");
+
+    // S-11: host classification routes auth — a GitLab repo never receives a GitHub
+    // Bearer even when GITHUB_TOKEN is set (auth_for_request_url / for_*_archive split).
+    std::env::set_var("GITHUB_TOKEN", "ghtok");
+    let (_, auth_gl) = archive_url(&gl, &GitPin::Branch("main".into()));
+    assert!(auth_gl.headers.is_empty() && auth_gl.basic.is_none());
+    std::env::remove_var("GITHUB_TOKEN");
+
+    // restore
+    for (k, v) in saved {
+        match v {
+            Some(val) => std::env::set_var(k, val),
+            None => std::env::remove_var(k),
+        }
+    }
+}
+
+// ───────────────────────────── S-14/S-16 · materialize_source (local) + sub-dir un-nest ─────────────────────────────
+// Oracle: kasetto src/source/mod.rs::tests::{local_materialize_does_not_set_cleanup_dir,
+// local_materialize_supports_sub_dir}. resolve_source_root (S-16) is `fn`-private in both;
+// it is observed through the PUBLIC materialize_source sub-dir arm (the only public seam).
+#[test]
+fn parity_materialize_source_local() {
+    let root = tmp("materialize-local");
+    let skill_dir = root.join("demo-skill");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(skill_dir.join("SKILL.md"), "# Demo\n\nDesc\n").unwrap();
+
+    let src = SourceSpec {
+        source: root.to_string_lossy().to_string(),
+        branch: None,
+        git_ref: None,
+        sub_dir: None,
+        skills: SkillsField::Wildcard("*".to_string()),
+    };
+    let stage = tmp("materialize-stage");
+    let m = materialize_source(&src, Path::new("/"), &stage).unwrap();
+    // local source: revision "local", no cleanup, in-place, skill discovered, root preserved.
+    assert_eq!(m.source_revision, "local");
+    assert!(m.cleanup_dir.is_none());
+    assert!(m.available.contains_key("demo-skill"));
+    assert!(root.exists());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&stage);
+
+    // sub-dir un-nest (S-16 resolve_source_root via the public seam).
+    let root = tmp("materialize-subdir");
+    let nested = root.join("plugins/swift-apple-expert");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("SKILL.md"), "# Nested\n\nDesc\n").unwrap();
+    let src = SourceSpec {
+        source: root.to_string_lossy().to_string(),
+        branch: None,
+        git_ref: None,
+        sub_dir: Some("plugins/swift-apple-expert".to_string()),
+        skills: SkillsField::Wildcard("*".to_string()),
+    };
+    let stage = tmp("materialize-stage2");
+    let m = materialize_source(&src, Path::new("/"), &stage).unwrap();
+    assert!(m.available.contains_key("swift-apple-expert"));
+    assert_eq!(m.available.get("swift-apple-expert").unwrap(), &nested);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&stage);
+}
+
+// ───────────────────────────── S-17 · discover / discover_with_root_name ─────────────────────────────
+// Oracle: kasetto src/source/mod.rs::tests::{discover_supports_root_level_skill_with_hint,
+// discover_uses_local_directory_name_for_root_level_skill, discover_finds_skills_in_skills_subdir}.
+#[test]
+fn parity_discover_skills() {
+    // root-level SKILL.md named by the hint.
+    let root = tmp("discover-root-hint");
+    fs::write(root.join("SKILL.md"), "# Root\n\nDesc\n").unwrap();
+    let available = discover_with_root_name(&root, Some("raycast-script-creator")).unwrap();
+    assert!(available.contains_key("raycast-script-creator"));
+    assert_eq!(available.get("raycast-script-creator").unwrap(), &root);
+    let _ = fs::remove_dir_all(&root);
+
+    // discover() names the root skill by the directory's own name.
+    let root = tmp("discover-root-local");
+    fs::write(root.join("SKILL.md"), "# Root\n\nDesc\n").unwrap();
+    let available = discover(&root).unwrap();
+    let root_name = root.file_name().unwrap().to_string_lossy().to_string();
+    assert!(available.contains_key(&root_name));
+    assert_eq!(available.get(&root_name).unwrap(), &root);
+    let _ = fs::remove_dir_all(&root);
+
+    // scans both `<root>/` and `<root>/skills/`; a dir with no SKILL.md is not a skill.
+    let root = tmp("discover-subdir");
+    let a = root.join("skills/alpha");
+    let b = root.join("beta");
+    fs::create_dir_all(&a).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    fs::write(a.join("SKILL.md"), "x").unwrap();
+    fs::write(b.join("SKILL.md"), "x").unwrap();
+    fs::create_dir_all(root.join("skills/not-a-skill")).unwrap();
+    let available = discover(&root).unwrap();
+    assert!(available.contains_key("alpha"));
+    assert!(available.contains_key("beta"));
+    assert!(!available.contains_key("not-a-skill"));
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ───────────────────────────── S-18 · discover_mcps ─────────────────────────────
+// Oracle: kasetto src/source/mod.rs::tests::discover_mcps_*.
+#[test]
+fn parity_discover_mcps() {
+    let mcp_json = r#"{"mcpServers":{"tool":{"command":"x"}}}"#;
+
+    // root .mcp.json
+    let root = tmp("mcps-dot");
+    fs::write(root.join(".mcp.json"), mcp_json).unwrap();
+    let mcps = discover_mcps(&root).unwrap();
+    assert_eq!(mcps.len(), 1);
+    assert!(mcps[0].ends_with(".mcp.json"));
+    let _ = fs::remove_dir_all(&root);
+
+    // root mcp.json
+    let root = tmp("mcps-plain");
+    fs::write(root.join("mcp.json"), mcp_json).unwrap();
+    let mcps = discover_mcps(&root).unwrap();
+    assert_eq!(mcps.len(), 1);
+    assert!(mcps[0].ends_with("mcp.json"));
+    let _ = fs::remove_dir_all(&root);
+
+    // root .mcp.json + mcps/extra.json → 2
+    let root = tmp("mcps-both");
+    fs::create_dir_all(root.join("mcps")).unwrap();
+    fs::write(
+        root.join(".mcp.json"),
+        r#"{"mcpServers":{"a":{"command":"x"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("mcps/extra.json"),
+        r#"{"mcpServers":{"b":{"command":"y"}}}"#,
+    )
+    .unwrap();
+    let mcps = discover_mcps(&root).unwrap();
+    assert_eq!(mcps.len(), 2);
+    let _ = fs::remove_dir_all(&root);
+
+    // nothing → empty
+    let root = tmp("mcps-empty");
+    assert!(discover_mcps(&root).unwrap().is_empty());
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ───────────────────────────── S-19 · resolve_mcp_entry ─────────────────────────────
+// Oracle: kasetto src/source/mod.rs::tests::resolve_mcp_entry_*.
+#[test]
+fn parity_resolve_mcp_entry() {
+    let payload = r#"{"mcpServers":{"s":{"command":"x"}}}"#;
+
+    // Name → mcps/<name>.json
+    let root = tmp("rme-name");
+    fs::create_dir_all(root.join("mcps")).unwrap();
+    fs::write(root.join("mcps/github.json"), payload).unwrap();
+    let path = resolve_mcp_entry(&root, &McpEntry::Name("github".into())).unwrap();
+    assert!(path.ends_with("mcps/github.json"));
+    let _ = fs::remove_dir_all(&root);
+
+    // auto-append .json, and explicit .json both resolve.
+    let root = tmp("rme-ext");
+    fs::create_dir_all(root.join("mcps")).unwrap();
+    fs::write(root.join("mcps/linear.json"), payload).unwrap();
+    assert!(resolve_mcp_entry(&root, &McpEntry::Name("linear".into()))
+        .unwrap()
+        .ends_with("linear.json"));
+    assert!(
+        resolve_mcp_entry(&root, &McpEntry::Name("linear.json".into()))
+            .unwrap()
+            .ends_with("linear.json")
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    // Obj{path} → <path>/<name>.json
+    let root = tmp("rme-obj");
+    fs::create_dir_all(root.join("tools")).unwrap();
+    fs::write(root.join("tools/my-server.json"), payload).unwrap();
+    let path = resolve_mcp_entry(
+        &root,
+        &McpEntry::Obj {
+            name: "my-server".into(),
+            path: Some("tools".into()),
+        },
+    )
+    .unwrap();
+    assert!(path.ends_with("tools/my-server.json"));
+    let _ = fs::remove_dir_all(&root);
+
+    // Obj{no path} → defaults to mcps/
+    let root = tmp("rme-obj-default");
+    fs::create_dir_all(root.join("mcps")).unwrap();
+    fs::write(root.join("mcps/server.json"), payload).unwrap();
+    let path = resolve_mcp_entry(
+        &root,
+        &McpEntry::Obj {
+            name: "server".into(),
+            path: None,
+        },
+    )
+    .unwrap();
+    assert!(path.ends_with("mcps/server.json"));
+    let _ = fs::remove_dir_all(&root);
+
+    // missing → err
+    let root = tmp("rme-missing");
+    assert!(resolve_mcp_entry(&root, &McpEntry::Name("nope".into())).is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ───────────────────────────── S-20/S-21 · discover_commands + resolve_command_entry ─────────────────────────────
+// Oracle: kasetto src/source/mod.rs::tests::{discover_commands_walks_nested_subdirs,
+// resolve_command_entry_name_uses_discovery, resolve_command_entry_obj_with_path}.
+#[test]
+fn parity_discover_and_resolve_commands() {
+    // walk commands/**/*.md, `:`-namespacing nested dirs; non-.md ignored.
+    let root = tmp("cmd-disc");
+    fs::create_dir_all(root.join("commands/git/work")).unwrap();
+    fs::write(root.join("commands/commit.md"), "---\n---\nbody\n").unwrap();
+    fs::write(root.join("commands/git/commit.md"), "x").unwrap();
+    fs::write(root.join("commands/git/work/status.md"), "x").unwrap();
+    fs::write(root.join("commands/not-md.txt"), "ignored").unwrap();
+    let map = discover_commands(&root).unwrap();
+    assert_eq!(map.len(), 3);
+    assert!(map.contains_key("commit"));
+    assert!(map.contains_key("git:commit"));
+    assert!(map.contains_key("git:work:status"));
+    let _ = fs::remove_dir_all(&root);
+
+    // Name → namespaced discovery lookup.
+    let root = tmp("cmd-resolve");
+    fs::create_dir_all(root.join("commands/git")).unwrap();
+    fs::write(root.join("commands/git/commit.md"), "x").unwrap();
+    let (name, path) =
+        resolve_command_entry(&root, &CommandEntry::Name("git:commit".to_string())).unwrap();
+    assert_eq!(name, "git:commit");
+    assert!(path.ends_with("commands/git/commit.md"));
+    let _ = fs::remove_dir_all(&root);
+
+    // Obj{path} → <path>/<name>.md, name strips `.md`.
+    let root = tmp("cmd-obj");
+    fs::create_dir_all(root.join("ops")).unwrap();
+    fs::write(root.join("ops/deploy.md"), "x").unwrap();
+    let (name, path) = resolve_command_entry(
+        &root,
+        &CommandEntry::Obj {
+            name: "deploy".to_string(),
+            path: Some("ops".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(name, "deploy");
+    assert!(path.ends_with("ops/deploy.md"));
+    let _ = fs::remove_dir_all(&root);
+
+    // missing → err.
+    let root = tmp("cmd-missing");
+    assert!(resolve_command_entry(&root, &CommandEntry::Name("nope".to_string())).is_err());
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ───────────────────────────── XC-04 · now_unix / now_unix_str ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::tests::{now_unix_is_after_2020, now_unix_str_matches_now_unix}.
+#[test]
+fn parity_now_unix() {
+    // 2020-01-01T00:00:00Z — guards against a zeroed/saturated clock regression.
+    assert!(now_unix() > 1_577_836_800);
+    let s = now_unix_str();
+    let parsed: u64 = s.parse().expect("decimal");
+    // The two calls straddle at most one second.
+    assert!(now_unix() - parsed <= 1);
 }
