@@ -22,7 +22,10 @@
 //! `--locked` zero-network), and `#![forbid(unsafe_code)]` (set via `[lints]`).
 
 pub mod agent;
+pub mod command;
 pub mod config;
+pub mod config_edit;
+pub mod dirs;
 pub mod extend;
 pub mod fsops;
 pub mod hash;
@@ -30,18 +33,32 @@ pub mod lock;
 pub mod mcp;
 pub mod report;
 pub mod source;
+pub mod util;
 
 pub use agent::{
     all_command_global_targets, all_command_project_targets, all_mcp_project_targets,
     all_mcp_settings_targets, command_global_targets, command_project_targets, CommandFormat,
     CommandTarget, McpSettingsFormat, McpSettingsTarget,
 };
+pub use command::{apply_command, destination_path, ensure_parent_dirs, parse, render, Parsed};
 pub use config::{
     git_pin_of, Agent, AgentField, CommandEntry, CommandSourceSpec, CommandsField, Config, GitPin,
     McpEntry, McpSourceSpec, McpsField, Scope, SkillTarget, SkillsField, SourceSpec, AGENT_PRESETS,
 };
+pub use config_edit::{
+    ensure_local_config, insert_item, is_remote_source, item_exists, remove_item, remove_names,
+    split_at_ref, Pin, RemoveOutcome, Section, Selector, SourceItem,
+};
+pub use dirs::{
+    dirs_agent_env_cache, dirs_agent_env_config, dirs_agent_env_data, dirs_home,
+    dirs_xdg_cache_home, dirs_xdg_config_home, dirs_xdg_data_home,
+};
 pub use extend::{extract_extends, load_config_recursive, merge_yaml, MAX_EXTENDS_DEPTH};
-pub use fsops::SettingsFile;
+pub use fsops::{
+    copy_dir, copy_dir_contents, copy_file, relativize_dest, resolve_command_targets, resolve_dest,
+    resolve_destinations, resolve_mcp_settings_targets, resolve_path, scope_root, select_targets,
+    BrokenSkill, SettingsFile, TargetSelection,
+};
 pub use hash::{hash_dir, hash_file, hash_str};
 pub use lock::{
     AgentLockEntry, AgentLockFile, AssetEntry, LockMode, AGENT_ASSETS_KEY, LOCK_VERSION,
@@ -54,6 +71,7 @@ pub use source::{
     archive_url, derive_browse_url, download_extract, parse_repo_url, rewrite_browse_to_raw_url,
     BrowseDerived, RepoUrl, UrlRequestAuth,
 };
+pub use util::{now_unix, now_unix_str};
 
 /// Result alias for the agent-env crate.
 pub type Result<T> = std::result::Result<T, AgentEnvError>;
@@ -76,10 +94,8 @@ pub enum AgentEnvError {
     #[error("yaml error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 
-    /// A JSON (de)serialization failure for agent settings files.
-    ///
-    /// Mirrors kasetto's box-error auto-conversion of `serde_json::Error` via `?`
-    /// (e.g. `SettingsFile::save`'s `serde_json::to_string_pretty`).
+    /// A JSON (de)serialization failure for agent settings files (the `SettingsFile`
+    /// save/merge path; mirrors kasetto's `?`-propagated `serde_json::Error`).
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 }
