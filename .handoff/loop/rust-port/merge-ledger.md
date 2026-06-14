@@ -129,20 +129,20 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 
 ## src/commands/* (business logic → Engine methods; clap glue = front-end)
 
-- [ ] C-01 · port-fresh · Engine::agent_sync · merge-into engine (new Engine method, drives agent-env) · -> envctl_engine::Engine::agent_sync · refs: research#engine-grain (verbs are agent-asset, parallel to component verbs) · status: not merged
-- [ ] C-02 · port-fresh · agent-sync skills phase · merge-into engine (agent_sync internals) · -> envctl_engine (sync_skills) · refs: · status: not merged
-- [ ] C-03 · port-fresh · agent-sync commands phase · merge-into engine (agent_sync internals; needs PR-01) · -> envctl_engine (sync_commands) · refs: research#left-behind PR-01 (dep) · status: not merged
-- [ ] C-04 · port-fresh · agent-sync mcps phase · merge-into engine (agent_sync internals; needs MC-01) · -> envctl_engine (sync_mcps) · refs: research#left-behind MC-01 (dep) · status: not merged
+- [~] C-01 · port-fresh · Engine::agent_sync · merge-into engine (new Engine method, drives agent-env) · -> envctl_engine::Engine::agent_sync · refs: research#engine-grain (verbs are agent-asset, parallel to component verbs) · status: not merged
+- [~] C-02 · port-fresh · agent-sync skills phase · merge-into engine (agent_sync internals) · -> envctl_engine (sync_skills) · refs: · status: not merged
+- [~] C-03 · port-fresh · agent-sync commands phase · merge-into engine (agent_sync internals; needs PR-01) · -> envctl_engine (sync_commands) · refs: research#left-behind PR-01 (dep) · status: not merged
+- [~] C-04 · port-fresh · agent-sync mcps phase · merge-into engine (agent_sync internals; needs MC-01) · -> envctl_engine (sync_mcps) · refs: research#left-behind MC-01 (dep) · status: not merged
 - [~] C-05 · port-fresh · agent-env::sync::remove_stale (shared) · new agent-env::sync · -> envctl_agent_env::sync::remove_stale · refs: · status: not merged
 - [~] C-06 · port-fresh · agent-env::sync (key conventions) · new agent-env::sync · -> envctl_agent_env::sync (skill_key/asset-id conventions) · refs: · status: not merged
-- [ ] C-07 · port-fresh · Engine::agent_add · merge-into engine (new Engine method) · -> envctl_engine::Engine::agent_add · refs: · status: not merged
-- [ ] C-08 · port-fresh · Engine::agent_remove · merge-into engine (new Engine method, alias rm) · -> envctl_engine::Engine::agent_remove · refs: · status: not merged
-- [ ] C-09 · port-fresh · Engine::agent_lock (+--check/--upgrade-package) · merge-into engine (new Engine method; NOT the component `lock --check`) · -> envctl_engine::Engine::agent_lock · refs: research#engine-grain (distinct from cli Cmd::Lock@main.rs:269) · status: not merged
-- [ ] C-10 · port-fresh · Engine::agent_list · merge-into engine (new Engine method) · -> envctl_engine::Engine::agent_list · refs: · status: not merged
-- [ ] C-11 · port-fresh · Engine::agent_clean · merge-into engine (new Engine method; needs MC-02 remove) · -> envctl_engine::Engine::agent_clean · refs: research#left-behind MC-02 (dep) · status: not merged
-- [ ] C-12 · port-fresh · agent-env::config_edit::{resolve_local_config_path,split_at_ref}+sync_after · new agent-env::config_edit + engine · -> envctl_agent_env::config_edit::* + Engine sync_after · refs: · status: not merged
-- [ ] C-13 · port-fresh · Engine::agent_init_template · merge-into engine (folded into add/sync) · -> envctl_engine::Engine (init template) · refs: · status: not merged
-- [ ] C-14 · port-fresh · Engine::agent_clean (asset portion only) · merge-into engine (binary-self-removal is front-end) · -> envctl_engine::Engine::agent_clean (asset cleanup) · refs: · status: not merged
+- [~] C-07 · port-fresh · Engine::agent_add · merge-into engine (new Engine method) · -> envctl_engine::Engine::agent_add · refs: · status: not merged
+- [~] C-08 · port-fresh · Engine::agent_remove · merge-into engine (new Engine method, alias rm) · -> envctl_engine::Engine::agent_remove · refs: · status: not merged
+- [~] C-09 · port-fresh · Engine::agent_lock (+--check/--upgrade-package) · merge-into engine (new Engine method; NOT the component `lock --check`) · -> envctl_engine::Engine::agent_lock · refs: research#engine-grain (distinct from cli Cmd::Lock@main.rs:269) · status: not merged
+- [~] C-10 · port-fresh · Engine::agent_list · merge-into engine (new Engine method) · -> envctl_engine::Engine::agent_list · refs: · status: not merged
+- [~] C-11 · port-fresh · Engine::agent_clean · merge-into engine (new Engine method; needs MC-02 remove) · -> envctl_engine::Engine::agent_clean · refs: research#left-behind MC-02 (dep) · status: not merged
+- [~] C-12 · port-fresh · agent-env::config_edit::{resolve_local_config_path,split_at_ref}+sync_after · new agent-env::config_edit + engine · -> envctl_agent_env::config_edit::* + Engine sync_after · refs: · status: not merged
+- [~] C-13 · port-fresh · Engine::agent_init_template · merge-into engine (folded into add/sync) · -> envctl_engine::Engine (init template) · refs: · status: not merged
+- [~] C-14 · port-fresh · Engine::agent_clean (asset portion only) · merge-into engine (binary-self-removal is front-end) · -> envctl_engine::Engine::agent_clean (asset cleanup) · refs: · status: not merged
 
 ## LEFT-BEHIND — discovered by the sweep (referenced as deps, never rowed)
 
