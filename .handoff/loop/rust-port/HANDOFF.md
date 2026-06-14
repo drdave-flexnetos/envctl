@@ -1,12 +1,36 @@
 # HANDOFF — rust-port-merge (kasetto → envctl, Epic C absorption)
-closed_utc: 2026-06-14T02:45:17Z   branch: develop   worktree: /home/drdave/Desktop/meta/.worktrees/<fresh>/envctl (create off origin/develop)
-cycle_budget: 3   cycles_total: 9   cycles_this_session: many (library + engine wiring landed)
-last_item: TASK-0013 (engine wiring)   next_item: parity-verifier pass ([~]→[x]) THEN TASK-0014 (CLI/GUI front-end)
-orchestrator_phase: DONE-through-engine (merge-ledger 0 [ ] remaining)   last_agent: invariant-guardian (PASS)
-gate_status: PASS (498 workspace tests; no-c/shape/enable green)   pr_url: #78 (MERGED)
+closed_utc: 2026-06-14 (parity session, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
+cycle_budget: 3   cycles_total: 10   cycles_this_session: 3 (parity-verifier pass — RESET to 0 on resume)
+last_item: PARITY cluster fsops+config_edit (+14 [x])   next_item: PARITY cluster C-* command business logic, THEN one Engine::agent_sync integration cycle (closes the 6 [~] residue), THEN TASK-0014 (CLI/GUI front-end, the 13 [≠])
+orchestrator_phase: PARITY-VERIFIER PASS (merge 0 [ ] to-merge; parity 74 [x] / 6 [~] / 22 [ ] / 13 [≠] = DONE-equiv 87/115)
+gate_status: PASS every cycle (agent-env 304 tests; no-c/fmt green)
 
-**Resume with:** `/harness:rust-port-merge` (or `/feature-forge` for TASK-0014). State lives in
-`.handoff/loop/rust-port/` (namespaced — NOT the flat `.handoff/loop/`, the forge-loop's).
+## THIS SESSION (2026-06-14, parity-verifier pass — 3 cycles, all PASS)
+- **Cycle 1 — source-resolver** (+11 [x]: S-09/10/11/14/16/17/18/19/20/21,XC-04). **PR #80 MERGED** to develop (3228971).
+- **Cycle 2 — model + 21-preset table + config-loader + SHA-256 lock** (+27 [x]: M-01/03/04/06/07/09-14/17/19/20/21/23-26, CFG-01/02, L-01-06). **PR #81** (auto-merge armed; stacked-then-rebased onto develop after #80).
+- **Cycle 3 — fsops + config_edit** (+14 [x]: F-03..F-10, FE-01..06; 0 BLOCKED). **PR #82** STACKED on #81.
+- parity 33→74 [x]. New parity vectors: suite 12→75 fns. NEVER stubbed; residue recorded honestly.
+
+## ⚠️ PR-STACK — land in order, rebase each onto the prior
+#80 MERGED. **#81 → #82 are a stack.** When #81 squash-merges to develop, rebase #82:
+```
+cd <cycle-3 worktree> && git fetch origin
+git rebase --onto origin/develop <#81-tip-sha> task-0012-parity-pass-3   # drop the merged cycle-2 commit
+git push --force-with-lease && gh pr merge 82 --auto --squash
+```
+(Same pattern already used to land #81 onto #80 — see commit history. The conflict is only the
+shared loop_state.md / parity-ledger.md section lines; the test-file appends are non-overlapping.)
+
+## 6 [~] residue (NOT faked — close together in ONE Engine integration cycle)
+S-07 (tar-slip guard), S-12 (auth_env_inline_help), S-13 (http_fetch_auth_hint), S-15 (main→master
+retry), CFG-03 (remote http arm), + M-24 `State`/L-03 `list_installed_*` design-folds. All are
+`pub(crate)`/network-only/engine-folded — unreachable via the offline cross-crate public API. Close by
+exercising `Engine::agent_sync` end-to-end (it drives materialize→download→merge→lock) in a
+`crates/engine/tests/` integration test, OR add a `pub` test seam. Do NOT fake a passing vector.
+
+**Resume with:** `/forge-loop resume the /rust-port-merge` (or `/harness:rust-port-merge`). State lives in
+`.handoff/loop/rust-port/` (namespaced — NOT the flat `.handoff/loop/`, the forge-loop's). On resume:
+first land the #81→#82 stack, then RESET cycles_this_session to 0 and pick the next cluster (C-*).
 
 ## Where it stands (all on origin/develop)
 The kasetto absorption is **structurally COMPLETE through the Engine**. `crates/agent-env` = 18-module
