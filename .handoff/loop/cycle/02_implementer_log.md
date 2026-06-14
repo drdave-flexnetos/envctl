@@ -151,3 +151,33 @@ broker/repowire/weave regression fixture, 5 command-format transforms, the full 
 **Gate results (raw via `rtk proxy`):** build=0 · test=78 lib + 1 integ + 0 doc, all pass · clippy -D warnings=0 · fmt --check=0 · no-c=PASS.
 
 **Verbatim-name note:** kasetto's `continue` preset writes its own merge-marker file `.continue/mcpServers/kasetto.json` (both global M-13 and project M-14). This is kasetto's SELF-named drop file inside the agent-native `.continue/mcpServers/` dir, not an agent-native path. Per the naming note it is kept **verbatim** (byte-for-byte parity for the differential verifier); the product-identity rename is TASK-0013 Engine-wiring's job. All agent-native paths (`.claude/skills`, `.codex/config.toml`, the VS Code user `mcp.json`, etc.) are unchanged. The `kasetto_config` arg on `mcp_settings_target`/`all_mcp_settings_targets` is threaded through verbatim (kasetto reserves it; unused by every preset today).
+
+## rust-port-merge cycle: MCP additive merge (MC-01/MC-02)
+
+**Source ported (VERBATIM, no-downgrade):** kasetto v3.2.0 `src/mcps/{mod,merge,codex,pack}.rs` (395+109+159+19 lines) + `src/fsops/settings.rs` (ledger F-04).
+
+**Files added:**
+- `crates/agent-env/src/mcp.rs` (NEW) — the whole MCP additive-merge engine collapsed into one module (kasetto's 4 split files → 1 module: top-level dispatch + pack reader + JSON merges + CodexToml). Re-exported from `lib.rs`: `merge_mcp_config`, `remove_mcp_server`, `servers_present_in_settings`, `read_source_mcp_servers`.
+- `crates/agent-env/src/fsops.rs` (NEW) — `SettingsFile` load→mutate→save wrapper (F-04), re-exported.
+
+**Files changed:**
+- `crates/agent-env/src/lib.rs` — added `pub mod fsops;` + `pub mod mcp;`, the re-exports, and a new `AgentEnvError::Json(#[from] serde_json::Error)` variant (mirrors kasetto's box-error `?` auto-conversion of `serde_json::to_string_pretty` in `SettingsFile::save`). `err(...)` → `AgentEnvError::Message` as the existing modules do.
+
+**All 4 formats ported (every branch, no stub):**
+1. **McpServers** JSON `{ "mcpServers": {...} }` — identity transform.
+2. **VsCodeServers** `{ "servers": {...} }` — `normalize_vscode_server` (adds `type: stdio` for command / `http` for url).
+3. **OpenCode** `{ "mcp": {...} }` — `mcp_entry_to_opencode` (remote url→`type:remote`+headers; else `type:local`+command-array+environment; both error branches).
+4. **CodexToml** `[mcp_servers.name]` — `merge_codex_config_toml` + `json_mcp_server_to_codex_toml_table` (remote `url`/`serverUrl`/`http`/`https`/`sse`/`streamable-http` → `url`+`http_headers`; else `command`+`args`+`env`; non-string env via Display). Plus `remove_server` + `servers_present` for the Codex path.
+
+**Never-clobber (no-downgrade) tests added** (the #1 risk — global `broker`/`repowire`/`weave` must survive):
+- `merge_preserves_broker_repowire_weave_and_adds_new` (McpServers): all 3 mesh servers keep real values, pack's placeholder broker token is NOT applied, `new-tool` added.
+- `merge_codex_never_clobbers_existing_mesh_servers` (CodexToml).
+- `merge_vscode_never_clobbers_existing_servers` (VsCodeServers).
+- `merge_opencode_never_clobbers_existing_servers` (OpenCode).
+Plus the 14 kasetto `mod.rs` parity tests ported verbatim (adapted paths/types), extra remote-codex/remote-opencode/pack-reader coverage, and 4 `SettingsFile` tests.
+
+**Test-count delta:** 78 → **104** lib unit tests (+26), all passing (+ 1 integration `no_downgrade` test still green).
+
+**Gate results (raw via `rtk proxy`):** build=0 · test=104 lib + 1 integ, all pass · clippy -D warnings=0 · fmt --check=0 · no-c=PASS.
+
+**Notes:** No format/branch stubbed or dropped. `SettingsFile` made `pub` (re-exported) since `mcp.rs` consumes it across the module boundary; kasetto had it `pub(crate)` in a sibling. The additive `if !dst_map.contains_key(&key)` / Codex `if mcp_tbl.contains_key(&name) { continue; }` guards are the never-clobber mechanism — ported exactly.
