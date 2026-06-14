@@ -1,18 +1,40 @@
-# HANDOFF — rust-port-merge (kasetto → envctl, Epic C absorption)
-closed_utc: 2026-06-14 (parity SESSION-3, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
-cycle_budget: 3   cycles_total: 16   cycles_this_session: 3 (RESET to 0 on resume)
-last_item: FINAL parity cluster (+3 [x]: XC-01/XC-02/CFG-03)   next_item: **NOT MORE PARITY** — TASK-0014 (the 13 [≠] front-end CLI/GUI verbs, thin adapters over the verified engine — route via feature-forge). Optional: close S-15 via an HTTPS test endpoint / fetch-DI seam.
-orchestrator_phase: PARITY-VERIFIER PASS **COMPLETE AT OFFLINE CEILING** (parity 101 [x] / 1 [~] / 0 [ ] / 13 [≠] = DONE-equiv 114/115; only S-15 live-network unverified)
-gate_status: PASS every cycle (agent-env 330 + engine 96 tests; clippy -D warnings / no-c / fmt green)
+# HANDOFF — rust-port-merge + TASK-0014 (kasetto → envctl, Epic C)
+closed_utc: 2026-06-14 (session-relay-wrap-up)   branch: develop (08d7086)   worktree: create FRESH off origin/develop
+cycle_budget: 3   cycles_total: 17   cycles_this_session: parity all merged + TASK-0014 CLI merged
+last_item: TASK-0014 agent CLI (merged #90) + /verify human-render fix (#91 armed)
+next_item: **TASK-0014b** — GUI agent panel in `crates/gui/src/main.rs` (egui), thin adapter over the SAME `Engine::agent_*` methods (route via feature-forge). Then optional: close **S-15** (fetch-DI seam / HTTPS endpoint) + the 4 pre-existing `--all-targets`-only lints in `crates/engine/tests/agent_sync_parity.rs`.
+orchestrator_phase: Epic C COMPLETE THROUGH THE CLI (parity 101 [x] / 1 [~] / 13 [≠]; CLI front-end shipped; GUI = TASK-0014b)
+last_agent: invariant-guardian (TASK-0014 PASS-WITH-NOTES) + /verify fix
+gate_status: PASS (agent-env 330 + engine 96 + cli 20 tests; clippy --workspace -D warnings / no-c / shape / enable / fmt green)   pr_url: #89 parity MERGED, #90 CLI MERGED, #91 verify-fix armed
 
-## ⭐ STATUS: the kasetto→envctl ABSORPTION + PARITY is COMPLETE through the engine.
-101/102 testable rows are differentially parity-verified `[x]` against kasetto v3.2.0; the 13 `[≠]` are
-front-end (envctl owns rendering, semantics already `[x]` via the C-* engine tests). The ONLY unverified
-row is **S-15** (`materialize_source` live main→master HTTP retry) — its CODE matches kasetto
-`src/source/mod.rs:93-100` line-for-line, but the archive URLs are HTTPS-hardcoded with no fetch DI seam, so
-a std-only `TcpListener` mock can't reach it offline (honest residue, recorded — never faked). Close it with
-a real HTTPS test endpoint or a fetch-injection seam if/when desired. **The next real work is TASK-0014
-(front-end), which is a feature-forge job, NOT another parity cycle in this loop.**
+landed_this_session:
+  - #89  parity-verifier pass consolidated (verbs + C-12-FIX + residue close) — 101 [x], MERGED
+  - #90  cli: envctl agent {sync,add,remove,lock,list,clean} command group — MERGED
+  - #91  cli: render agent return in human mode (/verify fix: list/remove showed header only) — armed
+decisions_and_dead_ends:
+  - Deep PR stacking under fast auto-merge is fragile → CONSOLIDATE >2-3 deep (cherry-pick net-new
+    commits onto fresh develop, one PR). Did this for #85-#88 → #89. (ICM decisions-forge-loop.)
+  - `--json`-only tests pass the guardian but miss the human surface for return-value verbs (the list
+    bug /verify caught). A verb whose data is in the RETURN (not events) needs explicit human rendering
+    — now `AgentResult::render_human()` + 2 regression tests.
+  - S-15 is honest live-network residue (HTTPS-hardcoded, no fetch DI seam) — do NOT fake; close with a
+    seam. Found+fixed one real downgrade (C-12 engine remote-config rejection) en route.
+  - GUI deliberately split to TASK-0014b — engine parity guarantees zero engine churn for it.
+icm_stored: decisions-forge-loop, context-envctl, errors-resolved, decisions-envctl (recall on resume)
+verify_on_resume: |
+  git -C <fresh worktree off origin/develop> rev-parse --short origin/develop   # expect 08d7086+ (or #91-merge)
+  cargo build -p envctl-engine -p envctl && cargo test -p envctl                 # cli 20 pass
+  bash ci/gates/no-c.sh && bash ci/gates/shape.sh && bash ci/gates/enable.sh     # PASS
+  target/debug/envctl agent --help                                              # 6 verbs
+resume_command: /forge-loop TASK-0014b   (GUI) — or /session-relay-resume from .handoff/loop/rust-port/HANDOFF.md
+
+## ⭐ STATUS: the kasetto→envctl ABSORPTION + PARITY is COMPLETE through the engine AND the CLI.
+TASK-0014 shipped the `envctl agent {sync,add,remove,lock,list,clean}` CLI (thin adapter over the
+verified engine; #90) + the human-render fix (#91). Remaining front-end work = **TASK-0014b** (GUI panel).
+The 13 `[≠]` rows are front-end (envctl owns rendering; verb semantics already `[x]` via the C-* engine
+tests). The ONLY unverified parity row is **S-15** (`materialize_source` live main→master HTTP retry) —
+CODE matches kasetto `src/source/mod.rs:93-100` line-for-line, but archive URLs are HTTPS-hardcoded with no
+fetch DI seam, so a std-only `TcpListener` mock can't reach it offline (honest residue — never faked).
 
 ## SESSION-2 (2026-06-14 successor, parity-verifier pass — 3 cycles, all PASS)
 First landed session-1's stack (#80/#81/#82 all MERGED). Then:
