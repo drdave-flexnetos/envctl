@@ -204,14 +204,15 @@ fn c12_split_at_ref_trailing_at_ignored() {
 }
 
 /// Contract: ledger C-12 `resolve_local_config_path` ERR-on-remote arm. kasetto's
-/// `resolve_local_config_path` rejects any `scheme://` config (remote configs cannot be edited
-/// in place); envctl factors that guard into `agent_env::config_edit::ensure_local_config`. The
-/// engine's `agent_add`/`agent_remove` use a path-only `resolve_local_config_path` and do NOT
-/// re-invoke this guard, so the remote-config rejection is verified at the library seam (where
-/// the kasetto behavior actually lives), not through the Engine verb. See `## Deviations`.
+/// `resolve_local_config_path` rejects any `scheme://` config (remote configs cannot be edited in
+/// place). envctl's engine `resolve_local_config_path` now routes the config string through
+/// `agent_env::config_edit::ensure_local_config` (C-12-FIX, `edit.rs`) before building the path,
+/// so the rejection is enforced AT THE ENGINE VERB — `agent_add`/`agent_remove` both refuse a
+/// remote `--config`, parity with kasetto (no longer a downgrade). Verified both at the library
+/// seam and end-to-end through the verbs.
 #[test]
-fn c12_ensure_local_config_rejects_remote_accepts_local() {
-    // Oracle parity: the local path passes through unchanged...
+fn c12_engine_verbs_reject_remote_config_accept_local() {
+    // Library seam: the local path passes through unchanged...
     assert_eq!(
         ensure_local_config("./agent-env.yaml").unwrap(),
         "./agent-env.yaml"
@@ -221,6 +222,28 @@ fn c12_ensure_local_config_rejects_remote_accepts_local() {
     assert!(
         err.to_string().contains("cannot edit remote config"),
         "remote config edit must be refused: {err}"
+    );
+
+    // C-12-FIX — the Engine VERBS now enforce it too (fail-closed, before any FS touch).
+    let (engine, _proj, _cfg) = project("scope: project\nagent: claude-code\n");
+    let remote = "https://example.com/agent-env.yaml";
+
+    let (s, _rx) = sink();
+    let add_err = engine
+        .agent_add(add_spec("github.com/o/r", remote), &s)
+        .expect_err("agent_add must reject a remote --config");
+    assert!(
+        add_err.to_string().contains("cannot edit remote config"),
+        "agent_add remote-config rejection: {add_err}"
+    );
+
+    let (s2, _rx2) = sink();
+    let rm_err = engine
+        .agent_remove(remove_spec("github.com/o/r", remote), &s2)
+        .expect_err("agent_remove must reject a remote --config");
+    assert!(
+        rm_err.to_string().contains("cannot edit remote config"),
+        "agent_remove remote-config rejection: {rm_err}"
     );
 }
 

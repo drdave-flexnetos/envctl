@@ -13,11 +13,21 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 3   # SESSION-2 BUDGET 3/3 REACHED → HAND OFF. cycle1=leaves, cycle2=C-* sync engine, cycle3=C-* verbs
-cycles_total: 13
-parity: 93 [x] verified · 7 [~] residue/gap · 2 [ ] pending (M-22,S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 106/115)
-ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass + 1 no-downgrade fix)
-last_item: PARITY cluster C-* VERBS — +7 [x] (C-07/08/09/10/11/13/14) via crates/engine/tests/agent_command_parity.rs (+22 tests, engine 74→96); C-12 [~] (remote-config-reject GAP = C-12-FIX, a real no-downgrade engine fix)
+cycles_this_session: 1   # SESSION-3 (successor) RESUME: counter reset to 0; cycle1 = C-12-FIX (no-downgrade engine fix)
+cycles_total: 14
+parity: 94 [x] verified · 6 [~] residue/network · 2 [ ] pending (M-22,S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 107/115)
+ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity residue + TASK-0014 front-end)
+last_item: C-12-FIX (no-downgrade engine fix) — resolve_local_config_path now Result + rejects remote scheme:// via ensure_local_config; agent_add/remove both refuse remote --config; C-12 [~]→[x]. engine 96 tests, clippy/no-c/shape green
+session3_note: SESSION-3 successor 2026-06-14. Landed session-2 stack (#83 merged; #84/#85 rebased onto
+  fresh develop c083d0f, armed). Cycle 1 = C-12-FIX (the no-downgrade finding from session-2): engine
+  src change crates/engine/src/agent/edit.rs (resolve_local_config_path → anyhow::Result, route through
+  agent_env::config_edit::ensure_local_config; call sites :53,:151 propagate ?) + engine-verb rejection
+  test. C-12 → [x]. PR pending (STACKED on cycle-6 branch). REMAINING (8 rows, all network/engine-fallback):
+  2 [ ] M-22 (resolve_scope file-read fallback — engine path, NON-network, closeable next) + S-15
+  (main→master retry, network); 6 [~] S-07/S-12/S-13/CFG-03 (pub(crate)/network) + ... NEXT cycles:
+  (2) M-22 engine fallback test (non-network, easy [x]); (3) S-07/S-12/S-13 pub test seams + S-15/CFG-03
+  either mock-HTTP-server tests or accept as permanent network-residue (logic source-verified + in-crate
+  ignore'd tests). THEN TASK-0014 = 13 [≠] front-end CLI/GUI verbs (thin adapters over verified engine).
 session2_summary: SESSION-2 successor 2026-06-14, budget 3/3. Landed session-1 stack (#80-#82 merged).
   Cycle1 leaves +6 [x] (PR #83). Cycle2 C-* sync engine +6 [x] (PR #84). Cycle3 C-* verbs +7 [x] (PR #85
   pending). parity 80→93 [x] (DONE-equiv 106/115). Engine integration tests: agent_sync_parity.rs (15) +
