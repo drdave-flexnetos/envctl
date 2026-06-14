@@ -68,8 +68,10 @@ pub use mcp::{
 };
 pub use report::{Action, InstalledSkill, Report, Summary, SyncFailure};
 pub use source::{
-    archive_url, derive_browse_url, download_extract, parse_repo_url, rewrite_browse_to_raw_url,
-    BrowseDerived, RepoUrl, UrlRequestAuth,
+    archive_url, derive_browse_url, discover, discover_commands, discover_mcps,
+    discover_with_root_name, download_extract, materialize_source, parse_repo_url,
+    resolve_command_entry, resolve_mcp_entry, rewrite_browse_to_raw_url, BrowseDerived,
+    MaterializedSource, RepoUrl, UrlRequestAuth,
 };
 pub use util::{now_unix, now_unix_str};
 
