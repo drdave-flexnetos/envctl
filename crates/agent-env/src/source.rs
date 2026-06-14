@@ -1378,6 +1378,114 @@ mod tests {
         let _ = fs::remove_dir_all(&dst);
     }
 
+    // --- auth env inline help + http-fetch auth hint (S-12 / S-13) ---
+    //
+    // `auth_env_inline_help`/`http_fetch_auth_hint` are `pub(crate)`, so they cannot be
+    // reached from the cross-crate `tests/parity_vs_kasetto.rs` harness. These in-crate tests
+    // mirror kasetto's OWN certified vectors in `src/source/auth.rs::tests`.
+
+    // S-13 — Oracle: kasetto src/source/auth.rs::tests::http_fetch_auth_hint_mentions_github_token_for_github_host
+    #[test]
+    fn http_fetch_auth_hint_mentions_github_token_for_github_host() {
+        let h = http_fetch_auth_hint("https://github.com/org/private", 403);
+        assert!(h.contains("GITHUB_TOKEN") || h.contains("GH_TOKEN"), "{h}");
+    }
+
+    // S-13 — Oracle: kasetto src/source/auth.rs::tests::http_fetch_auth_hint_mentions_gitlab_token_for_gitlab_host
+    #[test]
+    fn http_fetch_auth_hint_mentions_gitlab_token_for_gitlab_host() {
+        let h = http_fetch_auth_hint("https://gitlab.com/group/proj", 401);
+        assert!(h.contains("GITLAB_TOKEN"), "{h}");
+    }
+
+    // S-13 — Oracle: kasetto src/source/auth.rs::tests::http_fetch_auth_hint_mentions_bitbucket_env_for_bitbucket_host
+    #[test]
+    fn http_fetch_auth_hint_mentions_bitbucket_env_for_bitbucket_host() {
+        let h = http_fetch_auth_hint("https://bitbucket.org/ws/r", 403);
+        assert!(
+            h.contains("BITBUCKET_EMAIL") || h.contains("BITBUCKET_USERNAME"),
+            "{h}"
+        );
+    }
+
+    // S-13 — Oracle: kasetto src/source/auth.rs::tests::http_fetch_auth_hint_mentions_gitea_token_for_codeberg_host
+    #[test]
+    fn http_fetch_auth_hint_mentions_gitea_token_for_codeberg_host() {
+        let h = http_fetch_auth_hint("https://codeberg.org/u/r", 401);
+        assert!(
+            h.contains("CODEBERG_TOKEN")
+                || h.contains("GITEA_TOKEN")
+                || h.contains("FORGEJO_TOKEN"),
+            "{h}"
+        );
+    }
+
+    // S-13 — the else-empty arm: any non-auth status yields no hint. (kasetto auth.rs:75-83
+    // `_ => String::new()`; the oracle exercises this implicitly via the 401/403/404 arms —
+    // assert the empty arm directly so the full match is covered.)
+    #[test]
+    fn http_fetch_auth_hint_is_empty_for_non_auth_status() {
+        assert_eq!(http_fetch_auth_hint("https://github.com/org/r", 200), "");
+        assert_eq!(http_fetch_auth_hint("https://github.com/org/r", 500), "");
+    }
+
+    // S-13 — the 404 arm prepends the "if the repo or file is private" framing before the help.
+    // (kasetto auth.rs:78-82.)
+    #[test]
+    fn http_fetch_auth_hint_404_mentions_private_and_help() {
+        let h = http_fetch_auth_hint("https://github.com/org/r", 404);
+        assert!(h.contains("private"), "{h}");
+        assert!(h.contains("GITHUB_TOKEN") || h.contains("GH_TOKEN"), "{h}");
+    }
+
+    // S-12 — per-host-family inline-help vectors. Oracle: the host-family routing asserted by
+    // kasetto's `http_fetch_auth_hint_mentions_*` tests (auth.rs:155-184), which delegate to
+    // `auth_env_inline_help`; here we assert the help string directly per family.
+    #[test]
+    fn auth_env_inline_help_github_mentions_github_token() {
+        let h = auth_env_inline_help("https://github.com/org/private");
+        assert!(h.contains("GITHUB_TOKEN") || h.contains("GH_TOKEN"), "{h}");
+    }
+
+    #[test]
+    fn auth_env_inline_help_gitlab_mentions_gitlab_token() {
+        let h = auth_env_inline_help("https://gitlab.com/group/proj");
+        assert!(h.contains("GITLAB_TOKEN"), "{h}");
+    }
+
+    #[test]
+    fn auth_env_inline_help_bitbucket_mentions_bitbucket_env() {
+        let h = auth_env_inline_help("https://bitbucket.org/ws/r");
+        assert!(
+            h.contains("BITBUCKET_EMAIL") || h.contains("BITBUCKET_USERNAME"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn auth_env_inline_help_gitea_mentions_gitea_token() {
+        let h = auth_env_inline_help("https://codeberg.org/u/r");
+        assert!(
+            h.contains("CODEBERG_TOKEN")
+                || h.contains("GITEA_TOKEN")
+                || h.contains("FORGEJO_TOKEN"),
+            "{h}"
+        );
+    }
+
+    // S-12 — the host-less (unparseable URL) arm lists every provider's env var.
+    // (kasetto auth.rs:55-71 `None =>` arm.)
+    #[test]
+    fn auth_env_inline_help_no_host_lists_all_providers() {
+        let h = auth_env_inline_help("not-a-url");
+        assert!(h.contains("GITHUB_TOKEN"), "{h}");
+        assert!(h.contains("GITLAB_TOKEN"), "{h}");
+        assert!(
+            h.contains("CODEBERG_TOKEN") || h.contains("GITEA_TOKEN"),
+            "{h}"
+        );
+    }
+
     // --- materialize_source (local, offline) ---
 
     #[test]
@@ -1767,5 +1875,43 @@ mod tests {
         let entry = CommandEntry::Name("nope".to_string());
         assert!(resolve_command_entry(&root, &entry).is_err());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // --- XC-02: shared HTTP client (kasetto src/fsops/http.rs::http_client) ---
+    //
+    // Oracle: kasetto builds a process-wide `OnceLock<Result<Client, String>>`,
+    // `connect_timeout(10s)` + `timeout(30s)`, UA `kasetto/{VERSION}` (envctl renames the
+    // UA to `envctl-agent-env/{VERSION}`), pure-Rust rustls+ring. The decisive observable
+    // contract is **memoization**: the builder closure runs at most once and every call
+    // returns a clone of the same underlying client — no per-call TLS/session setup.
+    //
+    // No network is performed. The timeout/UA values configured on the builder are not
+    // introspectable through reqwest's public `Client` API (no getters), so this test
+    // asserts what IS observable — construction success + single-build memoization — and
+    // NOTES the non-introspectable config here rather than faking a probe of it. (The
+    // literal timeout/UA values themselves are pinned by direct source review against the
+    // kasetto oracle; reqwest exposes no accessor to assert them at runtime.)
+
+    #[test]
+    fn http_client_builds_ok_and_memoizes_via_oncelock() {
+        // First call builds (or returns the already-built) client.
+        let first = http_client();
+        assert!(first.is_ok(), "http_client() must construct successfully");
+
+        // OnceLock identity: after the first call the static is populated, and it can only
+        // have been built once — `get_or_init`'s closure never re-runs. This is the
+        // observable memoization signal (in-crate access to the private static), with no
+        // network round-trip.
+        assert!(
+            HTTP_CLIENT.get().is_some(),
+            "the process-wide OnceLock must be initialized after the first http_client() call"
+        );
+
+        // A second call returns Ok without re-building — same memoized client.
+        let second = http_client();
+        assert!(
+            second.is_ok(),
+            "the second http_client() call must reuse the memoized client"
+        );
     }
 }

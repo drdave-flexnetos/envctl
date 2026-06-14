@@ -130,3 +130,56 @@ pub enum AgentEnvError {
 pub(crate) fn err(message: impl Into<String>) -> AgentEnvError {
     AgentEnvError::Message(message.into())
 }
+
+#[cfg(test)]
+mod xc01_error_channel_tests {
+    //! XC-01 parity — the string-message error channel.
+    //!
+    //! Oracle: kasetto `src/error.rs` — `pub(crate) fn err(message: impl Into<String>) ->
+    //! Error` where `Error = Box<dyn std::error::Error + Send + Sync>`, built via
+    //! `std::io::Error::other(message.into()).into()`, plus `pub type Result<T> =
+    //! std::result::Result<T, Error>`.
+    //!
+    //! Idiom map (kasetto → envctl): kasetto's boxed-`dyn Error` channel built from
+    //! `io::Error::other` is ported to a typed `thiserror` enum whose
+    //! [`AgentEnvError::Message`] variant carries the free-form string. Both share the same
+    //! **observable** contract that this test pins: a string message handed to `err(...)`
+    //! round-trips byte-for-byte through the error's `Display`, and the `Result<T>` alias
+    //! resolves to the crate error. `err()` is `pub(crate)`, so this lives in-crate.
+    use super::{err, AgentEnvError, Result};
+
+    #[test]
+    fn err_produces_message_variant_whose_display_contains_the_message() {
+        let e = err("boom: something went wrong");
+        // Lands on the Message arm (the absorbed kasetto string-`err` channel), not Io/Yaml/Json.
+        assert!(
+            matches!(e, AgentEnvError::Message(_)),
+            "err(...) must land on the Message variant, got {e:?}"
+        );
+        // Observable parity with kasetto: the string round-trips through Display verbatim.
+        assert_eq!(e.to_string(), "boom: something went wrong");
+    }
+
+    #[test]
+    fn err_accepts_both_str_and_string_via_into() {
+        // Mirrors kasetto `err(impl Into<String>)`: &str and String both flow through.
+        let from_str = err("msg");
+        let from_string = err(String::from("msg"));
+        assert!(from_str.to_string().contains("msg"));
+        assert!(from_string.to_string().contains("msg"));
+    }
+
+    #[test]
+    fn result_alias_resolves_to_crate_error() {
+        // The `Result<T>` alias resolves to `Result<T, AgentEnvError>` (kasetto: `Result<T,
+        // Box<dyn Error + Send + Sync>>`). Exercise both arms so the alias is type-checked.
+        fn ok_path() -> Result<u32> {
+            Ok(7)
+        }
+        fn err_path() -> Result<u32> {
+            Err(err("nope"))
+        }
+        assert_eq!(ok_path().unwrap(), 7);
+        assert_eq!(err_path().unwrap_err().to_string(), "nope");
+    }
+}

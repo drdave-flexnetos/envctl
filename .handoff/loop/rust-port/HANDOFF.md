@@ -1,15 +1,34 @@
 # HANDOFF — rust-port-merge (kasetto → envctl, Epic C absorption)
-closed_utc: 2026-06-14 (parity session, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
-cycle_budget: 3   cycles_total: 10   cycles_this_session: 3 (parity-verifier pass — RESET to 0 on resume)
-last_item: PARITY cluster fsops+config_edit (+14 [x])   next_item: PARITY cluster C-* command business logic, THEN one Engine::agent_sync integration cycle (closes the 6 [~] residue), THEN TASK-0014 (CLI/GUI front-end, the 13 [≠])
-orchestrator_phase: PARITY-VERIFIER PASS (merge 0 [ ] to-merge; parity 74 [x] / 6 [~] / 22 [ ] / 13 [≠] = DONE-equiv 87/115)
-gate_status: PASS every cycle (agent-env 304 tests; no-c/fmt green)
+closed_utc: 2026-06-14 (parity SESSION-3, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
+cycle_budget: 3   cycles_total: 16   cycles_this_session: 3 (RESET to 0 on resume)
+last_item: FINAL parity cluster (+3 [x]: XC-01/XC-02/CFG-03)   next_item: **NOT MORE PARITY** — TASK-0014 (the 13 [≠] front-end CLI/GUI verbs, thin adapters over the verified engine — route via feature-forge). Optional: close S-15 via an HTTPS test endpoint / fetch-DI seam.
+orchestrator_phase: PARITY-VERIFIER PASS **COMPLETE AT OFFLINE CEILING** (parity 101 [x] / 1 [~] / 0 [ ] / 13 [≠] = DONE-equiv 114/115; only S-15 live-network unverified)
+gate_status: PASS every cycle (agent-env 330 + engine 96 tests; clippy -D warnings / no-c / fmt green)
 
-## THIS SESSION (2026-06-14, parity-verifier pass — 3 cycles, all PASS)
-- **Cycle 1 — source-resolver** (+11 [x]: S-09/10/11/14/16/17/18/19/20/21,XC-04). **PR #80 MERGED** to develop (3228971).
-- **Cycle 2 — model + 21-preset table + config-loader + SHA-256 lock** (+27 [x]: M-01/03/04/06/07/09-14/17/19/20/21/23-26, CFG-01/02, L-01-06). **PR #81** (auto-merge armed; stacked-then-rebased onto develop after #80).
-- **Cycle 3 — fsops + config_edit** (+14 [x]: F-03..F-10, FE-01..06; 0 BLOCKED). **PR #82** STACKED on #81.
-- parity 33→74 [x]. New parity vectors: suite 12→75 fns. NEVER stubbed; residue recorded honestly.
+## ⭐ STATUS: the kasetto→envctl ABSORPTION + PARITY is COMPLETE through the engine.
+101/102 testable rows are differentially parity-verified `[x]` against kasetto v3.2.0; the 13 `[≠]` are
+front-end (envctl owns rendering, semantics already `[x]` via the C-* engine tests). The ONLY unverified
+row is **S-15** (`materialize_source` live main→master HTTP retry) — its CODE matches kasetto
+`src/source/mod.rs:93-100` line-for-line, but the archive URLs are HTTPS-hardcoded with no fetch DI seam, so
+a std-only `TcpListener` mock can't reach it offline (honest residue, recorded — never faked). Close it with
+a real HTTPS test endpoint or a fetch-injection seam if/when desired. **The next real work is TASK-0014
+(front-end), which is a feature-forge job, NOT another parity cycle in this loop.**
+
+## SESSION-2 (2026-06-14 successor, parity-verifier pass — 3 cycles, all PASS)
+First landed session-1's stack (#80/#81/#82 all MERGED). Then:
+- **Cycle 1 — leaves** (+6 [x]: XC-03, ST-01/02, P-01/02, CP-01; envctl renames verified). **PR #83**.
+- **Cycle 2 — C-* sync engine** (+6 [x]: C-01..C-06) via NEW `crates/engine/tests/agent_sync_parity.rs` (+15). MCP additive/never-clobber + never-prune verified. **PR #84**.
+- **Cycle 3 — C-* verbs** (+7 [x]: C-07/08/09/10/11/13/14) via NEW `crates/engine/tests/agent_command_parity.rs` (+22). **C-12 → [~]** (remote-config-reject GAP = **C-12-FIX**, a real no-downgrade engine fix — see parity-ledger top). **PR #85** stacked.
+- parity 74→93 [x] (DONE-equiv 106/115). Engine tests 59→96. NEVER stubbed; the C-12 gap recorded, not hidden.
+
+## ⚠️ REMAINING TO FULL DONE (9 rows, all network/engine residue + 1 fix)
+2 `[ ]`: **M-22** (resolve_scope file-read fallback, engine path), **S-15** (main→master retry, network).
+7 `[~]`: **S-07/S-12/S-13** (pub(crate)/network), **CFG-03** (remote http arm), **C-12** (engine remote-reject GAP).
+Plan: ONE Engine/network integration cycle (exercise `Engine::agent_sync` materialize/download end-to-end)
+closes S-07/S-15/CFG-03 + M-22 at once; **C-12-FIX** (make `resolve_local_config_path` return Result +
+reject remote, edit.rs:352 + call sites :53,:151) + a `pub` test seam for S-12/S-13 closes the rest.
+THEN **TASK-0014** = the 13 `[≠]` front-end (CLI `envctl agent {sync,add,remove,lock,list,clean}` + GUI;
+thin adapters over the already-verified engine methods).
 
 ## ⚠️ PR-STACK — land in order, rebase each onto the prior
 #80 MERGED. **#81 → #82 are a stack.** When #81 squash-merges to develop, rebase #82:

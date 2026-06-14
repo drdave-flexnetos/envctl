@@ -50,7 +50,7 @@ impl Engine {
             lock_mode: spec.lock_mode.label(),
         });
 
-        let path = resolve_local_config_path(spec.config_path.as_deref());
+        let path = resolve_local_config_path(spec.config_path.as_deref())?;
 
         let (raw_source, at_ref) = split_at_ref(&spec.source);
         if at_ref.is_some() && (spec.git_ref.is_some() || spec.branch.is_some()) {
@@ -148,7 +148,7 @@ impl Engine {
             lock_mode: spec.lock_mode.label(),
         });
 
-        let path = resolve_local_config_path(spec.config_path.as_deref());
+        let path = resolve_local_config_path(spec.config_path.as_deref())?;
         if !path.exists() {
             anyhow::bail!("config not found: {}", path.display());
         }
@@ -347,12 +347,17 @@ fn sync_after(
 }
 
 /// Resolve the LOCAL (writable) config path for an edit. The agent-env config edits only ever
-/// touch a local file (`ensure_local_config` semantics): an explicit path is honored verbatim,
-/// otherwise the default config filename in the cwd.
-fn resolve_local_config_path(config: Option<&str>) -> PathBuf {
+/// touch a local file (`ensure_local_config` semantics): an explicit path is honored after
+/// rejecting remote (`scheme://…`) configs — which cannot be rewritten in place — otherwise the
+/// default config filename in the cwd. Fail-closed: a remote `--config` is refused, never
+/// silently treated as a local path (parity with kasetto `resolve_local_config_path`; C-12).
+fn resolve_local_config_path(config: Option<&str>) -> anyhow::Result<PathBuf> {
     match config {
-        Some(c) => PathBuf::from(c),
-        None => PathBuf::from(default_config_path()),
+        Some(c) => {
+            envctl_agent_env::config_edit::ensure_local_config(c)?;
+            Ok(PathBuf::from(c))
+        }
+        None => Ok(PathBuf::from(default_config_path())),
     }
 }
 
