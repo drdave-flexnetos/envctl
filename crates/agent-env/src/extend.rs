@@ -461,4 +461,127 @@ mod tests {
         assert!(msg.contains("depth limit exceeded"), "got: {msg}");
         let _ = fs::remove_dir_all(&root);
     }
+
+    // --- CFG-03: fetch_config_text remote arm (kasetto src/fsops/config.rs) ---
+    //
+    // Oracle: kasetto `fetch_config_text` http(s) branch — rewrite browse→raw, derive
+    // env-only auth, GET, read body, then: non-2xx → Err("remote config returned HTTP
+    // {status} ..."); a `<!DOCTYPE`/`<html`-prefixed 2xx body → Err("... login/HTML page
+    // instead of YAML ..."); otherwise Ok((text, origin)) with `canonical_id = fetch_url`
+    // and `label = config_ref`.
+    //
+    // Verified differentially against the kasetto contract WITHOUT real external network:
+    // a std-only `TcpListener` on `127.0.0.1:0` serves canned HTTP/1.1 responses, and the
+    // private `fetch_config_text` is driven at a plain-`http://127.0.0.1:<port>/...` ref
+    // (the URL scheme is preserved by `rewrite_browse_to_raw_url`, so the blocking reqwest
+    // client talks plain HTTP to the listener — no TLS, no C dep). NO new dependency.
+    use std::io::{Read, Write as IoWrite};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    /// Spawn a one-shot std-only HTTP/1.1 server on an ephemeral 127.0.0.1 port that, for
+    /// the next `responses.len()` connections, replies with each canned `(status_line,
+    /// body)` in order then closes. Returns the bound base URL plus the join handle.
+    fn spawn_canned_http(responses: Vec<(&'static str, String)>) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let base = format!("http://{addr}");
+        let handle = std::thread::spawn(move || {
+            for (status_line, body) in responses {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(_) => return,
+                };
+                // Drain the request headers (read until the blank line) so the client's
+                // write side completes before we respond.
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (base, handle)
+    }
+
+    #[test]
+    fn fetch_config_text_remote_200_returns_body_and_origin() {
+        let yaml_body = "agent: claude-code\nskills: []\n".to_string();
+        let (base, handle) = spawn_canned_http(vec![("200 OK", yaml_body.clone())]);
+        let url = format!("{base}/config.yaml");
+
+        let (text, origin) = match fetch_config_text(&url, None) {
+            Ok(pair) => pair,
+            Err(e) => panic!("200 must return Ok, got Err: {e}"),
+        };
+        assert_eq!(text, yaml_body, "remote body must round-trip verbatim");
+        // Oracle: canonical_id = fetch_url, label = config_ref, base_dir = None (remote).
+        assert_eq!(origin.canonical_id, url);
+        assert_eq!(origin.label, url);
+        assert!(origin.base_dir.is_none());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn fetch_config_text_remote_non_2xx_is_err_with_status() {
+        let (base, handle) = spawn_canned_http(vec![("404 Not Found", "nope".to_string())]);
+        let url = format!("{base}/missing.yaml");
+
+        let e = match fetch_config_text(&url, None) {
+            Ok(_) => panic!("non-2xx must be Err"),
+            Err(e) => e,
+        };
+        let msg = e.to_string();
+        // Oracle: "remote config returned HTTP {status} for {config_ref}{hint}".
+        assert!(
+            msg.contains("HTTP 404") && msg.contains(&url),
+            "expected HTTP-404 status error mentioning the URL, got: {msg}"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn fetch_config_text_remote_html_login_page_is_err() {
+        // 2xx but an HTML login page (the classic private-repo redirect) must be rejected,
+        // not parsed as YAML.
+        let html = "<!DOCTYPE html><html><body>login</body></html>".to_string();
+        let (base, handle) = spawn_canned_http(vec![("200 OK", html)]);
+        let url = format!("{base}/login.yaml");
+
+        let e = match fetch_config_text(&url, None) {
+            Ok(_) => panic!("HTML body must be Err"),
+            Err(e) => e,
+        };
+        let msg = e.to_string();
+        assert!(
+            msg.contains("login/HTML page instead of YAML"),
+            "expected the HTML-login detection error, got: {msg}"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn fetch_config_text_remote_200_parses_through_load_config_recursive() {
+        // Drive the remote arm through its public-ish recursive caller as well, proving the
+        // fetched YAML deserializes into a `Config` (nearest public entry over the private
+        // `fetch_config_text`).
+        let yaml_body = "agent: claude-code\nskills: []\n".to_string();
+        let (base, handle) = spawn_canned_http(vec![("200 OK", yaml_body)]);
+        let url = format!("{base}/config.yaml");
+
+        let mut visited = HashSet::new();
+        let (value, _base_dir, label) =
+            load_config_recursive(&url, None, &mut visited, 0).expect("recursive load over http");
+        let cfg: Config = serde_yaml::from_value(value).expect("deserialize fetched config");
+        assert_eq!(
+            cfg.agents().len(),
+            1,
+            "the fetched config must carry agent: claude"
+        );
+        assert_eq!(label, url);
+        handle.join().unwrap();
+    }
 }

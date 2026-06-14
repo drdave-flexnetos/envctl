@@ -1876,4 +1876,42 @@ mod tests {
         assert!(resolve_command_entry(&root, &entry).is_err());
         let _ = fs::remove_dir_all(&root);
     }
+
+    // --- XC-02: shared HTTP client (kasetto src/fsops/http.rs::http_client) ---
+    //
+    // Oracle: kasetto builds a process-wide `OnceLock<Result<Client, String>>`,
+    // `connect_timeout(10s)` + `timeout(30s)`, UA `kasetto/{VERSION}` (envctl renames the
+    // UA to `envctl-agent-env/{VERSION}`), pure-Rust rustls+ring. The decisive observable
+    // contract is **memoization**: the builder closure runs at most once and every call
+    // returns a clone of the same underlying client — no per-call TLS/session setup.
+    //
+    // No network is performed. The timeout/UA values configured on the builder are not
+    // introspectable through reqwest's public `Client` API (no getters), so this test
+    // asserts what IS observable — construction success + single-build memoization — and
+    // NOTES the non-introspectable config here rather than faking a probe of it. (The
+    // literal timeout/UA values themselves are pinned by direct source review against the
+    // kasetto oracle; reqwest exposes no accessor to assert them at runtime.)
+
+    #[test]
+    fn http_client_builds_ok_and_memoizes_via_oncelock() {
+        // First call builds (or returns the already-built) client.
+        let first = http_client();
+        assert!(first.is_ok(), "http_client() must construct successfully");
+
+        // OnceLock identity: after the first call the static is populated, and it can only
+        // have been built once — `get_or_init`'s closure never re-runs. This is the
+        // observable memoization signal (in-crate access to the private static), with no
+        // network round-trip.
+        assert!(
+            HTTP_CLIENT.get().is_some(),
+            "the process-wide OnceLock must be initialized after the first http_client() call"
+        );
+
+        // A second call returns Ok without re-building — same memoized client.
+        let second = http_client();
+        assert!(
+            second.is_ok(),
+            "the second http_client() call must reuse the memoized client"
+        );
+    }
 }

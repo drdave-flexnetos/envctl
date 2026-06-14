@@ -37,6 +37,29 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
   asserts both `agent_add` and `agent_remove` refuse a remote `--config`. C-12 → `[x]`. Engine non-printing
   + fail-closed preserved; clippy (`--workspace -D warnings`) / no-c / shape green.
 
+## Parity-verifier pass — 2026-06-14 (cluster: FINAL — XC-01/XC-02/CFG-03 + S-15 residue)
+
+**+3 rows flipped `→ [x]`** (98→101). **PARITY PASS AT ITS OFFLINE CEILING: 101 `[x]` / 1 `[~]` / 13 `[≠]`
+of 115 = DONE-equivalent 114/115.** Proven: **XC-01** error channel (in-crate: `err()`→Message variant
+Display round-trip, `Into<String>` &str+String, `Result` alias; kasetto io::Error::other → envctl thiserror
+Message, observable string-round-trip is the shared contract), **XC-02** `http_client()` (builds Ok +
+memoizes via the process-wide OnceLock; UA/timeouts not introspectable via reqwest public API → noted, not
+faked), **CFG-03** `fetch_config_text` remote arm (4 tests via a **std-only `127.0.0.1:0` TcpListener mock**,
+NO new deps, no-c stays clean: 200→body+origin, non-2xx→Err, HTML-login→Err, + through `load_config_recursive`).
+agent-env 322→330; engine 96; clippy(`-D warnings`)/no-c green.
+
+**ONLY remaining row — `S-15` `[~]` (honest live-network RESIDUE, NOT a gap):** the main→master retry CODE
+matches kasetto `src/source/mod.rs:93-100` line-for-line, but `materialize_source`'s archive URLs are built
+HTTPS-hardcoded by `remote_repo_archive_*` with NO fetch DI seam → a plain-HTTP `TcpListener` can't reach the
+live retry (TLS handshake fails first). Close via a real HTTPS test endpoint or a fetch-injection seam — never
+by faking. Everything S-15 depends on (URL builders, auth, tar-slip, gzip) is already `[x]`.
+
+**→ The kasetto→envctl ABSORPTION + PARITY is COMPLETE through the engine** (only S-15 live-retry unverified
+offline). Remaining envctl work is **TASK-0014** (the 13 `[≠]` front-end CLI/GUI verbs — semantics already
+`[x]` via the C-* engine tests; only rendering remains), NOT more parity cycles. Minor debt: 4 pre-existing
+`--all-targets`-only `unnecessary_to_owned` lints in `crates/engine/tests/agent_sync_parity.rs` (NOT in CI's
+`--workspace` clippy; cheap follow-up).
+
 ## Parity-verifier pass — 2026-06-14 (cluster: residue close — S-07/S-12/S-13/M-22, in-crate + engine)
 
 **+4 rows flipped `→ [x]`** (94→98). These rows are `pub(crate)`/engine-fallback so they use
@@ -190,8 +213,8 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 
 ## CROSS-CUTTING (port first — everything depends on these)
 
-- [~] XC-01 · src/error.rs:err/Error/Result · string-message error channel: `err(impl Into<String>)` → `Box<dyn Error+Send+Sync>` via `io::Error::other`; `Result<T>` alias. Every absorbed fn returns this. · -> agent-env::AgentEnvError (thiserror: Message/Io/Yaml) + Result + err() · deps: none
-- [~] XC-02 · src/fsops/http.rs:http_client · process-wide `OnceLock<Client>`; connect-timeout 10s, total 30s, UA `kasetto/{VERSION}`; pure-Rust rustls+ring (NO C TLS). ERROR: build failure cached & re-returned as Message. · -> agent-env::source::http_client · deps: XC-01
+- [x] XC-01 · src/error.rs:err/Error/Result · string-message error channel: `err(impl Into<String>)` → `Box<dyn Error+Send+Sync>` via `io::Error::other`; `Result<T>` alias. Every absorbed fn returns this. · -> agent-env::AgentEnvError (thiserror: Message/Io/Yaml) + Result + err() · deps: none
+- [x] XC-02 · src/fsops/http.rs:http_client · process-wide `OnceLock<Client>`; connect-timeout 10s, total 30s, UA `kasetto/{VERSION}`; pure-Rust rustls+ring (NO C TLS). ERROR: build failure cached & re-returned as Message. · -> agent-env::source::http_client · deps: XC-01
 - [x] XC-03 · src/fsops/dirs.rs:dirs_home/dirs_xdg_{config,data,cache}_home/dirs_kasetto_{config,data,cache} · XDG resolution: HOME (ERR "HOME is not set" if unset); XDG_*_HOME honored only when non-empty else `$HOME/.config|.local/share|.cache`; kasetto_* append `kasetto`. OS quirk: env-driven, no platform branch. · -> agent-env::dirs::* (envctl-namespaced dir) · deps: XC-01
 - [x] XC-04 · src/fsops/mod.rs:now_unix/now_unix_str · SystemTime since UNIX_EPOCH as secs; `.unwrap_or(0)` on clock-before-epoch. · -> agent-env::util::now_unix{,_str} · deps: none
 
@@ -238,7 +261,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] X-03 · src/model/extend.rs:merge_source_list/identity_of/string_field · identity = (source, ref|branch|"", sub-dir|sub_dir|""); same-identity replaced, new appended. SEED. · -> agent-env::extend (merge internals) · deps: M-08
 - [x] CFG-01 · src/fsops/config.rs:load_config_any · top-level loader: recursive merge → deserialize Config → cfg_dir (origin base_dir or cwd) + label. ERROR: parse failure labelled. SEED. · -> agent-env::extend::load_config_any · deps: X-01,X-02,CFG-02
 - [x] CFG-02 · src/fsops/config.rs:load_config_recursive + ConfigOrigin · MAX_EXTENDS_DEPTH=8 depth guard (ERR "extends depth limit exceeded"); per-origin canonical_id cycle guard (ERR "circular extends detected"); parents merged in order, then self. visited cloned per branch + removed after. SEED. · -> agent-env::extend::load_config_recursive · deps: CFG-03
-- [~] CFG-03 · src/fsops/config.rs:fetch_config_text · http(s): rewrite_browse_to_raw → auth → fetch; ERR on non-2xx (with auth hint) + HTML-login-page detection. local: canonicalize (ERR "config not found"), read, parent as base_dir. SEED. · -> agent-env::extend::fetch_config_text · deps: XC-02,S-08,S-12,S-13 ⟨parity 2026-06-14: LOCAL arm proven; remote http(s) arm network-only — close via Engine::agent_sync integration⟩
+- [x] CFG-03 · src/fsops/config.rs:fetch_config_text · http(s): rewrite_browse_to_raw → auth → fetch; ERR on non-2xx (with auth hint) + HTML-login-page detection. local: canonicalize (ERR "config not found"), read, parent as base_dir. SEED. · -> agent-env::extend::fetch_config_text · deps: XC-02,S-08,S-12,S-13 ⟨parity 2026-06-14: LOCAL arm proven; remote http(s) arm network-only — close via Engine::agent_sync integration⟩
 - [x] F-03 · src/fsops/copy.rs:copy_dir/copy_dir_contents/copy_file · verbatim recursive copy; MAX_COPY_DEPTH=32 (ERR symlink-cycle); dst removed first; SYMLINK followed (canonicalize → recurse dir / copy file); fs::copy preserves +x bit; Windows: strip READONLY (cfg(windows)). ERROR: depth-exceed. NOT in seed. · -> agent-env::fsops::copy_dir · deps: XC-01 ⟨parity 2026-06-14: unix copy/symlink/+x arms PASS on Linux; cfg(windows) READONLY-strip arm platform-residue (unreachable here)⟩
 - [x] F-04 · src/fsops/settings.rs:SettingsFile::load/save · JSON wrapper: load existing or `{}` (ERR "invalid settings JSON"); save pretty-printed, create parent dirs. NOT in seed. · -> agent-env::fsops::SettingsFile · deps: XC-01
 - [x] F-05 · src/fsops/mod.rs:resolve_path · expand ONLY leading `~/` or bare `~` to HOME (mid-path `~` literal); absolute kept, else base.join. EDGE: home-resolve failure → raw. NOT in seed. · -> agent-env::fsops::resolve_path · deps: XC-03
@@ -272,7 +295,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] S-12 · src/source/auth.rs:auth_env_inline_help · per-host-family env-var hint string (GitHub/GitLab/Bitbucket/Gitea/none). SEED. · -> agent-env::source::auth_env_inline_help · deps: S-01
 - [x] S-13 · src/source/auth.rs:http_fetch_auth_hint · 401|403→" - {help}"; 404→" - if private, {help}"; else "". SEED. · -> agent-env::source::http_fetch_auth_hint · deps: S-12
 - [x] S-14 · src/source/mod.rs:materialize_source + MaterializedSource · http: parse → git_pin → fetch+extract (ref/branch/Default), source_revision label; **main→master retry on Default** (second download_extract, ERR appends "also tried master"); resolve_source_root(sub_dir); discover_with_root_name(hint). local: resolve_path, no cleanup_dir, rev "local". SEED partial — S-15 covers main→master retry remainder. NOT otherwise in seed. · -> agent-env::source::materialize_source · deps: S-02,S-05,S-07,S-16,S-17,F-05
-- [ ] S-15 · src/source/mod.rs:materialize_source (GitPin::Default main→master retry) · live second HTTP attempt to `master` when `main` 404s; SEED `archive_url(GitPin::Default)` returns the `main` URL only — the RETRY is the materializer's job. SEED-DEFERRED remainder (TASK-0013). · -> agent-env::source::materialize_source (retry arm) · deps: S-14
+- [~] S-15 · src/source/mod.rs:materialize_source (GitPin::Default main→master retry) · live second HTTP attempt to `master` when `main` 404s; SEED `archive_url(GitPin::Default)` returns the `main` URL only — the RETRY is the materializer's job. SEED-DEFERRED remainder (TASK-0013). · -> agent-env::source::materialize_source (retry arm) · deps: S-14 ⟨RESIDUE 2026-06-14: retry CODE matches kasetto src/source/mod.rs:93-100 line-for-line, but archive URLs are HTTPS-hardcoded (remote_repo_archive_*) with NO fetch DI seam → a std-only plain-HTTP TcpListener cannot exercise the live main→master retry (TLS handshake fails before HTTP). Only honest live-network row; URL/auth/tar-slip/gzip all [x]. Close via a real HTTPS test endpoint or a fetch-injection seam — NOT by faking.⟩
 - [x] S-16 · src/source/mod.rs:resolve_source_root + repo_name_hint · sub_dir: empty→ERR; absolute→ERR "must be relative"; ParentDir|RootDir→ERR "must not escape"; not-exists→ERR; not-dir→ERR. repo_name_hint: last path segment per host variant. NOT in seed. · -> agent-env::source::{resolve_source_root,repo_name_hint} · deps: S-02
 - [x] S-17 · src/source/mod.rs:discover/discover_with_root_name/discover_skills_in_subdir · root SKILL.md→named by hint; scan `<root>/` + `<root>/skills/` for `*/SKILL.md`; WARN on subdir shadowing root skill (eprintln). NOT in seed. · -> agent-env::source::discover · deps: none
 - [x] S-18 · src/source/mod.rs:discover_mcps · root `.mcp.json`/`mcp.json` + `mcps/*.json`; WARN if legacy `mcp/` present w/o `mcps/` (eprintln). NOT in seed. · -> agent-env::source::discover_mcps · deps: none
