@@ -1,48 +1,66 @@
-# HANDOFF — rust-port-MERGE (kasetto → envctl) · VERIFY/MERGE mode · 2026-06-13
+# HANDOFF — rust-port-merge (kasetto → envctl, Epic C absorption)
+closed_utc: 2026-06-14T02:45:17Z   branch: develop   worktree: /home/drdave/Desktop/meta/.worktrees/<fresh>/envctl (create off origin/develop)
+cycle_budget: 3   cycles_total: 9   cycles_this_session: many (library + engine wiring landed)
+last_item: TASK-0013 (engine wiring)   next_item: parity-verifier pass ([~]→[x]) THEN TASK-0014 (CLI/GUI front-end)
+orchestrator_phase: DONE-through-engine (merge-ledger 0 [ ] remaining)   last_agent: invariant-guardian (PASS)
+gate_status: PASS (498 workspace tests; no-c/shape/enable green)   pr_url: #78 (MERGED)
 
-**Resume with:** `/harness:rust-port-merge` (or `/rust-port` — the harness is now ejected into
-`envctl/.claude`). Reads state from **`.handoff/loop/rust-port/`** (namespaced — NOT the flat
-`.handoff/loop/`, which is the forge-loop's). This completes **forge-loop TASK-0012** (Epic C:
-kasetto absorption, no downgrade).
+**Resume with:** `/harness:rust-port-merge` (or `/feature-forge` for TASK-0014). State lives in
+`.handoff/loop/rust-port/` (namespaced — NOT the flat `.handoff/loop/`, the forge-loop's).
 
-## State precedence
-Git (committed) > this HANDOFF > `.handoff/loop/rust-port/{merge-ledger,parity-ledger,loop_state}.md`.
-In verify-merge mode the **merge-ledger.md is authoritative**.
+## Where it stands (all on origin/develop)
+The kasetto absorption is **structurally COMPLETE through the Engine**. `crates/agent-env` = 18-module
+pure-Rust port of **pivoshenko/kasetto v3.2.0**; `crates/engine/src/agent/*` = the 6 `Engine::agent_*`
+methods. **merge-ledger: 102 `[~]` merged / 0 `[ ]` to-merge / 13 `[≠]` front-end / 22 `[x]` parity-verified.**
 
-## Where things are
-- **Merged to develop (PR #71):** `crates/agent-env` (seed + model/* port) + the rust-port DISCOVER state.
-- **PR #72 (branch `task-0012-verify-merge`, off develop):** the rust-port-merge harness eject + the
-  verify-merge classification. Auto-merge armed. If merged before you resume → fresh worktree off the
-  new develop (has everything); else continue on `task-0012-verify-merge`.
-- **X (source):** `meta/kasetto` = pivoshenko **v3.2.0** (`ec01cca`); fork synced (origin/main = v3.2.0,
-  0/0; divergence on `flexnetos-divergence-backup-2026-06-13` + bundle `.archives/`).
-- **Y (dest):** envctl. The harness lives in `.claude/` (12 skills + 10 agents).
-- ⚠️ Stray remote branch `task-0012-agent-env` was recreated by a post-merge push — **harmless, delete it**
-  (its content is in develop via #71's squash + #72). Auto-mode blocked the deletion; do it manually.
+landed_this_session:
+  - PR #71  agent-env seed + model/* port
+  - PR #72  rust-port-merge harness eject + verify-merge classification
+  - PR #73  MCP additive-never-clobber merge (MC-01/MC-02) — left-behind sweep catch
+  - PR #75  command transforms (PR-01) + config_edit (FE-*) + fsops resolution
+  - PR #76  source discovery + runtime/profile/config_path/sync — LIBRARY COMPLETE
+  - PR #78  engine wiring — Engine::agent_{sync,add,remove,lock,list,clean} (TASK-0013)
+  - (peer) meta PR #31 retarget kasetto repo; kasetto fork origin/main force-synced to v3.2.0
+  - #74 was a duplicate of #71 (closed by owner — work already on develop)
 
-## Merge ledger (authoritative): 115 rows
-- **55 `[~]`** — agent-env's already-merged foundational+model surface (config/extend/source/hash/lock/
-  agent/report). MERGED into Y, **re-verification vs kasetto X pending**.
-- **47 `[ ]`** — to merge: fsops (copy/dirs/settings/select_targets/resolve_*), `config_edit.rs` mutation
-  engine, command business logic, AND the **3 left-behind engines** the verify sweep caught:
-  - **MC-01/MC-02** — `src/mcps/*` additive never-clobber MCP merge (4 formats; **#1 no-downgrade risk:
-    preserve global broker/repowire/weave**).
-  - **PR-01** — `src/prompts/*` 5 command-format transforms.
-- **13 `[≠]`** — front-end (ui/banner/colors + clap wiring); envctl owns rendering (TASK-0014).
-- Researcher confirmed **0 duplications**, **reuse-Y=0** (engine's lock/runtime/doctor ≠ agent-env surface).
+## next_item — two tracks (either order)
+1. **Parity-verifier pass:** drive the 80 remaining `[~]` → `[x]` by extending
+   `crates/agent-env/tests/parity_vs_kasetto.rs` (golden vectors VERBATIM from kasetto v3.2.0's own
+   `#[cfg(test)]` modules — `cargo test` in meta/kasetto @ ec01cca passes 216 of them). 22 done.
+2. **TASK-0014 (front-end, the 13 `[≠]`):** CLI verbs `envctl agent {sync,add,remove,lock,list,clean}`
+   (clap) + GUI parity. THIN ADAPTER over the engine methods — build `Agent*Spec`, call
+   `Engine::agent_*`, drain the `EventSink` to render the tree/grid, map `report.summary.failed>0` →
+   exit code, `--json` serializes the (already `Serialize`) return. The engine API was designed for this.
 
-## NEXT (verify-merge ITERATE — the dual gate, per unit)
-1. **Parity-verifier pass on the 55 `[~]`** — differentially verify each agent-env symbol vs kasetto v3.2.0
-   (the source is Rust → run/port kasetto's own tests + fixtures). PASS → `- [x]`. (A representative sample
-   already matched in `/verify`: SHA-256 vs `sha256sum`, the 4-host resolver, config parse, 21-agent table.)
-2. **Port the 47 `[ ]`** dep-ready first; the MCP additive merge (MC-01) is the priority no-downgrade unit.
-3. **Dual gate every cycle:** verify vs kasetto X **AND** assert envctl Y not regressed
-   (`findings/y-regression.md`); Y stays green (build/clippy/test/no-c).
-4. **DONE** only at 100% merged+verified `[x]`/`[≠]` + left-behind sweep clean + Y green.
+## findings / decisions_and_dead_ends (don't re-litigate)
+- **Source of truth = pivoshenko/kasetto v3.2.0** (the `upstream` remote), NOT the FlexNetOS fork (was
+  v3.0.0+divergent). Fork renamed env_manager_agent→FlexNetOS/kasetto, origin/main force-synced to
+  v3.2.0; pre-sync divergence preserved (branch `flexnetos-divergence-backup-2026-06-13` + git bundle
+  in `meta/.archives/`). Do NOT downgrade meta/kasetto.
+- **Two locks are DELIBERATELY separate:** engine FNV-1a component lock (`crates/engine/src/lock.rs`,
+  `envctl.lock`) vs agent-asset SHA-256 lock (`agent_env::lock`, `agent-env.lock`). Do NOT unify — that's
+  the later TASK-0017. `crate::agent::lock` never imports `crate::lock`.
+- **Engine is non-printing:** kasetto's `print_*`/`ui.rs`/`process::exit` are DROPPED (FRONTEND-04
+  `[≠]`); agent verbs emit `Event::Agent*` + return `Serialize` data; front-end maps failed>0→exit.
+- **Preview-default fail-closed:** `apply:false` = ZERO writes; `lock_mode=Locked` = zero-network; MCP
+  merge additive never-clobber (broker/repowire/weave survive); never-prune-on-failure (remove_stale
+  only when summary.failed==0). These are guardian-tested — keep them.
+- **PR workflow (IMPORTANT):** auto-merge + fast CI squash-merges a PR in ~1-2 min, deleting its branch;
+  a later push recreates it diverged. WORK ONE PR PER CYCLE OFF FRESH origin/develop. Recover a diverged
+  branch via fresh-branch + cherry-pick of ONLY the net-new commits (`git diff origin/develop...branch
+  --stat`), never deleting concurrent sibling files.
+- **never-discard (owner directive):** stale/orphaned/uncommitted work is INCOMPLETE work to complete +
+  carry forward, never `git restore`/delete as drift (the parity harness was carried forward this way).
 
-## Gates (non-negotiable)
-no C / no mimalloc / one rustls ring-only / no-c.sh green · non-printing library · forbid(unsafe_code) ·
-**never weaken the parity gate, never stub to pass, never narrow-to-fit Y** (the cardinal rule).
+icm_stored: context-envctl, errors-resolved, decisions-envctl (recall these on resume)
 
-## Verify-on-resume baseline
-`rtk proxy cargo test -p envctl-agent-env` (78+) · `bash ci/gates/no-c.sh` (PASS). Red → NEEDS-HUMAN.
+## verify_on_resume (run FIRST to confirm green)
+```
+cd <fresh worktree off origin/develop>
+rtk proxy cargo test -p envctl-agent-env            # expect ~226 + parity_vs_kasetto (12)
+rtk proxy cargo test -p envctl-engine               # expect agent_sync integration tests pass
+bash ci/gates/no-c.sh && bash ci/gates/shape.sh && bash ci/gates/enable.sh   # all PASS
+```
+Red → write `.handoff/loop/rust-port/NEEDS-HUMAN` and stop.
+
+resume_command: /harness:rust-port-merge   (or /feature-forge for TASK-0014)
