@@ -13,11 +13,11 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 1   # SESSION-3 (successor) RESUME: counter reset to 0; cycle1 = C-12-FIX (no-downgrade engine fix)
-cycles_total: 14
-parity: 94 [x] verified · 6 [~] residue/network · 2 [ ] pending (M-22,S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 107/115)
+cycles_this_session: 2   # SESSION-3: cycle1 = C-12-FIX; cycle2 = residue close S-07/S-12/S-13/M-22 (in-crate + engine)
+cycles_total: 15
+parity: 98 [x] verified · 3 [~] (XC-01,XC-02,CFG-03) · 1 [ ] (S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 111/115)
 ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity residue + TASK-0014 front-end)
-last_item: C-12-FIX (no-downgrade engine fix) — resolve_local_config_path now Result + rejects remote scheme:// via ensure_local_config; agent_add/remove both refuse remote --config; C-12 [~]→[x]. engine 96 tests, clippy/no-c/shape green
+last_item: residue close — +4 [x] (S-07,S-12,S-13,M-22) via in-crate #[cfg(test)] in agent-env/src/source.rs (S-12/S-13 +11) + pre-existing S-07/M-22 tests flipped; agent-env 311→322, engine 96; clippy/no-c green
 session3_note: SESSION-3 successor 2026-06-14. Landed session-2 stack (#83 merged; #84/#85 rebased onto
   fresh develop c083d0f, armed). Cycle 1 = C-12-FIX (the no-downgrade finding from session-2): engine
   src change crates/engine/src/agent/edit.rs (resolve_local_config_path → anyhow::Result, route through
