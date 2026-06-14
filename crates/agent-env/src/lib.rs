@@ -27,6 +27,7 @@ pub mod config;
 pub mod config_edit;
 pub mod config_path;
 pub mod dirs;
+pub mod driver;
 pub mod extend;
 pub mod fsops;
 pub mod hash;
@@ -61,7 +62,13 @@ pub use dirs::{
     dirs_agent_env_cache, dirs_agent_env_config, dirs_agent_env_data, dirs_home,
     dirs_xdg_cache_home, dirs_xdg_config_home, dirs_xdg_data_home,
 };
-pub use extend::{extract_extends, load_config_recursive, merge_yaml, MAX_EXTENDS_DEPTH};
+pub use driver::{
+    apply_removals, clean_counts, load_skills_mcps_commands, plan_add_edits, rebuild_lock, sync,
+    verify_source, AssetRow, CleanCounts, DriverCtx, SectionEdit, SyncResult, UpdatedAt,
+};
+pub use extend::{
+    extract_extends, load_config_any, load_config_recursive, merge_yaml, MAX_EXTENDS_DEPTH,
+};
 pub use fsops::{
     copy_dir, copy_dir_contents, copy_file, relativize_dest, resolve_command_targets, resolve_dest,
     resolve_destinations, resolve_mcp_settings_targets, resolve_path, scope_root, select_targets,

@@ -3,6 +3,7 @@
 //! Both the CLI (`envctl`) and the GUI (`envctl-gui`) drive the box through the
 //! *identical* `Engine` API below, so the two front-ends can never diverge.
 pub mod addrepo; // Phase 4: the staged build-from-source pipeline + confined AI agent
+pub mod agent; // agent-env subsystem: the 6 agent-asset verbs over envctl-agent-env
 pub mod command;
 pub mod component; // Component, Hook, Guard, Phase, HookRunner
 pub mod dashboard; // meta mission-control: read .meta.yaml -> render zellij KDL layout
@@ -23,6 +24,11 @@ pub mod runtime; // machine-local last-run state (XDG cache), out of the lock
 pub mod telemetry; // sample() -> Telemetry (nvidia-smi CSV + sysinfo)
 pub mod wiring; // apply()/revert() for Wiring (shell_rc backup-then-excise) // EngineCommand / EngineEvent + run_event_loop (GUI worker API)
 
+pub use agent::{
+    AgentAddSpec, AgentCleanSpec, AgentEditOutcome, AgentList, AgentListKind, AgentListSpec,
+    AgentLockMode, AgentLockOutcome, AgentLockSpec, AgentRemoveSpec, AgentReport, AgentScope,
+    AgentSectionSel, AgentSyncSpec, AgentVerb,
+};
 pub use command::{run_event_loop, EngineCommand, EngineEvent, TelemetryControl};
 pub use component::{Component, Guard, Hook, HookRunner, Phase};
 pub use dashboard::{

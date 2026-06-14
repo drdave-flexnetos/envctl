@@ -8,12 +8,12 @@
 //! types `State`, `SkillEntry`, `LOCK_VERSION` already live in [`crate::lock`] and are not
 //! re-defined here (kasetto co-locates them in `types.rs`; the seed split the lock surface).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::Scope;
 
 /// Per-run outcome counters (ledger M-25).
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct Summary {
     /// Skills newly installed this run.
     pub installed: usize,
@@ -31,7 +31,7 @@ pub struct Summary {
 
 /// A single recorded step in a sync run — the per-skill (or per-source) action log row
 /// (ledger M-25).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Action {
     /// The source this action pertains to (`None` for source-less actions).
     pub source: Option<String>,
@@ -61,7 +61,7 @@ pub struct Report {
 }
 
 /// A `list`-view row describing one installed skill (ledger M-25).
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct InstalledSkill {
     /// Stable identifier (typically `source::skill`).
     pub id: String,
