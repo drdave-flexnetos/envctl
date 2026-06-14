@@ -13,11 +13,22 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 2   # SESSION-2 (successor): cycle1=leaves, cycle2=C-* sync engine (Engine integration tests)
-cycles_total: 12
-parity: 86 [x] verified · 6 [~] residue/network · 10 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 99/115)
-ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass)
-last_item: PARITY cluster C-* SYNC ENGINE — +6 [x] (C-01..C-06) via crates/engine/tests/agent_sync_parity.rs (+15 tests, engine 59→74); 0 BLOCKED; MCP additive/never-clobber + never-prune verified
+cycles_this_session: 3   # SESSION-2 BUDGET 3/3 REACHED → HAND OFF. cycle1=leaves, cycle2=C-* sync engine, cycle3=C-* verbs
+cycles_total: 13
+parity: 93 [x] verified · 7 [~] residue/gap · 2 [ ] pending (M-22,S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 106/115)
+ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass + 1 no-downgrade fix)
+last_item: PARITY cluster C-* VERBS — +7 [x] (C-07/08/09/10/11/13/14) via crates/engine/tests/agent_command_parity.rs (+22 tests, engine 74→96); C-12 [~] (remote-config-reject GAP = C-12-FIX, a real no-downgrade engine fix)
+session2_summary: SESSION-2 successor 2026-06-14, budget 3/3. Landed session-1 stack (#80-#82 merged).
+  Cycle1 leaves +6 [x] (PR #83). Cycle2 C-* sync engine +6 [x] (PR #84). Cycle3 C-* verbs +7 [x] (PR #85
+  pending). parity 80→93 [x] (DONE-equiv 106/115). Engine integration tests: agent_sync_parity.rs (15) +
+  agent_command_parity.rs (22). **REMAINING TO FULL DONE (9 rows, all network/engine residue):** 2 [ ]
+  = M-22 (resolve_scope file-read fallback, engine path) + S-15 (main→master retry, network); 7 [~] =
+  S-07/S-12/S-13 (pub(crate)/network), CFG-03 (remote arm), C-12 (engine remote-reject GAP). PLUS the 13
+  [≠] front-end = TASK-0014 (CLI/GUI verbs). **NEXT SESSION:** (a) ONE Engine/network integration cycle
+  exercising materialize/download end-to-end → closes S-07/S-15/CFG-03 + M-22; (b) C-12-FIX engine src
+  change (resolve_local_config_path → Result, reject remote) + S-12/S-13 pub-seam → closes the rest;
+  (c) TASK-0014 front-end. PR-STACK: #80-#82 merged; #83→#84→#85 stacked linear — rebase each onto develop
+  as its parent merges (git rebase --onto origin/develop <parent-tip> <branch>; clean so far).
 session2_note: SESSION-2 successor 2026-06-14. Landed session-1 PR-stack (#80/#81 merged; #82 rebased onto
   fresh develop 870387f, auto-merge armed). Then cycle 1 = leaves cluster (+6 [x], 311 tests, PR pending,
   STACKED on #82 branch task-0012-parity-pass-3). Remaining 16 [ ]: M-22 (resolve_scope fallback) + S-15
