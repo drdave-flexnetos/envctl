@@ -152,32 +152,78 @@ broker/repowire/weave regression fixture, 5 command-format transforms, the full 
 
 **Verbatim-name note:** kasetto's `continue` preset writes its own merge-marker file `.continue/mcpServers/kasetto.json` (both global M-13 and project M-14). This is kasetto's SELF-named drop file inside the agent-native `.continue/mcpServers/` dir, not an agent-native path. Per the naming note it is kept **verbatim** (byte-for-byte parity for the differential verifier); the product-identity rename is TASK-0013 Engine-wiring's job. All agent-native paths (`.claude/skills`, `.codex/config.toml`, the VS Code user `mcp.json`, etc.) are unchanged. The `kasetto_config` arg on `mcp_settings_target`/`all_mcp_settings_targets` is threaded through verbatim (kasetto reserves it; unused by every preset today).
 
-## rust-port-merge cycle: MCP additive merge (MC-01/MC-02)
+## rust-port-merge cycle: command transforms (PR-01)
 
-**Source ported (VERBATIM, no-downgrade):** kasetto v3.2.0 `src/mcps/{mod,merge,codex,pack}.rs` (395+109+159+19 lines) + `src/fsops/settings.rs` (ledger F-04).
+**Cluster:** the command-format transform engine (ledger PR-01 — left-behind).
+**Source:** kasetto v3.2.0 `src/prompts/{mod,parse,transform}.rs` (82+97+206 L).
+**Landed:** NEW module `crates/agent-env/src/command.rs`, declared `pub mod command;`
+and re-exported (`apply_command, destination_path, ensure_parent_dirs, parse, render, Parsed`)
+from `crates/agent-env/src/lib.rs`.
 
-**Files added:**
-- `crates/agent-env/src/mcp.rs` (NEW) — the whole MCP additive-merge engine collapsed into one module (kasetto's 4 split files → 1 module: top-level dispatch + pack reader + JSON merges + CodexToml). Re-exported from `lib.rs`: `merge_mcp_config`, `remove_mcp_server`, `servers_present_in_settings`, `read_source_mcp_servers`.
-- `crates/agent-env/src/fsops.rs` (NEW) — `SettingsFile` load→mutate→save wrapper (F-04), re-exported.
+**Landing decision:** new-module (not merge-into-existing). The `CommandFormat` /
+`CommandTarget` value types already lived in `agent.rs` (re-exported from `lib.rs`); the
+transforms dispatch on them. No symbol conflict — `apply_command`/`render`/`destination_path`
+/`parse`/`Parsed` were absent from the crate, so a clean add.
 
-**Files changed:**
-- `crates/agent-env/src/lib.rs` — added `pub mod fsops;` + `pub mod mcp;`, the re-exports, and a new `AgentEnvError::Json(#[from] serde_json::Error)` variant (mirrors kasetto's box-error `?` auto-conversion of `serde_json::to_string_pretty` in `SettingsFile::save`). `err(...)` → `AgentEnvError::Message` as the existing modules do.
+**Ported VERBATIM (no downgrade), all 5 command-format transforms:**
+- `MarkdownFrontmatter` — namespaced `:` → nested subdirs (`git:commit` → `git/commit.md`);
+  frontmatter re-emitted between fences.
+- `MarkdownPlain` — body only, frontmatter stripped; flat `-` name.
+- `PromptMd` — `<name>.prompt.md`, frontmatter preserved.
+- `PromptFile` (Continue Dev) — `$ARGUMENTS`→`{{{ input }}}`, `invokable: true` injected,
+  no double-inject when already present; flat `-` name.
+- `GeminiToml` — `description = "…"` (TOML-escaped) + `prompt = """…"""` heredoc.
+Plus `parse` (CRLF-normalize; opening `---` without closing `---` → fail-closed error),
+`Parsed::description` (serde_yaml extraction), `derive_relpath`/`name_to_nested_path`/
+`flatten_name`/`toml_string`/`render_prompt_file`/`render_gemini_toml`/`ensure_parent_dirs`,
+and the `apply_command` driver.
 
-**All 4 formats ported (every branch, no stub):**
-1. **McpServers** JSON `{ "mcpServers": {...} }` — identity transform.
-2. **VsCodeServers** `{ "servers": {...} }` — `normalize_vscode_server` (adds `type: stdio` for command / `http` for url).
-3. **OpenCode** `{ "mcp": {...} }` — `mcp_entry_to_opencode` (remote url→`type:remote`+headers; else `type:local`+command-array+environment; both error branches).
-4. **CodexToml** `[mcp_servers.name]` — `merge_codex_config_toml` + `json_mcp_server_to_codex_toml_table` (remote `url`/`serverUrl`/`http`/`https`/`sse`/`streamable-http` → `url`+`http_headers`; else `command`+`args`+`env`; non-string env via Display). Plus `remove_server` + `servers_present` for the Codex path.
+**Error mapping:** kasetto `err(...)`/`Result` → `crate::err`/`crate::Result`
+(`AgentEnvError::Message`), mirroring the sibling modules. `crate::fsops::temp_dir` (test-only)
+→ the local per-module `temp_dir` helper used elsewhere in the crate's tests.
 
-**Never-clobber (no-downgrade) tests added** (the #1 risk — global `broker`/`repowire`/`weave` must survive):
-- `merge_preserves_broker_repowire_weave_and_adds_new` (McpServers): all 3 mesh servers keep real values, pack's placeholder broker token is NOT applied, `new-tool` added.
-- `merge_codex_never_clobbers_existing_mesh_servers` (CodexToml).
-- `merge_vscode_never_clobbers_existing_servers` (VsCodeServers).
-- `merge_opencode_never_clobbers_existing_servers` (OpenCode).
-Plus the 14 kasetto `mod.rs` parity tests ported verbatim (adapted paths/types), extra remote-codex/remote-opencode/pack-reader coverage, and 4 `SettingsFile` tests.
+**Test delta (X parity + Y not-regressed):**
+- kasetto's `prompts/*` `#[cfg(test)] mod tests` ported VERBATIM (paths adapted):
+  3 parse + 7 transform + 2 driver = 12.
+- Added DUAL-GATE coverage: `destination_path` for all 5 formats, `render` for all 5 with
+  no-frontmatter, the frontmatter opening-without-closing edge (error), CRLF normalization,
+  and TOML quote-escape = 6.
+- Crate unit tests **78 → 96 (+18)**; existing 78 unchanged (Y not regressed). Plus the
+  1 `no_downgrade.rs` integration test still green.
 
-**Test-count delta:** 78 → **104** lib unit tests (+26), all passing (+ 1 integration `no_downgrade` test still green).
+**DUAL GATE — all green (raw via `rtk proxy`):**
+`build=0` · `test=0` (96 unit + 1 integration, 0 failed) · `clippy -D warnings=0` ·
+`fmt=0` · `no-c=0` (rustls 0.23.40 on ring 0.17.14, zero aws-lc/openssl/C-SQLite).
 
-**Gate results (raw via `rtk proxy`):** build=0 · test=104 lib + 1 integ, all pass · clippy -D warnings=0 · fmt --check=0 · no-c=PASS.
+**Invariants:** non-printing library (Result-returning, no println/clap), `forbid(unsafe_code)`,
+snake_case modules / PascalCase types, inline `#[cfg(test)] mod tests`, no C / one rustls ring-only.
 
-**Notes:** No format/branch stubbed or dropped. `SettingsFile` made `pub` (re-exported) since `mcp.rs` consumes it across the module boundary; kasetto had it `pub(crate)` in a sibling. The additive `if !dst_map.contains_key(&key)` / Codex `if mcp_tbl.contains_key(&name) { continue; }` guards are the never-clobber mechanism — ported exactly.
+**Commit:** `de7a6a6` (not pushed). No stub/dropped format — every branch ported.
+
+## FE-* — config-edit mutation engine (TASK-0012) — DONE
+- **Module:** `crates/agent-env/src/config_edit.rs` (new); `pub mod` + `pub use` in `lib.rs`.
+- **Ported verbatim from** kasetto v3.2.0 `src/fsops/config_edit.rs` (811L) + reusable parsing from `src/commands/source_edit.rs`.
+  - Value types: `Section`(key/singular), `Pin`(Ref/Branch/None, value), `Selector`(Wildcard/Names), `SourceItem`, `RemoveOutcome`(NotFound/WholeItem/Names).
+  - Mutation fns: `insert_item`, `remove_item`, `remove_names`, `item_exists` — raw line/text editing, **comment-preserving (NOT lossy serde round-trip)**.
+  - Source parsing: `split_at_ref`, `is_remote_source`, `ensure_local_config`.
+  - Error map: `crate::error::{err,Result}` → `crate::{err,Result}` (AgentEnvError::Message channel). Visibility `pub(crate)`→`pub` so lib re-exports.
+  - Out of scope (deferred TASK-0013/0014): `sync_after`, default-path resolve, clap/print drivers (add.rs/remove.rs command logic).
+- **DUAL GATE:**
+  - X parity: kasetto `#[cfg(test)] mod tests` ported VERBATIM (all pass) + 6 split_at_ref/local-config tests + 3 added comment-preservation gate tests (add & remove preserve surrounding comments).
+  - Y: whole crate green — **130 lib tests** (was 96, +34), clippy `-D warnings` clean, fmt clean, **no-c PASS**.
+- **Comment-preservation verbatim & non-lossy:** YES — text/line-level editing carried over byte-for-byte; no `serde_yaml::from_str`→`to_string` swap.
+- **Commit:** `75b2ec6` (not pushed).
+
+## XC-03 / XC-04 / F-03..F-10 — fsops path/target-resolution cluster (+ dirs/util leaf deps) (TASK-0012) — DONE
+- **Modules:** `crates/agent-env/src/{dirs,util,fsops}.rs` (all NEW); `pub mod` + `pub use` re-exports appended to `lib.rs`.
+- **Ported verbatim from** kasetto v3.2.0 `src/fsops/{dirs,mod,copy,settings}.rs` (NO downgrade — every branch/error path/cfg-arm carried):
+  - `dirs` (XC-03): `dirs_home` (ERR "HOME is not set"), `dirs_xdg_{config,data,cache}_home` (honor `XDG_*_HOME` only when non-empty, else `$HOME/.config|.local/share|.cache`), and the per-product dir helpers.
+    - **Kasetto-dir rename:** the product-self-named `dirs_kasetto_{config,data,cache}` → **`dirs_agent_env_{config,data,cache}`** (append `agent-env`, not `kasetto`). The agent-NATIVE XDG bases are kept byte-for-byte; only the kasetto-self-named leaf changed (documented in the module header + each fn doc). Threaded through `resolve_mcp_settings_targets` (the `kasetto_config` arg → `agent_env_config`).
+  - `util` (XC-04): `now_unix` / `now_unix_str` (saturating `unwrap_or(0)` pre-epoch guard).
+  - `fsops` (F-03..F-10): `copy_dir`/`copy_dir_contents`/`copy_file` (MAX_COPY_DEPTH=32 symlink-cycle ERR, dst removed first, symlink-followed via canonicalize, `fs::copy` +x preserve, `cfg(windows)` READONLY strip kept); `SettingsFile::load/save` (JSON, load-existing-or-`{}`, "invalid settings JSON" ERR, pretty save + parent-dir create) — **self-contained, faithful SUPERSET of parallel PR #73** (`fsops::SettingsFile`); `resolve_path` (F-05, leading-`~/` & bare `~` only); `select_targets`+`BrokenSkill`+`TargetSelection` (F-06: wildcard `*`→all sorted, Name→lookup-or-broken, Obj{path}→SKILL.md-checked else broken, non-`*` wildcard → "invalid skills field"); `resolve_destinations` (F-07); `resolve_mcp_settings_targets` (F-08); `resolve_command_targets` (F-09); `scope_root`/`relativize_dest`/`resolve_dest` (F-10 lock-portability core).
+- **Integration / mapping:** reused agent-env `config` (SourceSpec/SkillsField/SkillTarget/Config/Scope) + `Agent` path methods (M-11..M-16: `project_path`/`global_path`/`mcp_*_target`/`commands_*_path`) + `agent::{McpSettingsTarget,CommandTarget}`. kasetto `err(...)`/`Result` → `crate::{err,Result}` (`AgentEnvError::Message`). Added `AgentEnvError::Json(#[from] serde_json::Error)` variant so `SettingsFile::save`'s `?` on the pretty serializer maps cleanly (matches PR #73's documented intent).
+- **DUAL GATE:**
+  - X parity: kasetto `#[cfg(test)] mod tests` from `mod.rs`/`copy.rs`/`settings.rs` ported VERBATIM + required coverage: `resolve_path` leading-`~`-only (mid-path `~` literal), `select_targets` wildcard sort + missing/explicit-path/relative-path + non-`*` error + Obj-missing-SKILL.md, `scope_root`/`relativize_dest`/`resolve_dest` round-trip + out-of-root, copy +x / symlink-follow / **depth-guard symlink-cycle refusal**, `resolve_destinations`/`resolve_mcp_settings_targets`/`resolve_command_targets` per-agent + dedupe + filter. (HOME-dependent tests made race-immune — no process-global env mutation, since other modules' tests poke HOME concurrently.)
+  - Y not regressed: whole crate green — **159 lib tests** (was 130, +29) + 1 doctest, clippy `-D warnings` clean, fmt clean, **no-c PASS** (rustls 0.23.40 on ring 0.17.14, zero aws-lc/openssl/C-SQLite).
+- **Invariants:** non-printing library (Result, no println/clap), `forbid(unsafe_code)`, snake_case modules / PascalCase types / SCREAMING_SNAKE consts (`MAX_COPY_DEPTH`), inline `#[cfg(test)] mod tests`, MSRV 1.80, cross-platform `cfg(windows)` arm preserved, no C / one rustls ring-only.
+- **No stub / no dropped branch.** Faithful superset of PR #73; later merge reconciles to this copy.
