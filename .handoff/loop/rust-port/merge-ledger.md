@@ -48,7 +48,7 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 - [~] M-19 · port-fresh · agent-env::{command_global_targets,command_project_targets} · merge-into agent-env::agent · -> envctl_agent_env::agent::{command_global_targets,command_project_targets} · refs: · status: merged (agent.rs:132,137), re-verify pending
 - [~] M-20 · port-fresh · agent-env::config (private helpers) · merge-into agent-env::agent · -> envctl_agent_env::agent::{dedup_targets,cmd,vscode_user_mcp_json,mcp_servers_target} · refs: · status: merged (agent.rs:98-164), re-verify pending
 - [~] M-21 · port-fresh · agent-env::config::resolve_scope · merge-into agent-env::config · -> envctl_agent_env::config::resolve_scope · refs: · status: merged (CLI>cfg>Global), re-verify pending; file-read fallback = M-22
-- [ ] M-22 · port-fresh · agent-env::config::resolve_scope (fallback arm) · merge-into agent-env::config · -> envctl_agent_env::config::resolve_scope (fallback) · refs: · status: not merged (deferred arm, TASK-0013)
+- [~] M-22 · port-fresh · agent-env::config::resolve_scope (fallback arm) · merge-into agent-env::config · -> envctl_agent_env::config::resolve_scope (fallback) · refs: · status: not merged (deferred arm, TASK-0013)
 - [~] M-23 · port-fresh · agent-env::lock::AgentLockEntry (folded) · merge-into agent-env::lock · -> envctl_agent_env::lock::AgentLockEntry · refs: research#D1 · status: merged, re-verify pending
 - [~] M-24 · port-fresh · agent-env::lock (version/state) · merge-into agent-env::lock · -> envctl_agent_env::lock::{LOCK_VERSION,AgentLockFile} · refs: research#D1 · status: merged, re-verify pending
 - [~] M-25 · port-fresh · agent-env::report::{Summary,Action,Report,InstalledSkill,SyncFailure} · merge-into agent-env::report · -> envctl_agent_env::report::* · refs: · status: merged (report.rs), re-verify pending
@@ -95,14 +95,14 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 - [~] S-11 · port-fresh · agent-env::source::auth_for_request_url · merge-into agent-env::source · -> envctl_agent_env::source::auth_for_request_url · refs: · status: merged, re-verify pending
 - [~] S-12 · port-fresh · agent-env::source::auth_env_inline_help · merge-into agent-env::source · -> envctl_agent_env::source::auth_env_inline_help · refs: · status: merged, re-verify pending
 - [~] S-13 · port-fresh · agent-env::source::http_fetch_auth_hint · merge-into agent-env::source · -> envctl_agent_env::source::http_fetch_auth_hint · refs: · status: merged, re-verify pending
-- [ ] S-14 · port-fresh · agent-env::source::materialize_source · merge-into agent-env::source · -> envctl_agent_env::source::{materialize_source,MaterializedSource} · refs: · status: not merged
-- [ ] S-15 · port-fresh · agent-env::source::materialize_source (Default main→master retry arm) · merge-into agent-env::source · -> envctl_agent_env::source::materialize_source (retry) · refs: · status: not merged (deferred remainder)
-- [ ] S-16 · port-fresh · agent-env::source::{resolve_source_root,repo_name_hint} · merge-into agent-env::source · -> envctl_agent_env::source::{resolve_source_root,repo_name_hint} · refs: · status: not merged
-- [ ] S-17 · port-fresh · agent-env::source::discover · merge-into agent-env::source · -> envctl_agent_env::source::{discover,discover_with_root_name,discover_skills_in_subdir} · refs: · status: not merged
-- [ ] S-18 · port-fresh · agent-env::source::discover_mcps · merge-into agent-env::source · -> envctl_agent_env::source::discover_mcps · refs: research#left-behind (feeds C-04/MC-01) · status: not merged
-- [ ] S-19 · port-fresh · agent-env::source::resolve_mcp_entry · merge-into agent-env::source · -> envctl_agent_env::source::resolve_mcp_entry · refs: · status: not merged
-- [ ] S-20 · port-fresh · agent-env::source::discover_commands · merge-into agent-env::source · -> envctl_agent_env::source::{discover_commands,walk_commands} · refs: research#left-behind (feeds C-03/PR-01) · status: not merged
-- [ ] S-21 · port-fresh · agent-env::source::resolve_command_entry · merge-into agent-env::source · -> envctl_agent_env::source::{resolve_command_entry,resolve_named_command} · refs: · status: not merged
+- [~] S-14 · port-fresh · agent-env::source::materialize_source · merge-into agent-env::source · -> envctl_agent_env::source::{materialize_source,MaterializedSource} · refs: · status: not merged
+- [~] S-15 · port-fresh · agent-env::source::materialize_source (Default main→master retry arm) · merge-into agent-env::source · -> envctl_agent_env::source::materialize_source (retry) · refs: · status: not merged (deferred remainder)
+- [~] S-16 · port-fresh · agent-env::source::{resolve_source_root,repo_name_hint} · merge-into agent-env::source · -> envctl_agent_env::source::{resolve_source_root,repo_name_hint} · refs: · status: not merged
+- [~] S-17 · port-fresh · agent-env::source::discover · merge-into agent-env::source · -> envctl_agent_env::source::{discover,discover_with_root_name,discover_skills_in_subdir} · refs: · status: not merged
+- [~] S-18 · port-fresh · agent-env::source::discover_mcps · merge-into agent-env::source · -> envctl_agent_env::source::discover_mcps · refs: research#left-behind (feeds C-04/MC-01) · status: not merged
+- [~] S-19 · port-fresh · agent-env::source::resolve_mcp_entry · merge-into agent-env::source · -> envctl_agent_env::source::resolve_mcp_entry · refs: · status: not merged
+- [~] S-20 · port-fresh · agent-env::source::discover_commands · merge-into agent-env::source · -> envctl_agent_env::source::{discover_commands,walk_commands} · refs: research#left-behind (feeds C-03/PR-01) · status: not merged
+- [~] S-21 · port-fresh · agent-env::source::resolve_command_entry · merge-into agent-env::source · -> envctl_agent_env::source::{resolve_command_entry,resolve_named_command} · refs: · status: not merged
 
 ## src/lock.rs (SHA-256 agent-asset lock — separate from engine FNV-1a component lock)
 
@@ -115,17 +115,17 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 
 ## src/state.rs (machine-local agent-sync runtime — preserve lock↔runtime separation)
 
-- [ ] ST-01 · port-fresh · agent-env::runtime::RuntimeState · new agent-env::runtime (MIRROR engine's separation, do NOT fold into engine::runtime — different payload) · -> envctl_agent_env::runtime::RuntimeState · refs: research#D3, AP-02 · status: not merged
-- [ ] ST-02 · port-fresh · agent-env::runtime::* · new agent-env::runtime · -> envctl_agent_env::runtime::{runtime_state_path,load,save,clear} · refs: research#D3 · status: not merged
+- [~] ST-01 · port-fresh · agent-env::runtime::RuntimeState · new agent-env::runtime (MIRROR engine's separation, do NOT fold into engine::runtime — different payload) · -> envctl_agent_env::runtime::RuntimeState · refs: research#D3, AP-02 · status: not merged
+- [~] ST-02 · port-fresh · agent-env::runtime::* · new agent-env::runtime · -> envctl_agent_env::runtime::{runtime_state_path,load,save,clear} · refs: research#D3 · status: not merged
 
 ## src/profile.rs (SKILL.md metadata)
 
-- [ ] P-01 · port-fresh · agent-env::profile::read_skill_profile · new agent-env::profile · -> envctl_agent_env::profile::{read_skill_profile,read_skill_profile_from_dir} · refs: · status: not merged
-- [ ] P-02 · port-fresh · agent-env::profile::format_updated_ago · new agent-env::profile · -> envctl_agent_env::profile::format_updated_ago · refs: · status: not merged
+- [~] P-01 · port-fresh · agent-env::profile::read_skill_profile · new agent-env::profile · -> envctl_agent_env::profile::{read_skill_profile,read_skill_profile_from_dir} · refs: · status: not merged
+- [~] P-02 · port-fresh · agent-env::profile::format_updated_ago · new agent-env::profile · -> envctl_agent_env::profile::format_updated_ago · refs: · status: not merged
 
 ## src/lib.rs (config-path resolution)
 
-- [ ] CP-01 · port-fresh · agent-env::config_path::default_config_path · new agent-env::config_path (rename KASETTO_CONFIG→envctl) · -> envctl_agent_env::config_path::{default_config_path,resolve_config_path,Preferences} · refs: · status: not merged
+- [~] CP-01 · port-fresh · agent-env::config_path::default_config_path · new agent-env::config_path (rename KASETTO_CONFIG→envctl) · -> envctl_agent_env::config_path::{default_config_path,resolve_config_path,Preferences} · refs: · status: not merged
 
 ## src/commands/* (business logic → Engine methods; clap glue = front-end)
 
@@ -133,8 +133,8 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 - [ ] C-02 · port-fresh · agent-sync skills phase · merge-into engine (agent_sync internals) · -> envctl_engine (sync_skills) · refs: · status: not merged
 - [ ] C-03 · port-fresh · agent-sync commands phase · merge-into engine (agent_sync internals; needs PR-01) · -> envctl_engine (sync_commands) · refs: research#left-behind PR-01 (dep) · status: not merged
 - [ ] C-04 · port-fresh · agent-sync mcps phase · merge-into engine (agent_sync internals; needs MC-01) · -> envctl_engine (sync_mcps) · refs: research#left-behind MC-01 (dep) · status: not merged
-- [ ] C-05 · port-fresh · agent-env::sync::remove_stale (shared) · new agent-env::sync · -> envctl_agent_env::sync::remove_stale · refs: · status: not merged
-- [ ] C-06 · port-fresh · agent-env::sync (key conventions) · new agent-env::sync · -> envctl_agent_env::sync (skill_key/asset-id conventions) · refs: · status: not merged
+- [~] C-05 · port-fresh · agent-env::sync::remove_stale (shared) · new agent-env::sync · -> envctl_agent_env::sync::remove_stale · refs: · status: not merged
+- [~] C-06 · port-fresh · agent-env::sync (key conventions) · new agent-env::sync · -> envctl_agent_env::sync (skill_key/asset-id conventions) · refs: · status: not merged
 - [ ] C-07 · port-fresh · Engine::agent_add · merge-into engine (new Engine method) · -> envctl_engine::Engine::agent_add · refs: · status: not merged
 - [ ] C-08 · port-fresh · Engine::agent_remove · merge-into engine (new Engine method, alias rm) · -> envctl_engine::Engine::agent_remove · refs: · status: not merged
 - [ ] C-09 · port-fresh · Engine::agent_lock (+--check/--upgrade-package) · merge-into engine (new Engine method; NOT the component `lock --check`) · -> envctl_engine::Engine::agent_lock · refs: research#engine-grain (distinct from cli Cmd::Lock@main.rs:269) · status: not merged
