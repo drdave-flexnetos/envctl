@@ -28,14 +28,14 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
 
 ---
 
-## NO-DOWNGRADE FIXES PENDING (found by the parity pass — carry forward, do NOT ignore)
-- **C-12-FIX (engine remote-config rejection):** kasetto's `resolve_local_config_path` ERRs on a
-  `scheme://` config; envctl's engine `resolve_local_config_path` (`crates/engine/src/agent/edit.rs:352`)
-  does `PathBuf::from(c)` verbatim — the comment claims `ensure_local_config` semantics but never calls it.
-  A remote `--config` would NOT be refused at the engine layer = a downgrade. FIX: have it return `Result`
-  and reject remote URLs (reuse `agent_env::config_edit::ensure_local_config`); update the 2 call sites
-  (edit.rs:53,151). Small engine-src cycle + a test. Until fixed, **C-12 stays `[~]`** (split_at_ref +
-  sync_after ARE proven `[x]`-grade; only this guard is missing).
+## NO-DOWNGRADE FIXES (found by the parity pass — carried forward, fixed)
+- **C-12-FIX (engine remote-config rejection): ✅ DONE 2026-06-14.** kasetto's `resolve_local_config_path`
+  ERRs on a `scheme://` config; envctl's engine version previously did `PathBuf::from(c)` verbatim (a
+  downgrade). FIXED: `crates/engine/src/agent/edit.rs` `resolve_local_config_path` now returns
+  `anyhow::Result<PathBuf>` and routes the config string through `agent_env::config_edit::ensure_local_config`
+  (call sites edit.rs:53,151 propagate `?`). Test `c12_engine_verbs_reject_remote_config_accept_local`
+  asserts both `agent_add` and `agent_remove` refuse a remote `--config`. C-12 → `[x]`. Engine non-printing
+  + fail-closed preserved; clippy (`--workspace -D warnings`) / no-c / shape green.
 
 ## Parity-verifier pass — 2026-06-14 (cluster: C-* VERB commands — Engine integration tests)
 
@@ -313,7 +313,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] C-09 · src/commands/lock.rs:run + LockOptions + refresh_asset_revisions + diff_summary + Drift/DriftStatus + upgrade_active · `lock` (verb 4): re-resolve skills (materialize+hash, upgrade-package filter carries unchanged), refresh asset revision pins (no content hash), write lock. `--check`: diff prev vs rebuilt (added/removed/updated by hash|rev for skills + rev for assets), exit(1) on drift, never write. `--upgrade-package`: restrict re-resolve to sources providing named skills. · -> Engine::agent_lock (kasetto lock + --check + --upgrade-package → `agent lock`) · deps: S-14,F-06,F-01,L-05,L-06,P-01
 - [x] C-10 · src/commands/list.rs:run + load_skills_mcps_commands + installed_skills_from_lock + {mcp,command}_asset_entries + AssetEntry + scope helpers · `list`/`status` (verbs 7,10): read lock(s) (scope or merged global+project), build InstalledSkill (read_skill_profile, updated_ago) + MCP/command asset rows, sort, filter by ListKind. Drift/status folds into list+lock --check per ADR. · -> Engine::agent_list (kasetto list/status → `agent list`) · deps: L-05,P-01,P-02,ST-02,M-25
 - [x] C-11 · src/commands/clean.rs:run + apply_removals + CleanOutput · `clean` (verb 8): load lock → count skills/mcps/commands → apply_removals (rm skill dirs, rm command files, remove_mcp_server from all known-agent targets) → clear_all + save + clear runtime. dry_run previews; **fail-closed best-effort** (ignores per-item rm errors, never partial-prunes the lock before disk). · -> Engine::agent_clean (kasetto clean → `agent clean`) · deps: L-05,MC-02,M-17,F-10,ST-02
-- [~] C-12 · src/commands/source_edit.rs:resolve_local_config_path + split_at_ref + sync_after · shared add/remove plumbing: ERR on remote config edit; `@<ref>` tail-split (SSH/userinfo round-trip safe); sync_after runs a plain sync post-edit. · -> agent-env::config_edit::{resolve_local_config_path,split_at_ref} + Engine sync_after · deps: CP-01,C-01 ⟨parity 2026-06-14: split_at_ref (6 verbatim) + sync_after PROVEN; **remote-config-reject GAP** — engine resolve_local_config_path (edit.rs:352) does PathBuf::from verbatim, never rejects scheme:// like kasetto → NO-DOWNGRADE FIX needed (return Result, reject remote). See C-12-FIX.⟩
+- [x] C-12 · src/commands/source_edit.rs:resolve_local_config_path + split_at_ref + sync_after · shared add/remove plumbing: ERR on remote config edit; `@<ref>` tail-split (SSH/userinfo round-trip safe); sync_after runs a plain sync post-edit. · -> agent-env::config_edit::{resolve_local_config_path,split_at_ref} + Engine sync_after · deps: CP-01,C-01 ⟨parity 2026-06-14: split_at_ref (6 verbatim) + sync_after + **remote-config-reject NOW ENFORCED at the verb** (C-12-FIX DONE: engine resolve_local_config_path routes through ensure_local_config; agent_add/agent_remove both reject scheme://) — full parity, no downgrade.⟩
 - [x] C-13 · src/commands/init.rs:run + TEMPLATE + init_config_path · `init` (verb 9): write commented YAML template (local or `--global`); ERR/prompt on existing (TTY overwrite). Folds into `agent add` (init path) / `agent sync` bootstrap per ADR. BUSINESS = template + path resolution; the TTY prompt + banner are FRONT-END. · -> Engine::agent_init_template (folded into add/sync) · deps: XC-03,CP-01
 - [x] C-14 · src/commands/uninstall.rs:run + count_assets + UninstallCounts + remove_{dir,file}_if_exists · `self uninstall`: count assets → clean::run → remove config+data dirs + kst + binary. ENVCTL-SCOPED: binary/dir removal is envctl's own install concern; the ASSET-cleanup portion folds into `agent clean`. The binary-self-removal is FRONT-END/divergent. · -> Engine::agent_clean (asset portion only) · deps: C-11,L-05
 
