@@ -1,9 +1,18 @@
 # HANDOFF — rust-port-merge (kasetto → envctl, Epic C absorption)
-closed_utc: 2026-06-14 (parity SESSION-2, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
-cycle_budget: 3   cycles_total: 13   cycles_this_session: 3 (RESET to 0 on resume)
-last_item: PARITY cluster C-* VERBS (+7 [x])   next_item: (a) ONE Engine/network integration cycle exercising materialize/download → closes S-07/S-15/CFG-03 + M-22; (b) C-12-FIX engine remote-reject + S-12/S-13 pub-seam; (c) TASK-0014 (CLI/GUI front-end, the 13 [≠])
-orchestrator_phase: PARITY-VERIFIER PASS (merge 0 [ ] to-merge; parity 93 [x] / 7 [~] / 2 [ ] / 13 [≠] = DONE-equiv 106/115)
-gate_status: PASS every cycle (agent-env 311 + engine 96 tests; no-c/fmt green)
+closed_utc: 2026-06-14 (parity SESSION-3, budget 3/3 reached)   branch: develop   worktree: create FRESH off origin/develop
+cycle_budget: 3   cycles_total: 16   cycles_this_session: 3 (RESET to 0 on resume)
+last_item: FINAL parity cluster (+3 [x]: XC-01/XC-02/CFG-03)   next_item: **NOT MORE PARITY** — TASK-0014 (the 13 [≠] front-end CLI/GUI verbs, thin adapters over the verified engine — route via feature-forge). Optional: close S-15 via an HTTPS test endpoint / fetch-DI seam.
+orchestrator_phase: PARITY-VERIFIER PASS **COMPLETE AT OFFLINE CEILING** (parity 101 [x] / 1 [~] / 0 [ ] / 13 [≠] = DONE-equiv 114/115; only S-15 live-network unverified)
+gate_status: PASS every cycle (agent-env 330 + engine 96 tests; clippy -D warnings / no-c / fmt green)
+
+## ⭐ STATUS: the kasetto→envctl ABSORPTION + PARITY is COMPLETE through the engine.
+101/102 testable rows are differentially parity-verified `[x]` against kasetto v3.2.0; the 13 `[≠]` are
+front-end (envctl owns rendering, semantics already `[x]` via the C-* engine tests). The ONLY unverified
+row is **S-15** (`materialize_source` live main→master HTTP retry) — its CODE matches kasetto
+`src/source/mod.rs:93-100` line-for-line, but the archive URLs are HTTPS-hardcoded with no fetch DI seam, so
+a std-only `TcpListener` mock can't reach it offline (honest residue, recorded — never faked). Close it with
+a real HTTPS test endpoint or a fetch-injection seam if/when desired. **The next real work is TASK-0014
+(front-end), which is a feature-forge job, NOT another parity cycle in this loop.**
 
 ## SESSION-2 (2026-06-14 successor, parity-verifier pass — 3 cycles, all PASS)
 First landed session-1's stack (#80/#81/#82 all MERGED). Then:

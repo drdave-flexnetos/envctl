@@ -13,11 +13,20 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 2   # SESSION-3: cycle1 = C-12-FIX; cycle2 = residue close S-07/S-12/S-13/M-22 (in-crate + engine)
-cycles_total: 15
-parity: 98 [x] verified · 3 [~] (XC-01,XC-02,CFG-03) · 1 [ ] (S-15) · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 111/115)
-ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity residue + TASK-0014 front-end)
-last_item: residue close — +4 [x] (S-07,S-12,S-13,M-22) via in-crate #[cfg(test)] in agent-env/src/source.rs (S-12/S-13 +11) + pre-existing S-07/M-22 tests flipped; agent-env 311→322, engine 96; clippy/no-c green
+cycles_this_session: 3   # SESSION-3 BUDGET 3/3 REACHED → HAND OFF. cycle1=C-12-FIX, cycle2=residue close, cycle3=XC-01/02/CFG-03+S-15
+cycles_total: 16
+parity: 101 [x] verified · 1 [~] (S-15 live-network residue) · 0 [ ] · 13 [≠] front-end (parity-ledger.md authoritative; DONE-equiv 114/115 — PARITY AT OFFLINE CEILING)
+ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION + PARITY COMPLETE THROUGH ENGINE; remaining = S-15 residue + TASK-0014 front-end)
+last_item: FINAL parity cluster — +3 [x] (XC-01 error channel, XC-02 http_client, CFG-03 fetch_config_text via std TcpListener mock); S-15 [~] honest live-network residue (HTTPS-hardcoded, no DI seam, code matches kasetto line-for-line); agent-env 322→330
+session3_summary: SESSION-3 successor 2026-06-14, budget 3/3. Landed session-2 stack (#83/#84 merged; #85/#86
+  rebased+armed). cycle1 C-12-FIX (no-downgrade engine fix, #86); cycle2 residue close S-07/S-12/S-13/M-22 (#87);
+  cycle3 XC-01/XC-02/CFG-03 +S-15-residue (#88). parity 93→101 [x] (DONE-equiv 114/115). **PARITY-VERIFIER PASS
+  COMPLETE through the engine — only S-15 (live main→master HTTP retry) unverified offline (honest residue).**
+  PR-STACK #85→#86→#87→#88 linear (rebase each onto develop as parent merges; resume-baseline self-heals).
+  **NEXT WORK IS NO LONGER PARITY CYCLES — it's TASK-0014** (the 13 [≠] front-end: CLI `envctl agent
+  {sync,add,remove,lock,list,clean}` + GUI, thin adapters over the now-fully-verified engine methods — route
+  via feature-forge, NOT this parity loop). Optional: close S-15 via an HTTPS test endpoint / fetch-DI seam.
+  Minor debt: 4 --all-targets-only unnecessary_to_owned lints in engine/tests/agent_sync_parity.rs (not in CI).
 session3_note: SESSION-3 successor 2026-06-14. Landed session-2 stack (#83 merged; #84/#85 rebased onto
   fresh develop c083d0f, armed). Cycle 1 = C-12-FIX (the no-downgrade finding from session-2): engine
   src change crates/engine/src/agent/edit.rs (resolve_local_config_path → anyhow::Result, route through
