@@ -194,3 +194,16 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
 - [≠] AP-01 · kasetto component-lock analog · envctl `crates/engine/src/lock.rs` is the **FNV-1a** component lock (LockDriftKind Added/Removed/Changed, `lock --check` CI gate) — UNTOUCHED. agent-env adds a SEPARATE keyed SHA-256 section (L-01..L-06). Rehashing components under SHA-256 = downgrade. · -> (engine lock, untouched) · deps: none
 - [≠] AP-02 · kasetto runtime analog · envctl `crates/engine/src/runtime.rs` — preserve lock↔runtime separation (ST-01/ST-02 reuse or mirror it). · -> (engine runtime) · deps: none
 - [≠] AP-03 · kasetto doctor · envctl `doctor` already ported — agent-env does not re-implement (see FRONTEND-09). · -> (engine doctor) · deps: none
+
+---
+
+## LEFT-BEHIND (added 2026-06-13 by the rust-port-MERGE verify sweep — were dep-referenced but unrowed)
+
+The verify/merge researcher's left-behind sweep found these kasetto v3.2.0 capabilities referenced
+as deps (MC-01/MC-02/PR-01) in C-03/C-04/C-11 but never given a row. agent-env has the format TYPE
+shells (M-26/M-27) + target resolution (M-13..M-20) but NOT these merge/transform IMPLEMENTATIONS.
+The merge-ledger (`.handoff/loop/rust-port/merge-ledger.md`) is authoritative in verify-merge mode.
+
+- [ ] MC-01 · src/mcps/{mod,merge,pack}.rs:merge_mcp_config/merge_into_json_key/merge_mcp_servers_object/merge_vscode_servers_object/merge_opencode_mcp_object/read_source_mcp_servers · the ADDITIVE, never-clobber MCP merge across 3 JSON formats (mcpServers/VsCode/OpenCode) — MUST preserve pre-existing servers (global broker/repowire/weave). #1 no-downgrade risk. · -> agent-env::mcp · deps: M-26,F-04
+- [ ] MC-02 · src/mcps/{mod,codex}.rs:remove_mcp_server/servers_present_in_settings/merge_codex_config_toml/json_mcp_server_to_codex_toml_table · the CodexToml (4th) MCP format + server removal + presence check (TOML, additive). · -> agent-env::mcp (codex) · deps: MC-01
+- [ ] PR-01 · src/prompts/{mod,parse,transform}.rs:apply_command/Parsed::parse/render/destination_path · the 5 command-format transforms (MarkdownFrontmatter nested-path, MarkdownPlain, PromptMd, PromptFile {{{input}}}/invokable, GeminiToml) + frontmatter split (CRLF-norm, unclosed `---`→err). · -> agent-env::command · deps: M-27,F-04

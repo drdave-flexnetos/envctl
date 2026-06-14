@@ -1,21 +1,31 @@
-# Loop state — rust-port (kasetto → envctl agent-env, Epic C absorption)
+# Loop state — rust-port-MERGE (kasetto → envctl, Epic C absorption, VERIFY/MERGE mode)
 session_started: 2026-06-13T17:23:35Z
-loop: rust-port
+loop: rust-port-merge
+mode: verify-merge                                        # dest_repo set → classification-driven; reuse-Y units skip the fresh port, verify-only vs X
 branch: task-0012-agent-env
 worktree: /home/drdave/Desktop/meta/.worktrees/task-0012-agent-env/envctl
-source_root: /home/drdave/Desktop/meta/kasetto            # pivoshenko/kasetto v3.2.0 (Cargo 3.2.0, ec01cca)
-source_toolchain: rust                                    # source is itself Rust (kasetto) → parity = behavior, not language translation
-rust_target: crates/agent-env (package envctl-agent-env)  # + later engine/cli wiring (TASK-0013/0014)
+state_dir: .handoff/loop/rust-port/                       # NAMESPACED (avoids clobbering the forge-loop's flat .handoff/loop/{backlog,loop_state,HANDOFF}.md). Resumes read state HERE, not the flat path.
+source_root: /home/drdave/Desktop/meta/kasetto            # X = pivoshenko/kasetto v3.2.0 (Cargo 3.2.0, ec01cca) — source-of-truth, itself Rust
+source_toolchain: cargo                                   # verifier RUNS kasetto (cargo) to differentially diff against
+dest_repo: envctl                                         # Y = where the merge lands (crates/agent-env now; crates/engine for runtime units already in envctl)
+dest_worktree: /home/drdave/Desktop/meta/.worktrees/task-0012-agent-env/envctl
+dest_branch: task-0012-agent-env
+dest_base: develop
+rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
 cycles_this_session: 1
 cycles_total: 1
-ledger: parity 0/112 verified · 55 ported [~] · 44 todo [ ] · 13 front-end [≠]
+ledger: parity 0/112 verified · 55 ported [~] · 44 todo [ ] · 13 front-end [≠]  (merge-ledger seeded from this — see merge-ledger.md)
 last_item: model/* completion (M-09 finish, M-11..M-20, M-25, M-26, M-27) — ported [~], build-health GREEN
-status: DISCOVER complete + 1 port cycle done. Seed (6ecb270) + model/* port committed. NEXT (resume):
-  run the PARITY-VERIFIER pass to upgrade the 55 [~] (foundational config/extend/source/hash/lock +
-  model/*) to [x] via differential test vs kasetto v3.2.0, THEN continue Phase-2 ITERATE on the 44 [ ]
-  (top dep-ready: XC-03 dirs, XC-04 util, then fsops F-03..F-10, config_edit FE-*, MCP merge, commands).
-last_update: 2026-06-13T17:40:00Z
+status: VERIFY-MERGE MODE engaged 2026-06-13 (owner: "rerun the kasetto integration via rust-port-merge;
+  full feature, nothing left behind"). Harness EJECTED into envctl/.claude (12 skills + 10 agents; FF
+  continuity-steward preserved). NEXT: (1) researcher builds reports/research.md reuse map (kasetto unit
+  ⟷ what envctl ALREADY provides — CLAUDE.md notes engine already has lock/runtime/doctor/lock--check →
+  expect reuse-Y/extend-Y units, NOT all port-fresh) + classify every unit in merge-ledger.md; (2) the
+  DUAL GATE per unit: differentially verify vs kasetto X AND assert envctl Y not regressed; (3) left-behind
+  sweep (every kasetto unit represented). The 55 [~] re-verify vs kasetto → [x]; the 44 [ ] split into
+  reuse-Y (verify envctl's existing symbol) / port-fresh / extend-Y. DONE only at 100% merged + verified.
+last_update: 2026-06-13T18:05:00Z
 
 ## Run framing (read before any cycle)
 - This rust-port runs as the IMPLEMENTATION ENGINE for forge-loop **TASK-0012** (Epic C: kasetto
