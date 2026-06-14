@@ -13,11 +13,19 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 2
-cycles_total: 7
-ledger: merge 102 [~] merged · 0 [ ] to-merge · 22 [x] parity-verified · 13 [≠] front-end  (ABSORPTION COMPLETE THROUGH ENGINE)
-last_item: TASK-0013 engine wiring (PR #78 MERGED) — Engine::agent_{sync,add,remove,lock,list,clean}
-status: VERIFY-MERGE MODE — strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
+cycles_this_session: 1   # RESUME 2026-06-14: reset to 0 on resume; cycle = source-resolver parity cluster
+cycles_total: 8
+parity: 33 [x] verified · 33 [~] unproven · 36 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠])
+ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass)
+last_item: PARITY cluster source-resolver — +11 [x] (S-09/10/11/14/16/17/18/19/20/21,XC-04); 4 [~] BLOCKED (S-07/12/13/15 pub(crate)/network-only)
+status: VERIFY-MERGE MODE — resume 2026-06-14. PARITY-VERIFIER PASS underway: absorption is structurally
+  complete through the Engine (0 to-merge); remaining DONE work = drive the 80 [~]/[ ] parity rows → [x]
+  via verbatim kasetto golden vectors. Cycle (this session, #1): source-resolver auth/discovery cluster —
+  248 agent-env tests pass (+7 fns), no-c PASS, fmt clean. 4 rows left [~] (BLOCKED honest: pub(crate) /
+  network-only — close via Engine integration surface or pub test seam, NOT by faking). NEXT clusters
+  (highest value): M-09..M-14/M-17 (21-preset path table), CFG-01..03 (recursive extends loader),
+  L-01..06 (SHA-256 asset lock), F-03..F-10+FE-* (fsops/config_edit), C-* command business logic.
+  PRIOR (kept for history): strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
   MCP additive-never-clobber merge (MC-01/MC-02, 4 formats — PR #73 MERGED) + command-format transforms
   (PR-01, 5 formats) + comment-preserving config_edit (FE-*) + fsops resolution/dirs/util (PR #75).
   Tests 78→181; dual gate green every cycle (kasetto-verbatim tests + envctl Y not regressed + no-c).

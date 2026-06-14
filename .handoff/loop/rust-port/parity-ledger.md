@@ -28,6 +28,28 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
 
 ---
 
+## Parity-verifier pass — 2026-06-14 (cluster: source-resolver auth/discovery)
+
+**+11 rows flipped `→ [x]`** by differential golden-vector verification (kasetto v3.2.0 `ec01cca`'s
+own `#[cfg(test)]` modules fed through agent-env's public API). 7 new test fns added to
+`crates/agent-env/tests/parity_vs_kasetto.rs`; suite 12→19 fns; `cargo test -p envctl-agent-env`
+**248 passed, 1 ignored** (baseline 241). Proven: **S-09/S-10/S-11** (env cred readers + auth_for_request_url
+via `archive_url(...).1: UrlRequestAuth` — GitHub Bearer / GitLab PRIVATE-TOKEN+JOB-TOKEN / Bitbucket
+basic / Gitea token; GitLab repo refuses GitHub Bearer), **S-14/S-16** (materialize_source local arm +
+resolve_source_root sub-dir), **S-17** (discover skills root/hint/subdir), **S-18** (discover_mcps),
+**S-19** (resolve_mcp_entry), **S-20/S-21** (discover_commands + resolve_command_entry namespaced),
+**XC-04** (now_unix/now_unix_str).
+
+**4 rows remain `[~]` — parity-by-in-module-oracle, NOT cross-crate differential (honest, not faked):**
+`S-07` (download_extract tar-slip guard — `pub(crate) extract_tar_gz`, network-only entry; covered by
+agent-env in-crate `extract_rejects_parent_dir_traversal`), `S-12` (auth_env_inline_help — `pub(crate)`,
+no public seam), `S-13` (http_fetch_auth_hint — `pub(crate)`, surfaces only in network error message),
+`S-15` (materialize_source main→master retry — live second HTTP, `#[ignore]` network in both kasetto
+and agent-env). Each verified by its own verbatim in-module vector; close via the **Engine integration
+surface** (`Engine::agent_sync` exercises materialize/download — TASK-0013 merged) in a later cycle, or a
+`pub` test seam. The retry/guard LOGIC is present and source-visible; only the offline cross-crate
+differential is blocked.
+
 ## Parity-verifier pass — 2026-06-13 (`/verify`, independent differential vs kasetto v3.2.0)
 
 22 rows flipped `→ [x]` by **runtime differential observation**, not code review. Method: kasetto's
@@ -67,7 +89,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [~] XC-01 · src/error.rs:err/Error/Result · string-message error channel: `err(impl Into<String>)` → `Box<dyn Error+Send+Sync>` via `io::Error::other`; `Result<T>` alias. Every absorbed fn returns this. · -> agent-env::AgentEnvError (thiserror: Message/Io/Yaml) + Result + err() · deps: none
 - [~] XC-02 · src/fsops/http.rs:http_client · process-wide `OnceLock<Client>`; connect-timeout 10s, total 30s, UA `kasetto/{VERSION}`; pure-Rust rustls+ring (NO C TLS). ERROR: build failure cached & re-returned as Message. · -> agent-env::source::http_client · deps: XC-01
 - [ ] XC-03 · src/fsops/dirs.rs:dirs_home/dirs_xdg_{config,data,cache}_home/dirs_kasetto_{config,data,cache} · XDG resolution: HOME (ERR "HOME is not set" if unset); XDG_*_HOME honored only when non-empty else `$HOME/.config|.local/share|.cache`; kasetto_* append `kasetto`. OS quirk: env-driven, no platform branch. · -> agent-env::dirs::* (envctl-namespaced dir) · deps: XC-01
-- [ ] XC-04 · src/fsops/mod.rs:now_unix/now_unix_str · SystemTime since UNIX_EPOCH as secs; `.unwrap_or(0)` on clock-before-epoch. · -> agent-env::util::now_unix{,_str} · deps: none
+- [x] XC-04 · src/fsops/mod.rs:now_unix/now_unix_str · SystemTime since UNIX_EPOCH as secs; `.unwrap_or(0)` on clock-before-epoch. · -> agent-env::util::now_unix{,_str} · deps: none
 
 ---
 
@@ -140,19 +162,19 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 - [x] S-06 · src/source/remote.rs:encode_gitlab_path/encode_github_ref · `/`→`%2F` (GitLab project path & GitHub ref single-segment). SEED. · -> agent-env::source (url encoders) · deps: none
 - [~] S-07 · src/source/remote.rs:download_extract · dst-clean → create → GET(auth) → ERR on unreachable/HTTP-non-2xx(+auth hint)/HTML-instead-of-tar.gz; gzip(flate2)→tar; **tar-slip guard**: strip top dir, ERR "unsafe archive path" on ParentDir; create parent dirs, unpack. SEED (pure-Rust flate2+tar, no C zlib). · -> agent-env::source::download_extract · deps: XC-02,S-08
 - [x] S-08 · src/source/remote.rs:rewrite_browse_to_raw_url + rewrite_{github_blob,gitea_src,gitlab_raw_url} · github blob|raw→raw.githubusercontent.com; gitea src/{branch|commit|tag}→raw (+query); gitlab `/-/raw|blob/`→api/v4 files raw (or `.`-segment heuristic, default ref main). None for unrecognized/non-http. SEED. · -> agent-env::source::rewrite_browse_to_raw_url · deps: S-01
-- [~] S-09 · src/source/auth.rs:UrlRequestAuth + apply + for_{github,gitlab,bitbucket,gitea}_archive · headers+optional basic; apply: basic_auth then headers. GitHub Bearer; GitLab PRIVATE-TOKEN|JOB-TOKEN; Bitbucket basic; Gitea `token`. SEED. · -> agent-env::source::UrlRequestAuth · deps: S-10
-- [~] S-10 · src/source/auth.rs:{github,gitlab,gitea}_auth_headers/bitbucket_basic_credentials/first_env_var · ENV-ONLY creds (never config/lock): GITHUB_TOKEN|GH_TOKEN→Bearer; GITLAB_TOKEN→PRIVATE-TOKEN else CI_JOB_TOKEN→JOB-TOKEN; BITBUCKET_EMAIL+TOKEN or USERNAME+APP_PASSWORD; GITEA|CODEBERG|FORGEJO_TOKEN→`token`. SEED. · -> agent-env::source (env cred readers) · deps: none
-- [~] S-11 · src/source/auth.rs:auth_for_request_url · classify host → headers/basic for fetching a remote resource (config/archive). SEED. · -> agent-env::source::auth_for_request_url · deps: S-01,S-10
+- [x] S-09 · src/source/auth.rs:UrlRequestAuth + apply + for_{github,gitlab,bitbucket,gitea}_archive · headers+optional basic; apply: basic_auth then headers. GitHub Bearer; GitLab PRIVATE-TOKEN|JOB-TOKEN; Bitbucket basic; Gitea `token`. SEED. · -> agent-env::source::UrlRequestAuth · deps: S-10
+- [x] S-10 · src/source/auth.rs:{github,gitlab,gitea}_auth_headers/bitbucket_basic_credentials/first_env_var · ENV-ONLY creds (never config/lock): GITHUB_TOKEN|GH_TOKEN→Bearer; GITLAB_TOKEN→PRIVATE-TOKEN else CI_JOB_TOKEN→JOB-TOKEN; BITBUCKET_EMAIL+TOKEN or USERNAME+APP_PASSWORD; GITEA|CODEBERG|FORGEJO_TOKEN→`token`. SEED. · -> agent-env::source (env cred readers) · deps: none
+- [x] S-11 · src/source/auth.rs:auth_for_request_url · classify host → headers/basic for fetching a remote resource (config/archive). SEED. · -> agent-env::source::auth_for_request_url · deps: S-01,S-10
 - [~] S-12 · src/source/auth.rs:auth_env_inline_help · per-host-family env-var hint string (GitHub/GitLab/Bitbucket/Gitea/none). SEED. · -> agent-env::source::auth_env_inline_help · deps: S-01
 - [~] S-13 · src/source/auth.rs:http_fetch_auth_hint · 401|403→" - {help}"; 404→" - if private, {help}"; else "". SEED. · -> agent-env::source::http_fetch_auth_hint · deps: S-12
-- [ ] S-14 · src/source/mod.rs:materialize_source + MaterializedSource · http: parse → git_pin → fetch+extract (ref/branch/Default), source_revision label; **main→master retry on Default** (second download_extract, ERR appends "also tried master"); resolve_source_root(sub_dir); discover_with_root_name(hint). local: resolve_path, no cleanup_dir, rev "local". SEED partial — S-15 covers main→master retry remainder. NOT otherwise in seed. · -> agent-env::source::materialize_source · deps: S-02,S-05,S-07,S-16,S-17,F-05
+- [x] S-14 · src/source/mod.rs:materialize_source + MaterializedSource · http: parse → git_pin → fetch+extract (ref/branch/Default), source_revision label; **main→master retry on Default** (second download_extract, ERR appends "also tried master"); resolve_source_root(sub_dir); discover_with_root_name(hint). local: resolve_path, no cleanup_dir, rev "local". SEED partial — S-15 covers main→master retry remainder. NOT otherwise in seed. · -> agent-env::source::materialize_source · deps: S-02,S-05,S-07,S-16,S-17,F-05
 - [ ] S-15 · src/source/mod.rs:materialize_source (GitPin::Default main→master retry) · live second HTTP attempt to `master` when `main` 404s; SEED `archive_url(GitPin::Default)` returns the `main` URL only — the RETRY is the materializer's job. SEED-DEFERRED remainder (TASK-0013). · -> agent-env::source::materialize_source (retry arm) · deps: S-14
-- [ ] S-16 · src/source/mod.rs:resolve_source_root + repo_name_hint · sub_dir: empty→ERR; absolute→ERR "must be relative"; ParentDir|RootDir→ERR "must not escape"; not-exists→ERR; not-dir→ERR. repo_name_hint: last path segment per host variant. NOT in seed. · -> agent-env::source::{resolve_source_root,repo_name_hint} · deps: S-02
-- [ ] S-17 · src/source/mod.rs:discover/discover_with_root_name/discover_skills_in_subdir · root SKILL.md→named by hint; scan `<root>/` + `<root>/skills/` for `*/SKILL.md`; WARN on subdir shadowing root skill (eprintln). NOT in seed. · -> agent-env::source::discover · deps: none
-- [ ] S-18 · src/source/mod.rs:discover_mcps · root `.mcp.json`/`mcp.json` + `mcps/*.json`; WARN if legacy `mcp/` present w/o `mcps/` (eprintln). NOT in seed. · -> agent-env::source::discover_mcps · deps: none
-- [ ] S-19 · src/source/mod.rs:resolve_mcp_entry · Name→`mcps/{name}.json`; Obj{path}→`{path}/{name}.json` (default mcps/); auto-append `.json`; ERR "MCP entry not found". NOT in seed. · -> agent-env::source::resolve_mcp_entry · deps: M-08
-- [ ] S-20 · src/source/mod.rs:discover_commands/walk_commands · walk `<root>/commands/**/*.md`; nested dirs → `:`-namespaced names (git/commit.md→`git:commit`); skip non-md. NOT in seed. · -> agent-env::source::discover_commands · deps: none
-- [ ] S-21 · src/source/mod.rs:resolve_command_entry/resolve_named_command · Name→namespaced lookup (ERR "not found"); Obj{path}→`{path}/{name}.md` (ERR "not found"), derived name strips `.md`; Obj{no path}→namespaced lookup. NOT in seed. · -> agent-env::source::resolve_command_entry · deps: S-20
+- [x] S-16 · src/source/mod.rs:resolve_source_root + repo_name_hint · sub_dir: empty→ERR; absolute→ERR "must be relative"; ParentDir|RootDir→ERR "must not escape"; not-exists→ERR; not-dir→ERR. repo_name_hint: last path segment per host variant. NOT in seed. · -> agent-env::source::{resolve_source_root,repo_name_hint} · deps: S-02
+- [x] S-17 · src/source/mod.rs:discover/discover_with_root_name/discover_skills_in_subdir · root SKILL.md→named by hint; scan `<root>/` + `<root>/skills/` for `*/SKILL.md`; WARN on subdir shadowing root skill (eprintln). NOT in seed. · -> agent-env::source::discover · deps: none
+- [x] S-18 · src/source/mod.rs:discover_mcps · root `.mcp.json`/`mcp.json` + `mcps/*.json`; WARN if legacy `mcp/` present w/o `mcps/` (eprintln). NOT in seed. · -> agent-env::source::discover_mcps · deps: none
+- [x] S-19 · src/source/mod.rs:resolve_mcp_entry · Name→`mcps/{name}.json`; Obj{path}→`{path}/{name}.json` (default mcps/); auto-append `.json`; ERR "MCP entry not found". NOT in seed. · -> agent-env::source::resolve_mcp_entry · deps: M-08
+- [x] S-20 · src/source/mod.rs:discover_commands/walk_commands · walk `<root>/commands/**/*.md`; nested dirs → `:`-namespaced names (git/commit.md→`git:commit`); skip non-md. NOT in seed. · -> agent-env::source::discover_commands · deps: none
+- [x] S-21 · src/source/mod.rs:resolve_command_entry/resolve_named_command · Name→namespaced lookup (ERR "not found"); Obj{path}→`{path}/{name}.md` (ERR "not found"), derived name strips `.md`; Obj{no path}→namespaced lookup. NOT in seed. · -> agent-env::source::resolve_command_entry · deps: S-20
 
 ---
 
