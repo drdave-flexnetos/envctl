@@ -22,8 +22,8 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 
 - [~] XC-01 · port-fresh · agent-env::AgentEnvError/Result/err · merge-into agent-env::lib · -> envctl_agent_env::{AgentEnvError,Result,err} · refs: research#reuse-map · status: merged (seed 6ecb270), re-verify pending
 - [~] XC-02 · port-fresh · agent-env::source::http_client · merge-into agent-env::source · -> envctl_agent_env::source::http_client · refs: research#no-direct-reuse · status: merged, re-verify pending
-- [ ] XC-03 · port-fresh · agent-env::dirs::* · new agent-env::dirs (envctl-namespaced) · -> envctl_agent_env::dirs::* · refs: research#no-direct-reuse (engine has no dirs) · status: not merged
-- [ ] XC-04 · port-fresh · agent-env::util::now_unix{,_str} · new agent-env::util · -> envctl_agent_env::util::now_unix · refs: research#no-direct-reuse · status: not merged
+- [~] XC-03 · port-fresh · agent-env::dirs::* · new agent-env::dirs (envctl-namespaced) · -> envctl_agent_env::dirs::* · refs: research#no-direct-reuse (engine has no dirs) · status: not merged
+- [~] XC-04 · port-fresh · agent-env::util::now_unix{,_str} · new agent-env::util · -> envctl_agent_env::util::now_unix · refs: research#no-direct-reuse · status: not merged
 
 ## src/model/* (config schema / agent presets / lock value types)
 
@@ -65,20 +65,20 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 - [~] CFG-01 · port-fresh · agent-env::extend::load_config_any · merge-into agent-env::extend · -> envctl_agent_env::extend::load_config_any · refs: research#D4 · status: merged (extend.rs:123), re-verify pending
 - [~] CFG-02 · port-fresh · agent-env::extend::load_config_recursive · merge-into agent-env::extend · -> envctl_agent_env::extend::{load_config_recursive,MAX_EXTENDS_DEPTH} · refs: · status: merged, re-verify pending
 - [~] CFG-03 · port-fresh · agent-env::extend::fetch_config_text · merge-into agent-env::extend · -> envctl_agent_env::extend::fetch_config_text · refs: · status: merged, re-verify pending
-- [ ] F-03 · port-fresh · agent-env::fsops::copy_dir · new agent-env::fsops · -> envctl_agent_env::fsops::{copy_dir,copy_dir_contents,copy_file} · refs: research#no-direct-reuse (engine has no copy) · status: not merged
+- [~] F-03 · port-fresh · agent-env::fsops::copy_dir · new agent-env::fsops · -> envctl_agent_env::fsops::{copy_dir,copy_dir_contents,copy_file} · refs: research#no-direct-reuse (engine has no copy) · status: not merged
 - [~] F-04 · port-fresh · agent-env::fsops::SettingsFile · new agent-env::fsops · -> envctl_agent_env::fsops::SettingsFile · refs: research#left-behind (consumed by MC-01) · status: MERGED 2026-06-13 (agent-env::fsops::SettingsFile, consumed by mcp)
-- [ ] F-05 · port-fresh · agent-env::fsops::resolve_path · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_path · refs: · status: not merged
-- [ ] F-06 · port-fresh · agent-env::fsops::select_targets · new agent-env::fsops · -> envctl_agent_env::fsops::{select_targets,BrokenSkill,TargetSelection} · refs: · status: not merged
-- [ ] F-07 · port-fresh · agent-env::fsops::resolve_destinations · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_destinations · refs: · status: not merged
-- [ ] F-08 · port-fresh · agent-env::fsops::resolve_mcp_settings_targets · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_mcp_settings_targets · refs: · status: not merged
-- [ ] F-09 · port-fresh · agent-env::fsops::resolve_command_targets · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_command_targets · refs: · status: not merged
-- [ ] F-10 · port-fresh · agent-env::fsops::{scope_root,relativize_dest,resolve_dest} · new agent-env::fsops (agent-asset variant; engine's scope logic is component-grain, not reused) · -> envctl_agent_env::fsops::{scope_root,relativize_dest,resolve_dest} · refs: research#no-direct-reuse · status: not merged
-- [ ] FE-01 · port-fresh · agent-env::config_edit::{Section,Pin,Selector,SourceItem,RemoveOutcome} · new agent-env::config_edit · -> envctl_agent_env::config_edit::* · refs: · status: not merged
-- [ ] FE-02 · port-fresh · agent-env::config_edit::insert_item · new agent-env::config_edit · -> envctl_agent_env::config_edit::insert_item · refs: · status: not merged
-- [ ] FE-03 · port-fresh · agent-env::config_edit::remove_item · new agent-env::config_edit · -> envctl_agent_env::config_edit::remove_item · refs: · status: not merged
-- [ ] FE-04 · port-fresh · agent-env::config_edit::remove_names · new agent-env::config_edit · -> envctl_agent_env::config_edit::remove_names · refs: · status: not merged
-- [ ] FE-05 · port-fresh · agent-env::config_edit::{item_exists,render_item} · new agent-env::config_edit · -> envctl_agent_env::config_edit::{item_exists,render_item} · refs: · status: not merged
-- [ ] FE-06 · port-fresh · agent-env::config_edit (line primitives) · new agent-env::config_edit · -> envctl_agent_env::config_edit::{parse_items,find_top_level,...} · refs: · status: not merged
+- [~] F-05 · port-fresh · agent-env::fsops::resolve_path · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_path · refs: · status: not merged
+- [~] F-06 · port-fresh · agent-env::fsops::select_targets · new agent-env::fsops · -> envctl_agent_env::fsops::{select_targets,BrokenSkill,TargetSelection} · refs: · status: not merged
+- [~] F-07 · port-fresh · agent-env::fsops::resolve_destinations · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_destinations · refs: · status: not merged
+- [~] F-08 · port-fresh · agent-env::fsops::resolve_mcp_settings_targets · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_mcp_settings_targets · refs: · status: not merged
+- [~] F-09 · port-fresh · agent-env::fsops::resolve_command_targets · new agent-env::fsops · -> envctl_agent_env::fsops::resolve_command_targets · refs: · status: not merged
+- [~] F-10 · port-fresh · agent-env::fsops::{scope_root,relativize_dest,resolve_dest} · new agent-env::fsops (agent-asset variant; engine's scope logic is component-grain, not reused) · -> envctl_agent_env::fsops::{scope_root,relativize_dest,resolve_dest} · refs: research#no-direct-reuse · status: not merged
+- [~] FE-01 · port-fresh · agent-env::config_edit::{Section,Pin,Selector,SourceItem,RemoveOutcome} · new agent-env::config_edit · -> envctl_agent_env::config_edit::* · refs: · status: not merged
+- [~] FE-02 · port-fresh · agent-env::config_edit::insert_item · new agent-env::config_edit · -> envctl_agent_env::config_edit::insert_item · refs: · status: not merged
+- [~] FE-03 · port-fresh · agent-env::config_edit::remove_item · new agent-env::config_edit · -> envctl_agent_env::config_edit::remove_item · refs: · status: not merged
+- [~] FE-04 · port-fresh · agent-env::config_edit::remove_names · new agent-env::config_edit · -> envctl_agent_env::config_edit::remove_names · refs: · status: not merged
+- [~] FE-05 · port-fresh · agent-env::config_edit::{item_exists,render_item} · new agent-env::config_edit · -> envctl_agent_env::config_edit::{item_exists,render_item} · refs: · status: not merged
+- [~] FE-06 · port-fresh · agent-env::config_edit (line primitives) · new agent-env::config_edit · -> envctl_agent_env::config_edit::{parse_items,find_top_level,...} · refs: · status: not merged
 
 ## src/source/* (multi-host resolver / URL / archive / auth / discovery)
 
@@ -148,7 +148,7 @@ verb wiring lands in **`crates/engine`** (Engine API) + CLI/GUI. The component-g
 
 - [~] MC-01 · port-fresh · agent-env::mcps::merge_mcp_config (+ merge/codex/pack) · new agent-env::mcps (mod+merge+codex+pack) · -> envctl_agent_env::mcps::merge_mcp_config · refs: research#left-behind (src/mcps/{mod:16,merge:39-53,codex:11,pack:8}; dep of C-04/MC consumers) · status: MERGED 2026-06-13 → agent-env::mcp (dual-gate GREEN, 78→104 tests, never-clobber proven for all 4 formats); 4-format additive MCP merge (mcpServers/VsCode/OpenCode/CodexToml), never-clobber. Depends on F-04 SettingsFile.
 - [~] MC-02 · port-fresh · agent-env::mcps::{remove_mcp_server,servers_present_in_settings} · new agent-env::mcps · -> envctl_agent_env::mcps::{remove_mcp_server,servers_present_in_settings} · refs: research#left-behind (src/mcps/mod:30,58 + codex:35,47; dep of C-11/clean) · status: MERGED 2026-06-13 → agent-env::mcp (dual-gate GREEN, 78→104 tests, never-clobber proven for all 4 formats); per-format server removal + presence (drives needs_fetch_mcps + clean).
-- [ ] PR-01 · port-fresh · agent-env::prompts::apply_command (+ parse + transform) · new agent-env::prompts (mod+parse+transform) · -> envctl_agent_env::prompts::apply_command · refs: research#left-behind (src/prompts/{mod:18,parse:28,transform:40-110}; dep of C-03) · status: MERGED 2026-06-13 → agent-env::mcp (dual-gate GREEN, 78→104 tests, never-clobber proven for all 4 formats); Markdown parse + 5-format render (MarkdownFrontmatter nested-path / MarkdownPlain / PromptMd / PromptFile `{{{ input }}}`+`invokable:true` / GeminiToml) + dest-path/ensure-parent. Depends on M-27 CommandTarget/CommandFormat.
+- [~] PR-01 · port-fresh · agent-env::prompts::apply_command (+ parse + transform) · new agent-env::prompts (mod+parse+transform) · -> envctl_agent_env::prompts::apply_command · refs: research#left-behind (src/prompts/{mod:18,parse:28,transform:40-110}; dep of C-03) · status: MERGED 2026-06-13 → agent-env::mcp (dual-gate GREEN, 78→104 tests, never-clobber proven for all 4 formats); Markdown parse + 5-format render (MarkdownFrontmatter nested-path / MarkdownPlain / PromptMd / PromptFile `{{{ input }}}`+`invokable:true` / GeminiToml) + dest-path/ensure-parent. Depends on M-27 CommandTarget/CommandFormat.
 
 ## FRONT-END — envctl owns rendering (intentional divergence)
 
