@@ -15,8 +15,8 @@ rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring 
 cycle_budget: 3
 cycles_this_session: 2
 cycles_total: 7
-ledger: merge 90 [~] merged · 12 [ ] to-merge (Engine C-* = TASK-0013) · 0 [x] verified · 13 [≠] front-end
-last_item: fsops resolution + dirs/util (XC-03/04, F-03..F-10) — PR #75; prior: command transforms (PR-01) + config_edit (FE-*) + MCP merge (MC-01/02, PR #73 MERGED)
+ledger: merge 102 [~] merged · 0 [ ] to-merge · 22 [x] parity-verified · 13 [≠] front-end  (ABSORPTION COMPLETE THROUGH ENGINE)
+last_item: TASK-0013 engine wiring (PR #78 MERGED) — Engine::agent_{sync,add,remove,lock,list,clean}
 status: VERIFY-MERGE MODE — strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
   MCP additive-never-clobber merge (MC-01/MC-02, 4 formats — PR #73 MERGED) + command-format transforms
   (PR-01, 5 formats) + comment-preserving config_edit (FE-*) + fsops resolution/dirs/util (PR #75).
