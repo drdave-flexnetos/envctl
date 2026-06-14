@@ -28,6 +28,21 @@ Row format: `- [ ] <id> · <source-path>:<symbol> · <contract> · -> <rust-targ
 
 ---
 
+## Parity-verifier pass — 2026-06-14 (cluster: runtime-state / profile / dirs / config-path leaves)
+
+**+6 rows flipped `→ [x]`** (74→80). 7 new test fns added to `parity_vs_kasetto.rs` (suite 75→82);
+`cargo test -p envctl-agent-env` **311 passed, 1 ignored** (baseline 304). Verbatim kasetto v3.2.0
+golden vectors through agent-env's public API. Proven: **XC-03** dirs/XDG resolution (HOME-unset ERR;
+XDG_*_HOME honored only when non-empty else `$HOME/.config|.local/share|.cache`), **ST-01/02** runtime
+state round-trip + load_latest_failures (broken|source_error extraction; lock↔runtime separation
+ADR-0001 §4; path = cache `runtime/{hash_str(lock_path)}.json`), **P-01** read_skill_profile (frontmatter
+desc wins, `#` heading→title, missing→fallback), **P-02** format_updated_ago (Ns/m/h/d ago, in Ns,
+unknown), **CP-01** config-path priority ($ENV > local > prefs source > global > local fallback).
+**0 BLOCKED.** envctl renames verified+asserted (NOT downgrades — same logic, envctl-namespaced):
+app-dir `kasetto`→`agent-env`; env var `KASETTO_CONFIG`→`ENVCTL_AGENT_CONFIG`; filename
+`kasetto.yaml`→`agent-env.yaml`. Remaining 16 `[ ]` = M-22 + S-15 (engine/network residue) + C-01..C-14
+(command orchestrators — verify via Engine integration tests, which also close the 6 `[~]` residue).
+
 ## Parity-verifier pass — 2026-06-14 (cluster: fsops + config_edit mutation engine)
 
 **+14 rows flipped `→ [x]`** (60→74). 29 new test fns added to `parity_vs_kasetto.rs` (suite 46→75);
@@ -118,7 +133,7 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 
 - [~] XC-01 · src/error.rs:err/Error/Result · string-message error channel: `err(impl Into<String>)` → `Box<dyn Error+Send+Sync>` via `io::Error::other`; `Result<T>` alias. Every absorbed fn returns this. · -> agent-env::AgentEnvError (thiserror: Message/Io/Yaml) + Result + err() · deps: none
 - [~] XC-02 · src/fsops/http.rs:http_client · process-wide `OnceLock<Client>`; connect-timeout 10s, total 30s, UA `kasetto/{VERSION}`; pure-Rust rustls+ring (NO C TLS). ERROR: build failure cached & re-returned as Message. · -> agent-env::source::http_client · deps: XC-01
-- [ ] XC-03 · src/fsops/dirs.rs:dirs_home/dirs_xdg_{config,data,cache}_home/dirs_kasetto_{config,data,cache} · XDG resolution: HOME (ERR "HOME is not set" if unset); XDG_*_HOME honored only when non-empty else `$HOME/.config|.local/share|.cache`; kasetto_* append `kasetto`. OS quirk: env-driven, no platform branch. · -> agent-env::dirs::* (envctl-namespaced dir) · deps: XC-01
+- [x] XC-03 · src/fsops/dirs.rs:dirs_home/dirs_xdg_{config,data,cache}_home/dirs_kasetto_{config,data,cache} · XDG resolution: HOME (ERR "HOME is not set" if unset); XDG_*_HOME honored only when non-empty else `$HOME/.config|.local/share|.cache`; kasetto_* append `kasetto`. OS quirk: env-driven, no platform branch. · -> agent-env::dirs::* (envctl-namespaced dir) · deps: XC-01
 - [x] XC-04 · src/fsops/mod.rs:now_unix/now_unix_str · SystemTime since UNIX_EPOCH as secs; `.unwrap_or(0)` on clock-before-epoch. · -> agent-env::util::now_unix{,_str} · deps: none
 
 ---
@@ -221,21 +236,21 @@ CFG-01..03 (recursive `extends` loader), L-01..06 (SHA-256 asset lock), S-09..13
 
 ## src/state.rs (machine-local runtime — kept OUT of committed lock)
 
-- [ ] ST-01 · src/state.rs:RuntimeState · {last_run:Option, latest_report:Option, installed_at:BTreeMap} — machine-local, regenerated each sync, never committed (lock↔runtime separation, ADR-0001 §4). updated_at/set_updated_at/forget/save_report_json/load_latest_failures (extract broken|source_error actions). NOT in seed (envctl runtime.rs is the analog — must preserve separation). · -> agent-env::runtime::RuntimeState (or reuse engine runtime) · deps: M-25
-- [ ] ST-02 · src/state.rs:runtime_state_path/load/save/clear_runtime_state · path keyed by hash_str(lock_path) under cache/`runtime/{key}.json`; load missing/empty→default; save pretty JSON + parent dirs; clear removes file. NOT in seed. · -> agent-env::runtime::* · deps: F-02,L-04,XC-03
+- [x] ST-01 · src/state.rs:RuntimeState · {last_run:Option, latest_report:Option, installed_at:BTreeMap} — machine-local, regenerated each sync, never committed (lock↔runtime separation, ADR-0001 §4). updated_at/set_updated_at/forget/save_report_json/load_latest_failures (extract broken|source_error actions). NOT in seed (envctl runtime.rs is the analog — must preserve separation). · -> agent-env::runtime::RuntimeState (or reuse engine runtime) · deps: M-25
+- [x] ST-02 · src/state.rs:runtime_state_path/load/save/clear_runtime_state · path keyed by hash_str(lock_path) under cache/`runtime/{key}.json`; load missing/empty→default; save pretty JSON + parent dirs; clear removes file. NOT in seed. · -> agent-env::runtime::* · deps: F-02,L-04,XC-03
 
 ---
 
 ## src/profile.rs (SKILL.md metadata extraction)
 
-- [ ] P-01 · src/profile.rs:read_skill_profile/read_skill_profile_from_dir · parse SKILL.md → (title, description): frontmatter name/description; body first `#` heading→title, first non-heading line→description (strip `-`/`*`); fallbacks (name, "No description."). EDGE: missing file → fallback. NOT in seed. · -> agent-env::profile::read_skill_profile · deps: none
-- [ ] P-02 · src/profile.rs:format_updated_ago · parse unix ts → "Ns/m/h/d ago" (or "in Ns" future, "unknown" on parse-fail). NOT in seed. · -> agent-env::profile::format_updated_ago · deps: XC-04
+- [x] P-01 · src/profile.rs:read_skill_profile/read_skill_profile_from_dir · parse SKILL.md → (title, description): frontmatter name/description; body first `#` heading→title, first non-heading line→description (strip `-`/`*`); fallbacks (name, "No description."). EDGE: missing file → fallback. NOT in seed. · -> agent-env::profile::read_skill_profile · deps: none
+- [x] P-02 · src/profile.rs:format_updated_ago · parse unix ts → "Ns/m/h/d ago" (or "in Ns" future, "unknown" on parse-fail). NOT in seed. · -> agent-env::profile::format_updated_ago · deps: XC-04
 
 ---
 
 ## src/lib.rs (config-path resolution)
 
-- [ ] CP-01 · src/lib.rs:default_config_path/resolve_config_path + Preferences + DEFAULT_*_FILENAME · priority: $KASETTO_CONFIG → ./kasetto.yaml (local) → prefs `source:` (XDG config/config.yaml) → global kasetto.yaml → ./kasetto.yaml fallback. (envctl renames KASETTO_CONFIG / filenames as appropriate.) NOT in seed. · -> agent-env::config_path::default_config_path · deps: XC-03
+- [x] CP-01 · src/lib.rs:default_config_path/resolve_config_path + Preferences + DEFAULT_*_FILENAME · priority: $KASETTO_CONFIG → ./kasetto.yaml (local) → prefs `source:` (XDG config/config.yaml) → global kasetto.yaml → ./kasetto.yaml fallback. (envctl renames KASETTO_CONFIG / filenames as appropriate.) NOT in seed. · -> agent-env::config_path::default_config_path · deps: XC-03
 
 ---
 
