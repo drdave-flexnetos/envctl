@@ -13,19 +13,22 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 1
-cycles_total: 1
-ledger: parity 0/112 verified · 55 ported [~] · 44 todo [ ] · 13 front-end [≠]  (merge-ledger seeded from this — see merge-ledger.md)
-last_item: model/* completion (M-09 finish, M-11..M-20, M-25, M-26, M-27) — ported [~], build-health GREEN
-status: VERIFY-MERGE MODE engaged 2026-06-13 (owner: "rerun the kasetto integration via rust-port-merge;
-  full feature, nothing left behind"). Harness EJECTED into envctl/.claude (12 skills + 10 agents; FF
-  continuity-steward preserved). NEXT: (1) researcher builds reports/research.md reuse map (kasetto unit
-  ⟷ what envctl ALREADY provides — CLAUDE.md notes engine already has lock/runtime/doctor/lock--check →
-  expect reuse-Y/extend-Y units, NOT all port-fresh) + classify every unit in merge-ledger.md; (2) the
-  DUAL GATE per unit: differentially verify vs kasetto X AND assert envctl Y not regressed; (3) left-behind
-  sweep (every kasetto unit represented). The 55 [~] re-verify vs kasetto → [x]; the 44 [ ] split into
-  reuse-Y (verify envctl's existing symbol) / port-fresh / extend-Y. DONE only at 100% merged + verified.
-last_update: 2026-06-13T18:05:00Z
+cycles_this_session: 4
+cycles_total: 5
+ledger: merge 74 [~] merged · 28 [ ] to-merge · 0 [x] verified · 13 [≠] front-end  (merge-ledger.md authoritative)
+last_item: fsops resolution + dirs/util (XC-03/04, F-03..F-10) — PR #75; prior: command transforms (PR-01) + config_edit (FE-*) + MCP merge (MC-01/02, PR #73 MERGED)
+status: VERIFY-MERGE MODE — strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
+  MCP additive-never-clobber merge (MC-01/MC-02, 4 formats — PR #73 MERGED) + command-format transforms
+  (PR-01, 5 formats) + comment-preserving config_edit (FE-*) + fsops resolution/dirs/util (PR #75).
+  Tests 78→181; dual gate green every cycle (kasetto-verbatim tests + envctl Y not regressed + no-c).
+  merge-ledger: 74 [~] / 28 [ ] / 0 [x] / 13 [≠].
+  NEXT: (1) the **parity-verifier pass** — upgrade the 74 [~] → [x] (independent differential vs kasetto;
+  a representative sample already matched in /verify: sha256 vs sha256sum, 4-host resolver, config, 21-agent).
+  (2) the remaining 28 [ ] — mostly Engine-level command/sync BUSINESS LOGIC (C-* sync/add/remove/lock/
+  list/clean) = **TASK-0013 engine wiring** (the agent-env LIBRARY surface is now ~complete) + small
+  leaves (M-22 resolve_scope fallback, S-18 discover_mcps). (3) DONE gate: 100% [x]/[≠] + left-behind
+  sweep clean + Y green. Engine wiring = TASK-0013, CLI verbs = TASK-0014.
+last_update: 2026-06-14T00:40:00Z
 
 ## Run framing (read before any cycle)
 - This rust-port runs as the IMPLEMENTATION ENGINE for forge-loop **TASK-0012** (Epic C: kasetto
