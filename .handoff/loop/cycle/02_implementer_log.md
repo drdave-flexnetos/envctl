@@ -227,3 +227,52 @@ snake_case modules / PascalCase types, inline `#[cfg(test)] mod tests`, no C / o
   - Y not regressed: whole crate green — **159 lib tests** (was 130, +29) + 1 doctest, clippy `-D warnings` clean, fmt clean, **no-c PASS** (rustls 0.23.40 on ring 0.17.14, zero aws-lc/openssl/C-SQLite).
 - **Invariants:** non-printing library (Result, no println/clap), `forbid(unsafe_code)`, snake_case modules / PascalCase types / SCREAMING_SNAKE consts (`MAX_COPY_DEPTH`), inline `#[cfg(test)] mod tests`, MSRV 1.80, cross-platform `cfg(windows)` arm preserved, no C / one rustls ring-only.
 - **No stub / no dropped branch.** Faithful superset of PR #73; later merge reconciles to this copy.
+
+---
+
+## TASK-0012 cluster: source materialize + asset discovery (S-14..S-21) — rust-port-MERGE
+
+**Source:** `kasetto/src/source/mod.rs` (642L). **Dest:** `crates/agent-env/src/source.rs` (EXTEND on S-01..S-13).
+**Branch:** `task-0012-source-discovery` (off develop). **Commit:** `4363bdb`.
+
+**Units ported (all full, no stubs):**
+- S-14 `materialize_source` (+ `MaterializedSource`): local in-place (`source_revision="local"`, `cleanup_dir=None`) vs remote `download_extract` into caller-provided `stage` (`cleanup_dir=Some(stage)`); revision label carried (`ref:`/`branch:`/`branch:main`).
+- S-15 `GitPin::Default` main→master retry arm ported verbatim (`.or_else` second fetch, "(also tried branch `master` after `main`)" message).
+- S-16 `resolve_source_root` + `repo_name_hint`: sub-dir validated (empty/absolute/`..`/RootDir fail-closed; not-found / not-dir errors), repo-name hint per host variant.
+- S-17 `discover` / `discover_with_root_name` / `discover_skills_in_subdir`: root-level SKILL.md named by hint, `skills/` subdir walk, shadow warning.
+- S-18 `discover_mcps`: `.mcp.json`/`mcp.json` root + `mcps/*.json` (legacy `mcp/` warning; reworded to drop the kasetto-self name).
+- S-19 `resolve_mcp_entry`: Name→`mcps/`, Obj→custom/default dir, auto `.json`.
+- S-20 `discover_commands` / `walk_commands`: `commands/**/*.md` → `:`-namespaced.
+- S-21 `resolve_command_entry` / `resolve_named_command`: Name via discovery, Obj via path.
+
+**Integration / mapping:** reused agent-env `RepoUrl`/`parse_repo_url`/`remote_repo_archive_{ref,branch}`/`download_extract`; `crate::config::{SourceSpec,GitPin,McpEntry,CommandEntry}`, `crate::fsops::resolve_path`. `err(...)`→`AgentEnvError::Message`. Kept the caller-provided `stage` signature (no kasetto-named cache dir was introduced; `dirs_agent_env_cache` not needed). Re-exported new symbols from `lib.rs`.
+
+**DUAL GATE:**
+- X parity: ported kasetto's `mod tests` verbatim (adapted to local `temp_dir` + `crate::config` types) + added `resolve_source_root` un-nest/escape coverage. Covers discover (root + skills/ subdir), sub-dir honoring, mcp Name/Obj/auto-json/missing, command nested-namespace/Obj/missing, wildcard vs named.
+- Y not regressed: whole crate green. **202 tests pass (was 181), 1 ignored.**
+
+**Network-test handling:** the only networked path (remote `materialize_source` main→master) is a single `#[ignore]`d test (`remote_materialize_main_to_master_fallback`, hits `github.com/git/git`); the un-nest logic it depends on is exercised offline via `resolve_source_root_*` against pre-stripped stage trees. Suite stays offline + deterministic, mirroring the existing `extract_tar_gz` fixture approach.
+
+**Verify:** build / test (202 pass, 1 ignored) / `clippy --all-targets -D warnings` / `fmt --check` / `ci/gates/no-c.sh` — all green.
+
+---
+
+## rust-port-MERGE cycle — agent-env LIBRARY tail (ST/P/CP/C-05-06) — commit 3dbe7d0
+
+**Porter:** rust-port-porter (verify/merge mode). Branch `task-0012-source-discovery`.
+
+**Units ported (4 new modules, verbatim from kasetto v3.2.0, no downgrade):**
+- `runtime.rs` (ST-01/ST-02) ← `kasetto/src/state.rs` — `RuntimeState` (+ updated_at/set/forget/save_report_json/load_latest_failures) + `runtime_state_path`/`load`/`save`/`clear`. Separate agent-asset runtime payload (kept distinct from any engine runtime). Adapted `lock_path(scope,root)?` → agent-env's infallible `lock_path(scope,root,&dirs_agent_env_data()?)`.
+- `profile.rs` (P-01/P-02) ← `kasetto/src/profile.rs` — `read_skill_profile`/`read_skill_profile_from_dir` + `format_updated_ago`. UI-only `list_color_enabled` intentionally NOT ported (non-printing library).
+- `config_path.rs` (CP-01) ← `kasetto/src/lib.rs` — `default_config_path`, `resolve_config_path`, `Preferences` (+ filename/env consts).
+- `sync.rs` (C-05/C-06) ← `kasetto/src/commands/sync/` — pure `remove_stale` + `StaleEntry`; key conventions `skill_key`/`command_asset_id`/`mcp_asset_id` (+ `*_action_label`). Engine `agent_sync` driver remains TASK-0013 (out of scope).
+
+**kasetto → envctl renames (absorbed tool's OWN identity):**
+- env var `KASETTO_CONFIG` → `ENVCTL_AGENT_CONFIG`
+- config filename `kasetto.yaml` → `agent-env.yaml` (local + global)
+- per-product config dir `kasetto/` → `agent-env/` (`dirs_agent_env_config`)
+- runtime cache dir `kasetto/` → `agent-env/` (`dirs_agent_env_cache`)
+
+**Integration:** reused `config::Scope`, `lock::{AssetEntry,AgentLockFile,lock_path}`, `hash::hash_str`, `dirs::*`, `report::{Action,Summary,SyncFailure}`, `util::now_unix`. `err(...)`/`Result` → `crate::AgentEnvError`/`crate::Result`.
+
+**DUAL GATE — PASS:** kasetto inline tests ported verbatim+adapted (RuntimeState round-trip/clear, load_latest_failures, format_updated_ago boundaries, resolve_config_path priority ladder, remove_stale absent-only). Whole crate **226 passed / 1 ignored** (was 202). `clippy -D warnings` clean, `fmt --check` clean, `ci/gates/no-c.sh` PASS. HOME/XDG-mutating tests serialized via `env_lock` mutex (race-safe with sibling env tests).
