@@ -13,9 +13,9 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 4
-cycles_total: 5
-ledger: merge 74 [~] merged · 28 [ ] to-merge · 0 [x] verified · 13 [≠] front-end  (merge-ledger.md authoritative)
+cycles_this_session: 2
+cycles_total: 7
+ledger: merge 90 [~] merged · 12 [ ] to-merge (Engine C-* = TASK-0013) · 0 [x] verified · 13 [≠] front-end
 last_item: fsops resolution + dirs/util (XC-03/04, F-03..F-10) — PR #75; prior: command transforms (PR-01) + config_edit (FE-*) + MCP merge (MC-01/02, PR #73 MERGED)
 status: VERIFY-MERGE MODE — strong progress 2026-06-13/14. ALL 3 LEFT-BEHIND ENGINES NOW PORTED:
   MCP additive-never-clobber merge (MC-01/MC-02, 4 formats — PR #73 MERGED) + command-format transforms
