@@ -22,6 +22,7 @@
 //! `--locked` zero-network), and `#![forbid(unsafe_code)]` (set via `[lints]`).
 
 pub mod agent;
+pub mod command;
 pub mod config;
 pub mod extend;
 pub mod fsops;
@@ -36,6 +37,7 @@ pub use agent::{
     all_mcp_settings_targets, command_global_targets, command_project_targets, CommandFormat,
     CommandTarget, McpSettingsFormat, McpSettingsTarget,
 };
+pub use command::{apply_command, destination_path, ensure_parent_dirs, parse, render, Parsed};
 pub use config::{
     git_pin_of, Agent, AgentField, CommandEntry, CommandSourceSpec, CommandsField, Config, GitPin,
     McpEntry, McpSourceSpec, McpsField, Scope, SkillTarget, SkillsField, SourceSpec, AGENT_PRESETS,
