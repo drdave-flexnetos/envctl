@@ -1452,6 +1452,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "envctl-agent-env",
  "glob",
  "rustix 0.38.44",
  "serde",

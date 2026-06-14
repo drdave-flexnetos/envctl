@@ -10,6 +10,9 @@ name = "envctl_engine"
 path = "src/lib.rs"
 
 [dependencies]
+# The pure-Rust agent-env provisioning core (kasetto absorption, Epic C). No C in the trust
+# boundary: gzip via miniz_oxide, tar pure-Rust, reqwest→rustls→ring. The ONLY new dep.
+envctl-agent-env = { path = "../agent-env" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

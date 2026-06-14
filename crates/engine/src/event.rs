@@ -3,6 +3,8 @@
 //! `Send + 'static`, so events cross the GUI worker→UI channel unchanged, and the
 //! CLI drains the same vocabulary. (`EventSink::channel()`, not `new()`, keeps
 //! clippy's `new_ret_no_self` happy — it returns a channel pair, not `Self`.)
+use crate::agent::report::{AgentLockDriftItem, AgentReport, AgentVerb};
+use crate::agent::AgentScope;
 use crate::component::Phase;
 use crate::dashboard::{DashboardPlan, DeployOutcome};
 use crate::model::{EnvReport, OpResult, RunSummary};
@@ -53,6 +55,30 @@ pub enum Event {
     /// The outcome of a dashboard deploy (dry-run preview or applied write).
     DashboardDeployed {
         outcome: DeployOutcome,
+    },
+    /// An agent-asset verb run started (sync/add/remove/lock/list/clean). `dry_run`
+    /// reflects preview-vs-apply; `lock_mode` is the resolved mode label.
+    AgentRunStarted {
+        verb: AgentVerb,
+        scope: AgentScope,
+        dry_run: bool,
+        lock_mode: String,
+    },
+    /// One per-asset action from an agent-asset verb (live tree for GUI/CLI): the
+    /// source it came from, the asset name, the outcome status, and any error detail.
+    AgentAction {
+        source: Option<String>,
+        asset: Option<String>,
+        status: String,
+        error: Option<String>,
+    },
+    /// An agent-asset verb run finished — carries the full typed report.
+    AgentRunFinished {
+        report: AgentReport,
+    },
+    /// The drift result of `agent_lock --check` (empty = lock is up to date).
+    AgentLockChecked {
+        drift: Vec<AgentLockDriftItem>,
     },
 }
 

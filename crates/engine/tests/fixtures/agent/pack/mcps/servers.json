@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "github": { "command": "github-mcp", "args": [] },
+    "context7": { "command": "context7-mcp", "args": [] }
+  }
+}

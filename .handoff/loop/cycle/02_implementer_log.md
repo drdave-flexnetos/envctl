@@ -276,3 +276,98 @@ snake_case modules / PascalCase types, inline `#[cfg(test)] mod tests`, no C / o
 **Integration:** reused `config::Scope`, `lock::{AssetEntry,AgentLockFile,lock_path}`, `hash::hash_str`, `dirs::*`, `report::{Action,Summary,SyncFailure}`, `util::now_unix`. `err(...)`/`Result` → `crate::AgentEnvError`/`crate::Result`.
 
 **DUAL GATE — PASS:** kasetto inline tests ported verbatim+adapted (RuntimeState round-trip/clear, load_latest_failures, format_updated_ago boundaries, resolve_config_path priority ladder, remove_stale absent-only). Whole crate **226 passed / 1 ignored** (was 202). `clippy -D warnings` clean, `fmt --check` clean, `ci/gates/no-c.sh` PASS. HOME/XDG-mutating tests serialized via `env_lock` mutex (race-safe with sibling env tests).
+
+---
+
+## TASK-0013: engine agent wiring
+
+Status: **GREEN**. Wired kasetto's 6 agent-asset verbs into the envctl engine as
+`Engine::agent_{sync,add,remove,lock,list,clean}`, driving the already-ported `crates/agent-env`
+library. Built exactly to `01_architect_plan.md` (VERDICT GO), Risk-1 split honored.
+
+### Modules created
+- **NEW `crates/agent-env/src/driver.rs`** (the Risk-1 REUSABLE pure logic, ~1.5k lines): ports the
+  per-kind sync drivers (`sync_skills`/`sync_commands`/`sync_mcps` + `needs_fetch_*`,
+  `ensure_locked_satisfiable_*`, `desired_*_names`, `process_single_skill`/`process_locked_skill`,
+  `apply_pending_*`, `remove_stale_*`), the lock rebuild (`rebuild_lock`+`refresh_asset_revisions`),
+  the list loader (`load_skills_mcps_commands`+`AssetRow`), clean (`apply_removals`/`clean_counts`),
+  and add/remove edit planning (`plan_add_edits`/`verify_source`). Non-printing, Event-free, fills
+  `SyncResult{summary,actions}`. The kasetto `LockFile`/`State`/`SkillEntry` split collapses onto the
+  library's single `AgentLockFile`/`AgentLockEntry`; `ui`/spinner/`process::exit` DROPPED.
+  `DriverCtx::from_mode(apply, lock_mode)` is the preview/locked policy seam. +7 inline tests.
+- **NEW `crates/engine/src/agent/mod.rs`**: `AgentCtx::resolve` (the **M-22** fallback — `config_path:
+  None` → `default_config_path` → `load_config_any`(walks extends) → `Config::resolved_scope`),
+  `AgentScope`/`AgentLockMode`/`AgentListKind`, all 6 `Agent*Spec` typed opts (+`AgentSectionSel`),
+  agent-lock-path/runtime helpers (lock at `crate::agent::lock`, NEVER `crate::lock`).
+- **NEW `agent/sync.rs`** — `agent_sync` (C-01..04, skills→commands→mcps) + shared `run_sync_in_ctx`
+  (reused by add/remove self-sync) + `assemble_report` (emits per-action Events + RunFinished).
+- **NEW `agent/edit.rs`** — `agent_add` (C-07) + `agent_remove` (C-08) + C-12 `sync_after`
+  (in-process `run_sync_in_ctx(apply=true)`, NOT a subprocess). Locked+!no_sync rejected (ported).
+- **NEW `agent/lock.rs`** — `agent_lock` (C-09 `--check`/`--upgrade-package`); `--check`+`Locked` is a
+  true zero-network audit (skips re-resolve). Operates only on `agent-env.lock` via `agent_env::lock`.
+- **NEW `agent/list.rs`** — `agent_list` (C-10), read-only, scope-merged when no override.
+- **NEW `agent/clean.rs`** — `agent_clean` (C-11/C-14); tracked-only MCP teardown, returns AgentReport.
+- **NEW `agent/report.rs`** — typed returns `AgentReport`/`AgentList`/`AgentLockOutcome`/
+  `AgentEditOutcome`/`AgentVerb`/`AgentLockDriftItem` (all Serialize+Deserialize for the Event enum).
+- **EDIT `event.rs`** — `Event::{AgentRunStarted,AgentAction,AgentRunFinished,AgentLockChecked}`.
+- **EDIT `engine/src/lib.rs`** — `pub mod agent;` + re-exports of the spec/return/Scope/verb types.
+- **EDIT `engine/Cargo.toml`** — added `envctl-agent-env` path dep (the ONLY new dep; pure-Rust).
+- **EDIT `agent-env/src/{lib.rs,report.rs}`** — `pub mod driver` + re-exports; `Summary`/`Action`/
+  `InstalledSkill` gained `Clone+Deserialize` (needed because they ride inside the engine `Event` enum,
+  which derives Serialize+Deserialize like all existing Events).
+
+### Engine API delta (the parity contract for TASK-0014)
+- `impl Engine`: `agent_sync(AgentSyncSpec,&EventSink)->AgentReport`; `agent_add/agent_remove(...Spec)->
+  AgentEditOutcome`; `agent_lock(AgentLockSpec)->AgentLockOutcome`; `agent_list(AgentListSpec)->AgentList`;
+  `agent_clean(AgentCleanSpec)->AgentReport`. All `apply:bool` (Default = preview, NOT dry_run flag).
+- New Events listed above. AgentAction emitted in-order per recorded action (live tree); a front-end
+  maps `report.summary.failed > 0` → exit code (engine never `process::exit`s).
+
+### agent-env (reusable) vs engine (orchestration)
+Per Risk-1: PURE asset/lock/edit logic → `agent-env::driver` (keeps the library complete + the engine
+thin, following the `agent_env::sync::remove_stale` precedent). EVENT-EMITTING per-verb orchestration +
+the preview/Locked/apply policy + lock-path/runtime resolution + M-22 → `engine/src/agent/*`.
+
+### Tests added (8 integration + 7 driver inline)
+`crates/engine/tests/agent_sync.rs` (8, hermetic: committed `fixtures/agent/pack` local source, tempdir
+project roots, sandbox `HOME`, NO network): (1) sync preview-no-writes vs apply-installs+lock;
+(2) **MCP never-clobber** (broker/repowire/weave + github/context7 all present); (3) lock --check
+clean→drift on content mutation; (4) **--locked zero-network** fail-closed then satisfied;
+(5) remove+sync-after prunes beta keeps alpha; (6) clean preview-keeps vs apply-removes-tracked-only
+(+ list All vs Skills filter; untracked `weave` survives); (7) **M-22 fallback** (config_path:None→
+default config from cwd→Project scope); (8) **never-prune-on-failure** (sub-dir source_error→failed>0→
+removed==0, good skill kept). `driver.rs` inline: DriverCtx mode mapping, plan_add_edits defaults.
+
+### Build / test / gate results (all PASS)
+- `cargo build -p envctl-engine -p envctl` → build=0
+- `cargo test -p envctl-engine` → 31 inline + 8 integration PASS; `-p envctl-agent-env` → 228 PASS (+5)
+- `cargo test --workspace` → exit 0, zero failures across all crates (secrets stack incl.)
+- `cargo clippy -p envctl-engine -p envctl-agent-env -- -D warnings` → clean (one targeted
+  `#[allow(too_many_arguments)]` on the 8-arg `plan_add_edits`, the faithful port of AddOptions)
+- `cargo fmt --all` → applied, clean
+- `ci/gates/no-c.sh` PASS (rustls=0.23 on ring; zero aws-lc/openssl/C-SQLite/mimalloc) ·
+  `cargo tree -p envctl-engine` shows zero banned crates · `shape.sh` PASS · `enable.sh` PASS
+
+### Deviations
+None of substance. Two notes:
+1. Engine report/Action/Summary types needed `Deserialize` (not in the plan's spec list) because the
+   plan's `Event::AgentRunFinished{report}` embeds them in the `Event` enum, which derives both
+   Serialize+Deserialize (matching every existing Event variant). Added it library-side too. No
+   behavior change; pure data round-trip.
+2. `AgentAction` events are emitted in recorded order AFTER each driver pass returns (the driver stays
+   pure, the engine is the sole Event emitter) rather than mid-fetch — same ordered "live tree", and it
+   keeps the Risk-1 split clean. `init.rs` is NOT a 7th Engine method (the plan's API is exactly 6);
+   its config-scaffold concern is covered by add's `ensure_local_config`-style local-config creation.
+
+### Handoff notes (for the guardian)
+- **Non-printing**: zero `println!` in `crates/engine/src/agent/*` or `agent-env/src/driver.rs` (grep-clean).
+- **Fail-closed preview**: test (1) asserts preview writes neither skills dir nor lock; verify the
+  `apply` gate in `sync.rs::run_sync_in_ctx` (mkdir + `save` + runtime only under `if apply`).
+- **Locked zero-network**: test (4) + `lock.rs` `zero_network` guard. `agent_add` rejects Locked&&!no_sync.
+- **MCP never-clobber**: sync uses ONLY `merge_mcp_config`; clean's `apply_removals` uses
+  `remove_mcp_server` for **lock-tracked** ids only — test (2)+(6) prove pre-existing servers survive.
+- **Never-prune-on-failure**: `remove_stale_*` gated on `summary.failed==0` in the driver — test (8).
+- **FNV-1a lock untouched**: `agent/lock.rs` imports `agent_env::lock` only; no `use crate::lock`.
+- **No-C**: only new dep is `envctl-agent-env` (path). `cargo tree -p envctl-engine` banned-crate scan empty.
+
+Headline: GREEN — 6 Engine agent verbs wired engine-first over agent-env; 8 integration + driver/inline tests green; clippy/fmt/no-c/shape/enable all PASS.
