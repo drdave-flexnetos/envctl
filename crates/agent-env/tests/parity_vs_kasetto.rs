@@ -12,15 +12,19 @@
 
 use envctl_agent_env::{
     all_command_global_targets, all_mcp_project_targets, all_mcp_settings_targets, archive_url,
-    command_global_targets, command_project_targets, derive_browse_url, discover,
-    discover_commands, discover_mcps, discover_with_root_name, extract_extends, git_pin_of,
-    hash_dir, hash_file, hash_str, load_config_any, load_config_recursive, materialize_source,
-    merge_mcp_config, merge_yaml, now_unix, now_unix_str, parse, parse_repo_url, render,
-    resolve_command_entry, resolve_mcp_entry, Action, Agent, AgentField, AgentLockEntry,
-    AgentLockFile, AssetEntry, CommandEntry, CommandFormat, CommandSourceSpec, Config, GitPin,
-    InstalledSkill, LockMode, McpEntry, McpSettingsFormat, McpSettingsTarget, McpSourceSpec,
-    McpsField, RepoUrl, Report, Scope, SkillTarget, SkillsField, SourceSpec, Summary, SyncFailure,
-    AGENT_PRESETS, LOCK_VERSION,
+    clear_runtime_state, command_global_targets, command_project_targets, default_config_path,
+    derive_browse_url, dirs_agent_env_cache, dirs_agent_env_config, dirs_agent_env_data,
+    dirs_xdg_cache_home, dirs_xdg_config_home, dirs_xdg_data_home, discover, discover_commands,
+    discover_mcps, discover_with_root_name, extract_extends, format_updated_ago, git_pin_of,
+    hash_dir, hash_file, hash_str, load_config_any, load_config_recursive, load_runtime_state,
+    materialize_source, merge_mcp_config, merge_yaml, now_unix, now_unix_str, parse,
+    parse_repo_url, read_skill_profile, read_skill_profile_from_dir, render, resolve_command_entry,
+    resolve_config_path, resolve_mcp_entry, runtime_state_path, save_runtime_state, Action, Agent,
+    AgentField, AgentLockEntry, AgentLockFile, AssetEntry, CommandEntry, CommandFormat,
+    CommandSourceSpec, Config, GitPin, InstalledSkill, LockMode, McpEntry, McpSettingsFormat,
+    McpSettingsTarget, McpSourceSpec, McpsField, RepoUrl, Report, RuntimeState, Scope, SkillTarget,
+    SkillsField, SourceSpec, Summary, SyncFailure, AGENT_PRESETS, CONFIG_ENV_VAR,
+    DEFAULT_CONFIG_FILENAME, DEFAULT_GLOBAL_CONFIG_FILENAME, LOCK_VERSION, PREFERENCES_FILENAME,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -2757,4 +2761,373 @@ fn parity_config_edit_primitives_via_public_api() {
     )
     .unwrap();
     assert!(out.contains("\nskills:\n  - source: https://x/a"));
+}
+
+// ═════════════════════════════ PASS-4: runtime-state / profile / dirs / config-path leaf ═════════════════════════════
+// Differential parity for the machine-local-state + dirs + skill-profile + config-path
+// cluster. Vectors VERBATIM from kasetto v3.2.0 certified tests; where envctl renamed a
+// product-self-named string (app dir, env var, filename), the rename is noted inline and
+// envctl's value is asserted — the RESOLUTION LOGIC, not the literal "kasetto" string, is
+// what parity protects.
+
+// ───────────────────────────── XC-03 · XDG / home base-directory resolution ─────────────────────────────
+// Oracle: kasetto src/fsops/dirs.rs::{dirs_home, dirs_xdg_{config,data,cache}_home,
+// dirs_kasetto_{config,data,cache}}. kasetto's dirs.rs has no #[cfg(test)] module — the
+// resolution logic is the certified contract (exercised transitively by state.rs's
+// round_trip_runtime_state, which pins XDG_CACHE_HOME and reads it back through this layer).
+// We drive the SAME logic through agent-env's PUBLIC dirs::* API. The per-product leaf is
+// envctl-renamed `kasetto` → `agent-env` (asserted as such); the XDG bases are byte-for-byte.
+#[test]
+fn parity_dirs_xdg_resolution() {
+    let _g = ENV_LOCK.lock().unwrap();
+    // Save + restore every env var this layer consults (no leak across parity tests).
+    let keys = ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
+    let saved: Vec<(&str, Option<String>)> =
+        keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+
+    // dirs_home reads $HOME verbatim (kasetto dirs_home: env var → PathBuf).
+    std::env::set_var("HOME", "/home/tester");
+    assert_eq!(dirs_home().unwrap(), PathBuf::from("/home/tester"));
+
+    // XDG_CONFIG_HOME honored only when non-empty; the app-dir helper appends the product
+    // leaf. kasetto: `$XDG_CONFIG_HOME/kasetto`; envctl renames the leaf → `agent-env`.
+    std::env::set_var("XDG_CONFIG_HOME", "/custom/cfg");
+    assert_eq!(
+        dirs_xdg_config_home().unwrap(),
+        PathBuf::from("/custom/cfg")
+    );
+    assert_eq!(
+        dirs_agent_env_config().unwrap(),
+        PathBuf::from("/custom/cfg/agent-env"),
+        "envctl renames kasetto's `kasetto` config leaf → `agent-env`"
+    );
+    // Empty override → fall back to `$HOME/.config` (kasetto: `Ok(p) if !p.is_empty()`).
+    std::env::set_var("XDG_CONFIG_HOME", "");
+    assert_eq!(
+        dirs_xdg_config_home().unwrap(),
+        PathBuf::from("/home/tester/.config")
+    );
+    // Unset → same fallback.
+    std::env::remove_var("XDG_CONFIG_HOME");
+    assert_eq!(
+        dirs_xdg_config_home().unwrap(),
+        PathBuf::from("/home/tester/.config")
+    );
+    assert_eq!(
+        dirs_agent_env_config().unwrap(),
+        PathBuf::from("/home/tester/.config/agent-env")
+    );
+
+    // XDG_DATA_HOME: unset → `$HOME/.local/share`; leaf renamed kasetto → agent-env.
+    std::env::remove_var("XDG_DATA_HOME");
+    assert_eq!(
+        dirs_xdg_data_home().unwrap(),
+        PathBuf::from("/home/tester/.local/share")
+    );
+    assert_eq!(
+        dirs_agent_env_data().unwrap(),
+        PathBuf::from("/home/tester/.local/share/agent-env")
+    );
+    // Non-empty override honored.
+    std::env::set_var("XDG_DATA_HOME", "/custom/data");
+    assert_eq!(
+        dirs_agent_env_data().unwrap(),
+        PathBuf::from("/custom/data/agent-env")
+    );
+
+    // XDG_CACHE_HOME: unset → `$HOME/.cache`; leaf renamed kasetto → agent-env.
+    std::env::remove_var("XDG_CACHE_HOME");
+    assert_eq!(
+        dirs_xdg_cache_home().unwrap(),
+        PathBuf::from("/home/tester/.cache")
+    );
+    assert_eq!(
+        dirs_agent_env_cache().unwrap(),
+        PathBuf::from("/home/tester/.cache/agent-env")
+    );
+    // Non-empty override honored.
+    std::env::set_var("XDG_CACHE_HOME", "/custom/cache");
+    assert_eq!(
+        dirs_agent_env_cache().unwrap(),
+        PathBuf::from("/custom/cache/agent-env")
+    );
+
+    // HOME unset → the documented "HOME is not set" error (kasetto dirs_home err arm).
+    std::env::remove_var("HOME");
+    std::env::remove_var("XDG_CONFIG_HOME");
+    assert!(dirs_home().is_err());
+    // …and the fallback consumers propagate that error rather than panicking.
+    assert!(dirs_xdg_config_home().is_err());
+
+    for (k, v) in saved {
+        match v {
+            Some(val) => std::env::set_var(k, val),
+            None => std::env::remove_var(k),
+        }
+    }
+}
+
+// ───────────────────────────── ST-01/ST-02 · RuntimeState round-trip + state path ─────────────────────────────
+// Oracle: kasetto src/state.rs::tests::{round_trip_runtime_state,
+// load_latest_failures_extracts_failed_actions}. The lock↔runtime separation (ADR-0001 §4)
+// is preserved: state lives in the cache dir keyed by hash_str(lock_path), never in the lock.
+// envctl renames kasetto's cache leaf (`dirs_kasetto_cache` → `dirs_agent_env_cache`) and
+// resolves the global-data dir explicitly; for Scope::Project the lock path is
+// `project_root/agent-env.lock` in BOTH, so the cache key is identical.
+#[test]
+fn parity_runtime_state_round_trip() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let keys = ["HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"];
+    let saved: Vec<(&str, Option<String>)> =
+        keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+
+    let home = tmp("rt-home");
+    let cache = tmp("rt-cache");
+    let data = tmp("rt-data");
+    // Pin every XDG base runtime_state_path touches (HOME + DATA for the data-dir resolution,
+    // CACHE for the state file itself) so the vector is hermetic.
+    std::env::set_var("HOME", &home);
+    std::env::set_var("XDG_CACHE_HOME", &cache);
+    std::env::set_var("XDG_DATA_HOME", &data);
+    let root = tmp("rt-proj");
+
+    // VERBATIM kasetto round_trip_runtime_state vector.
+    let mut state = RuntimeState {
+        last_run: Some("123".into()),
+        ..Default::default()
+    };
+    state.set_updated_at("src::a", "100".into());
+    state.save_report_json(r#"{"actions":[]}"#);
+
+    save_runtime_state(&state, Scope::Project, &root).unwrap();
+    let loaded = load_runtime_state(Scope::Project, &root).unwrap();
+    assert_eq!(loaded.last_run.as_deref(), Some("123"));
+    assert_eq!(loaded.updated_at("src::a"), "100");
+    assert_eq!(loaded.updated_at("missing"), "");
+
+    // ST-02 path shape: cache/runtime/<hash>.json (hash of the lock path).
+    let path = runtime_state_path(Scope::Project, &root).unwrap();
+    assert!(path.starts_with(cache.join("agent-env/runtime")));
+    assert_eq!(path.extension().and_then(|e| e.to_str()), Some("json"));
+
+    // clear removes the file; a subsequent load returns RuntimeState::default().
+    clear_runtime_state(Scope::Project, &root).unwrap();
+    assert!(!path.exists());
+    assert!(load_runtime_state(Scope::Project, &root)
+        .unwrap()
+        .last_run
+        .is_none());
+    // Missing file → default (no error).
+    assert!(load_runtime_state(Scope::Project, &root)
+        .unwrap()
+        .installed_at
+        .is_empty());
+
+    for (k, v) in saved {
+        match v {
+            Some(val) => std::env::set_var(k, val),
+            None => std::env::remove_var(k),
+        }
+    }
+    let _ = fs::remove_dir_all(&home);
+    let _ = fs::remove_dir_all(&cache);
+    let _ = fs::remove_dir_all(&data);
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ST-01 (pure, env-free): RuntimeState helpers + load_latest_failures action extraction.
+// Oracle: kasetto src/state.rs::tests::load_latest_failures_extracts_failed_actions
+// (+ updated_at/set_updated_at/forget exercised by round_trip).
+#[test]
+fn parity_runtime_state_failures_and_helpers() {
+    // forget drops an install stamp; others survive.
+    let mut state = RuntimeState::default();
+    state.set_updated_at("src::a", "100".into());
+    state.set_updated_at("src::b", "200".into());
+    state.forget("src::a");
+    assert_eq!(state.updated_at("src::a"), "");
+    assert_eq!(state.updated_at("src::b"), "200");
+
+    // VERBATIM kasetto vector: only `broken`/`source_error` actions become failures, in order.
+    let mut state = RuntimeState::default();
+    state.save_report_json(
+        r#"{"actions":[
+                {"status":"installed","skill":"good","source":"s"},
+                {"status":"broken","skill":"bad","source":"s","error":"missing"},
+                {"status":"source_error","skill":"err","source":"s2","error":"timeout"}
+            ]}"#,
+    );
+    let failures = state.load_latest_failures();
+    assert_eq!(failures.len(), 2);
+    assert_eq!(failures[0].name, "bad");
+    assert_eq!(failures[0].source, "s");
+    assert_eq!(failures[0].reason, "missing");
+    assert_eq!(failures[1].name, "err");
+    assert_eq!(failures[1].reason, "timeout");
+
+    // No cached report → no failures (kasetto early-return arm).
+    let empty = RuntimeState::default();
+    assert!(empty.load_latest_failures().is_empty());
+}
+
+// ───────────────────────────── P-01 · read_skill_profile(_from_dir) ─────────────────────────────
+// Oracle: kasetto src/profile.rs::tests::{profile_prefers_heading_and_frontmatter_description,
+// profile_falls_back_when_file_missing}. envctl ports this verbatim (no rename); the UI-only
+// `list_color_enabled` helper is intentionally not ported (library is non-printing).
+#[test]
+fn parity_read_skill_profile() {
+    // VERBATIM kasetto vector: front-matter `description:` wins; first `#` heading → title.
+    let dir = tmp("profile");
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: slug-name\ndescription: from-front-matter\n---\n\n# Human Title\n\nBody line.\n",
+    )
+    .unwrap();
+    let (name, description) = read_skill_profile_from_dir(&dir, "fallback");
+    assert_eq!(name, "Human Title");
+    assert_eq!(description, "from-front-matter");
+    let _ = fs::remove_dir_all(&dir);
+
+    // VERBATIM kasetto vector: missing SKILL.md → (fallback_name, "No description.").
+    let dir = tmp("profile-missing");
+    let (name, description) = read_skill_profile_from_dir(&dir, "fallback-name");
+    assert_eq!(name, "fallback-name");
+    assert_eq!(description, "No description.");
+    let _ = fs::remove_dir_all(&dir);
+
+    // read_skill_profile(destination) overload resolves the path (same logic, string arg).
+    // Mirrors the title-from-heading + body-first-line description path.
+    let dir = tmp("profile-dest");
+    fs::write(dir.join("SKILL.md"), "# Title\n\nDesc.\n").unwrap();
+    let (name, description) = read_skill_profile(&dir.to_string_lossy(), "fallback");
+    assert_eq!(name, "Title");
+    assert_eq!(description, "Desc.");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ───────────────────────────── P-02 · format_updated_ago ─────────────────────────────
+// Oracle: kasetto src/profile.rs::tests::format_updated_ago_returns_unknown_for_invalid_input
+// (+ the documented Ns/m/h/d-ago / "in Ns" thresholds in src/profile.rs). Ported verbatim.
+#[test]
+fn parity_format_updated_ago() {
+    use envctl_agent_env::now_unix;
+    // VERBATIM kasetto vector: an unparseable stamp → "unknown".
+    assert_eq!(format_updated_ago("not-a-timestamp"), "unknown");
+
+    // Threshold boundaries from kasetto src/profile.rs (d<60 → s, <3600 → m, <86_400 → h, else d).
+    let now = now_unix();
+    assert_eq!(format_updated_ago(&now.to_string()), "0s ago");
+    assert_eq!(format_updated_ago(&(now - 30).to_string()), "30s ago");
+    assert_eq!(format_updated_ago(&(now - 120).to_string()), "2m ago");
+    assert_eq!(format_updated_ago(&(now - 7_200).to_string()), "2h ago");
+    assert_eq!(format_updated_ago(&(now - 172_800).to_string()), "2d ago");
+    // Future stamp → "in Ns".
+    assert_eq!(format_updated_ago(&(now + 5).to_string()), "in 5s");
+}
+
+// ───────────────────────────── CP-01 · default_config_path / resolve_config_path ─────────────────────────────
+// Oracle: kasetto src/lib.rs::tests (all 9). The PRIORITY LOGIC is verbatim; envctl renames
+// the env var (`KASETTO_CONFIG` → `ENVCTL_AGENT_CONFIG`) and the local/global filename
+// (`kasetto.yaml` → `agent-env.yaml`). resolve_config_path is the pure testable core; we drive
+// it through the PUBLIC API and assert envctl's renamed constants (DEFAULT_CONFIG_FILENAME).
+#[test]
+fn parity_resolve_config_path_priority() {
+    // Renamed env-var/filename constants carry the envctl identity (priority logic unchanged).
+    assert_eq!(CONFIG_ENV_VAR, "ENVCTL_AGENT_CONFIG");
+    assert_eq!(DEFAULT_CONFIG_FILENAME, "agent-env.yaml");
+    assert_eq!(DEFAULT_GLOBAL_CONFIG_FILENAME, "agent-env.yaml");
+    assert_eq!(PREFERENCES_FILENAME, "config.yaml");
+
+    // (1) env var takes highest priority — kasetto env_var_takes_highest_priority.
+    assert_eq!(
+        resolve_config_path(
+            Some("https://example.com/team.yaml".into()),
+            None,
+            true,
+            None
+        ),
+        "https://example.com/team.yaml"
+    );
+
+    let prefs_dir = tmp("cp-prefs");
+    let prefs = prefs_dir.join("config.yaml");
+    fs::write(&prefs, "source: https://example.com/remote.yaml\n").unwrap();
+
+    // (2) preferences `source:` used when no env var, no local — preferences_file_source_used_when_no_env_var.
+    assert_eq!(
+        resolve_config_path(None, Some(&prefs), false, None),
+        "https://example.com/remote.yaml"
+    );
+    // (3) env var beats preferences file — env_var_beats_preferences_file.
+    assert_eq!(
+        resolve_config_path(
+            Some("https://example.com/env.yaml".into()),
+            Some(&prefs),
+            false,
+            None
+        ),
+        "https://example.com/env.yaml"
+    );
+    // (4) local config beats preferences `source:` — local_kasetto_yaml_beats_preferences_source.
+    assert_eq!(
+        resolve_config_path(None, Some(&prefs), true, None),
+        DEFAULT_CONFIG_FILENAME
+    );
+    let _ = fs::remove_dir_all(&prefs_dir);
+
+    // (5) local used when no env/prefs — local_kasetto_yaml_used_when_no_env_or_prefs.
+    assert_eq!(
+        resolve_config_path(None, None, true, None),
+        DEFAULT_CONFIG_FILENAME
+    );
+
+    // (6) global config used when local absent — global_config_used_when_local_absent.
+    let global_dir = tmp("cp-global");
+    let global = global_dir.join("agent-env.yaml"); // renamed from kasetto.yaml
+    fs::write(&global, "agent: claude-code\nskills: []\n").unwrap();
+    assert_eq!(
+        resolve_config_path(None, None, false, Some(&global)),
+        global.to_string_lossy()
+    );
+    let _ = fs::remove_dir_all(&global_dir);
+
+    // (7) fall back to the local filename when nothing exists — falls_back_to_local_filename_when_nothing_exists.
+    assert_eq!(
+        resolve_config_path(None, None, false, None),
+        DEFAULT_CONFIG_FILENAME
+    );
+
+    // (8) a missing prefs file is skipped silently — missing_prefs_file_is_skipped_silently.
+    let missing_dir = tmp("cp-no-prefs");
+    let missing = missing_dir.join("config.yaml");
+    assert_eq!(
+        resolve_config_path(None, Some(&missing), true, None),
+        DEFAULT_CONFIG_FILENAME
+    );
+    let _ = fs::remove_dir_all(&missing_dir);
+
+    // (9) a prefs file without a `source:` key is skipped — prefs_file_without_source_key_is_skipped.
+    let no_src_dir = tmp("cp-prefs-no-source");
+    let no_src = no_src_dir.join("config.yaml");
+    fs::write(&no_src, "some_other_key: value\n").unwrap();
+    assert_eq!(
+        resolve_config_path(None, Some(&no_src), true, None),
+        DEFAULT_CONFIG_FILENAME
+    );
+    let _ = fs::remove_dir_all(&no_src_dir);
+}
+
+// CP-01 (env arm): default_config_path honors the RENAMED env override end-to-end.
+// Oracle: the env-var arm of kasetto default_config_path (priority 1), proven through the
+// public, env-reading entry point. envctl's env var is ENVCTL_AGENT_CONFIG.
+#[test]
+fn parity_default_config_path_env_override() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let prev = std::env::var(CONFIG_ENV_VAR).ok();
+    std::env::set_var(CONFIG_ENV_VAR, "https://example.com/from-env.yaml");
+    assert_eq!(default_config_path(), "https://example.com/from-env.yaml");
+    match prev {
+        Some(v) => std::env::set_var(CONFIG_ENV_VAR, v),
+        None => std::env::remove_var(CONFIG_ENV_VAR),
+    }
 }

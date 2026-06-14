@@ -13,11 +13,18 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 3   # BUDGET REACHED (3/3) — HAND OFF via session-relay after this cycle
-cycles_total: 10
-parity: 74 [x] verified · 6 [~] residue/network · 22 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠])
+cycles_this_session: 1   # SESSION-2 (successor) RESUME: counter reset to 0; cycle = runtime/profile/dirs/config-path leaves
+cycles_total: 11
+parity: 80 [x] verified · 6 [~] residue/network · 16 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 93/115)
 ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass)
-last_item: PARITY cluster fsops+config_edit — +14 [x] (F-03..F-10, FE-01..06); 0 BLOCKED (F-03 cfg(windows) platform-residue)
+last_item: PARITY cluster leaves runtime/profile/dirs/config-path — +6 [x] (XC-03,ST-01,ST-02,P-01,P-02,CP-01); 0 BLOCKED; envctl renames verified
+session2_note: SESSION-2 successor 2026-06-14. Landed session-1 PR-stack (#80/#81 merged; #82 rebased onto
+  fresh develop 870387f, auto-merge armed). Then cycle 1 = leaves cluster (+6 [x], 311 tests, PR pending,
+  STACKED on #82 branch task-0012-parity-pass-3). Remaining 16 [ ]: M-22 (resolve_scope fallback) + S-15
+  (main→master retry) = engine/network → fold into the Engine-integration cycle; C-01..C-14 = command
+  orchestrators (sync/add/remove/lock/list/clean/init) — verify via crates/engine/tests differential vs
+  kasetto command behavior; that SAME engine-integration work also closes the 6 [~] residue
+  (S-07/12/13/15,CFG-03,M-24/L-03). NEXT cycle = C-* sync engine (C-01..C-06). THEN TASK-0014 (13 [≠] CLI/GUI).
 status: VERIFY-MERGE MODE — resume 2026-06-14. PARITY-VERIFIER PASS, budget 3/3 reached → HAND OFF.
   Absorption structurally complete through the Engine (0 to-merge); remaining DONE work = drive the
   [~]/[ ] parity rows → [x] via verbatim kasetto golden vectors. Session cycles (all PASS, all merged or
