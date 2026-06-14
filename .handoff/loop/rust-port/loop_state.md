@@ -13,11 +13,11 @@ dest_branch: task-0012-agent-env
 dest_base: develop
 rust_target: crates/agent-env (package envctl-agent-env)  # + engine/cli wiring (TASK-0013/0014); reuse-Y units may already live in crates/engine (lock/runtime/doctor per CLAUDE.md)
 cycle_budget: 3
-cycles_this_session: 1   # SESSION-2 (successor) RESUME: counter reset to 0; cycle = runtime/profile/dirs/config-path leaves
-cycles_total: 11
-parity: 80 [x] verified · 6 [~] residue/network · 16 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 93/115)
+cycles_this_session: 2   # SESSION-2 (successor): cycle1=leaves, cycle2=C-* sync engine (Engine integration tests)
+cycles_total: 12
+parity: 86 [x] verified · 6 [~] residue/network · 10 [ ] pending-vector · 13 [≠] front-end (parity-ledger.md authoritative; DONE = all [x]/[≠]; DONE-equiv 99/115)
 ledger: merge 102 [~] merged · 0 [ ] to-merge · 13 [≠] front-end (ABSORPTION COMPLETE THROUGH ENGINE; remaining work = parity-verifier pass)
-last_item: PARITY cluster leaves runtime/profile/dirs/config-path — +6 [x] (XC-03,ST-01,ST-02,P-01,P-02,CP-01); 0 BLOCKED; envctl renames verified
+last_item: PARITY cluster C-* SYNC ENGINE — +6 [x] (C-01..C-06) via crates/engine/tests/agent_sync_parity.rs (+15 tests, engine 59→74); 0 BLOCKED; MCP additive/never-clobber + never-prune verified
 session2_note: SESSION-2 successor 2026-06-14. Landed session-1 PR-stack (#80/#81 merged; #82 rebased onto
   fresh develop 870387f, auto-merge armed). Then cycle 1 = leaves cluster (+6 [x], 311 tests, PR pending,
   STACKED on #82 branch task-0012-parity-pass-3). Remaining 16 [ ]: M-22 (resolve_scope fallback) + S-15
