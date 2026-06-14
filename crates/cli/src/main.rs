@@ -909,6 +909,62 @@ impl AgentResult {
             AgentResult::List(_) => true,
         }
     }
+
+    /// Render the typed return for the HUMAN (non-`--json`) view. `Report` (sync/clean) and
+    /// `Lock` already stream their full detail through the `EventSink` (the per-action tree and
+    /// the lock summary), so re-printing them would duplicate. But `list` emits only a header
+    /// event — its inventory lives entirely in the returned `AgentList` — and an `add`/`remove`
+    /// PREVIEW has no per-item events at all, so without this both would show only a header.
+    fn render_human(&self) {
+        match self {
+            AgentResult::List(l) => render_agent_list(l),
+            AgentResult::Edit(o) => {
+                let n = o.items.len();
+                println!(
+                    "  {} {} ({} item{})",
+                    o.action,
+                    o.source,
+                    n,
+                    if n == 1 { "" } else { "s" }
+                );
+                for it in &o.items {
+                    println!("    {}: {}", it.section, it.target);
+                }
+            }
+            // Fully rendered by the EventSink stream (print_event); nothing to add.
+            AgentResult::Report(_) | AgentResult::Lock(_) => {}
+        }
+    }
+}
+
+/// Human-readable inventory for `agent list` (the `AgentList` return; `list` emits no per-item
+/// events, so this is the only place its rows are shown outside `--json`).
+fn render_agent_list(l: &envctl_engine::AgentList) {
+    if l.skills.is_empty() && l.mcps.is_empty() && l.commands.is_empty() {
+        println!("  (no installed assets)");
+        return;
+    }
+    if !l.skills.is_empty() {
+        println!("  skills ({}):", l.skills.len());
+        for s in &l.skills {
+            println!(
+                "    {} ({}) [{:?}] \u{2190} {}  {}",
+                s.name, s.skill, s.scope, s.source, s.updated_ago
+            );
+        }
+    }
+    if !l.mcps.is_empty() {
+        println!("  mcps ({}):", l.mcps.len());
+        for m in &l.mcps {
+            println!("    {} [{:?}] \u{2190} {}", m.name, m.scope, m.source);
+        }
+    }
+    if !l.commands.is_empty() {
+        println!("  commands ({}):", l.commands.len());
+        for c in &l.commands {
+            println!("    {} [{:?}] \u{2190} {}", c.name, c.scope, c.source);
+        }
+    }
 }
 
 /// `envctl agent {sync,add,remove,lock,list,clean}` — a THIN adapter over the shared
@@ -1052,6 +1108,8 @@ fn run_agent(engine: Engine, cmd: AgentCmd, json: bool) -> anyhow::Result<()> {
 
     if json {
         println!("{}", result.to_json()?);
+    } else {
+        result.render_human();
     }
     if !result.ok() {
         std::process::exit(1);

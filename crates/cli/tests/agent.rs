@@ -266,3 +266,93 @@ fn fixture_dest_absent_until_apply() {
     assert!(!fx.dest.exists());
     assert!(Path::new(&fx.config_path()).exists());
 }
+
+/// Regression (found by /verify): `agent list` in HUMAN mode must render the inventory,
+/// not just a header. The inventory lives in the returned `AgentList` (the engine emits
+/// no per-item events for `list`), so the non-`--json` path must print the returned rows.
+/// Before the fix, `agent list` showed only `==> agent List …` and no installed assets.
+#[test]
+fn list_human_output_renders_installed_inventory() {
+    let fx = Fixture::new();
+    // A local skill pack with one skill.
+    let pack = fx.root.join("pack");
+    std::fs::create_dir_all(pack.join("alpha")).unwrap();
+    std::fs::write(
+        pack.join("alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: Alpha skill\n---\n# Alpha\n",
+    )
+    .unwrap();
+    // Point the config at the pack with a claude-code preset (installs to <cwd>/.claude/skills).
+    std::fs::write(
+        fx.config_path(),
+        format!(
+            "scope: project\nagent: claude-code\nskills:\n  - source: {}\n    skills: [\"alpha\"]\n",
+            pack.display()
+        ),
+    )
+    .unwrap();
+    // Install it.
+    let sync = fx
+        .cmd()
+        .args(["agent", "sync", "--apply"])
+        .output()
+        .unwrap();
+    assert!(
+        sync.status.success(),
+        "sync --apply failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    // HUMAN list MUST show the skill row + a count header — the bug was a header-only render.
+    let out = fx.cmd().args(["agent", "list"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("skills (1)"),
+        "human `list` missing the skills inventory header:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("alpha"),
+        "human `list` did not render the installed skill:\n{stdout}"
+    );
+    // --json still carries the same row (no regression).
+    let j = fx.cmd().args(["agent", "list", "--json"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&j.stdout).unwrap();
+    assert_eq!(v["skills"].as_array().unwrap().len(), 1);
+}
+
+/// Regression (found by /verify): an `add`/`remove` PREVIEW (no `--apply`) has no per-item
+/// events, so the human view must still render the edit-outcome summary line — before the
+/// fix it printed only a header.
+#[test]
+fn remove_preview_renders_outcome_summary() {
+    let fx = Fixture::new();
+    let pack = fx.root.join("pack");
+    std::fs::create_dir_all(pack.join("alpha")).unwrap();
+    std::fs::write(
+        pack.join("alpha/SKILL.md"),
+        "---\nname: alpha\n---\n# Alpha\n",
+    )
+    .unwrap();
+    std::fs::write(
+        fx.config_path(),
+        format!(
+            "scope: project\nagent: claude-code\nskills:\n  - source: {}\n    skills: [\"alpha\"]\n",
+            pack.display()
+        ),
+    )
+    .unwrap();
+    let before = snapshot(&fx);
+    let out = fx
+        .cmd()
+        .args(["agent", "remove", &pack.display().to_string()])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("would_remove"),
+        "human remove preview missing the would_remove summary:\n{stdout}"
+    );
+    // Still fail-closed: a preview writes nothing.
+    assert_unchanged(&fx, &before, "remove");
+}
