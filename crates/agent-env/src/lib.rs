@@ -25,14 +25,18 @@ pub mod agent;
 pub mod command;
 pub mod config;
 pub mod config_edit;
+pub mod config_path;
 pub mod dirs;
 pub mod extend;
 pub mod fsops;
 pub mod hash;
 pub mod lock;
 pub mod mcp;
+pub mod profile;
 pub mod report;
+pub mod runtime;
 pub mod source;
+pub mod sync;
 pub mod util;
 
 pub use agent::{
@@ -48,6 +52,10 @@ pub use config::{
 pub use config_edit::{
     ensure_local_config, insert_item, is_remote_source, item_exists, remove_item, remove_names,
     split_at_ref, Pin, RemoveOutcome, Section, Selector, SourceItem,
+};
+pub use config_path::{
+    default_config_path, resolve_config_path, Preferences, CONFIG_ENV_VAR, DEFAULT_CONFIG_FILENAME,
+    DEFAULT_GLOBAL_CONFIG_FILENAME, PREFERENCES_FILENAME,
 };
 pub use dirs::{
     dirs_agent_env_cache, dirs_agent_env_config, dirs_agent_env_data, dirs_home,
@@ -66,10 +74,20 @@ pub use lock::{
 pub use mcp::{
     merge_mcp_config, read_source_mcp_servers, remove_mcp_server, servers_present_in_settings,
 };
+pub use profile::{format_updated_ago, read_skill_profile, read_skill_profile_from_dir};
 pub use report::{Action, InstalledSkill, Report, Summary, SyncFailure};
+pub use runtime::{
+    clear_runtime_state, load_runtime_state, runtime_state_path, save_runtime_state, RuntimeState,
+};
 pub use source::{
-    archive_url, derive_browse_url, download_extract, parse_repo_url, rewrite_browse_to_raw_url,
-    BrowseDerived, RepoUrl, UrlRequestAuth,
+    archive_url, derive_browse_url, discover, discover_commands, discover_mcps,
+    discover_with_root_name, download_extract, materialize_source, parse_repo_url,
+    resolve_command_entry, resolve_mcp_entry, rewrite_browse_to_raw_url, BrowseDerived,
+    MaterializedSource, RepoUrl, UrlRequestAuth,
+};
+pub use sync::{
+    command_action_label, command_asset_id, mcp_action_label, mcp_asset_id, remove_stale,
+    skill_key, StaleEntry,
 };
 pub use util::{now_unix, now_unix_str};
 
