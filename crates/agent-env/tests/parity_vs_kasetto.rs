@@ -2050,3 +2050,711 @@ fn parity_lock_check_and_modes() {
     assert!(!upd.should_resolve("unrelated", &p));
     assert!(LockMode::Update(vec![]).should_resolve("anything", &p)); // empty = all
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// fsops + config_edit mutation-engine cluster (F-03..F-10, FE-01..FE-06).
+// Golden vectors taken VERBATIM from kasetto v3.2.0's certified #[cfg(test)]
+// modules in src/fsops/{copy,settings,mod,config_edit}.rs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+use envctl_agent_env::{
+    copy_dir, dirs_home, insert_item, item_exists, relativize_dest, remove_item, remove_names,
+    resolve_command_targets, resolve_dest, resolve_destinations, resolve_mcp_settings_targets,
+    resolve_path, scope_root, select_targets, BrokenSkill, Pin, RemoveOutcome, Section, Selector,
+    SettingsFile, SourceItem,
+};
+
+// ───────────────────────────── F-03 · copy_dir ─────────────────────────────
+// Oracle: kasetto src/fsops/copy.rs::tests::{copy_dir_preserves_executable_bit,
+// copy_dir_follows_symlinked_directories}. Verbatim recursive copy; fs::copy
+// preserves +x; symlinked dirs are canonicalized and recursed.
+#[cfg(unix)]
+#[test]
+fn parity_copy_dir_preserves_executable_bit() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tmp("copy-perm");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    let script = src.join("run.sh");
+    fs::write(&script, "#!/bin/sh\n").expect("write script");
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let dst = root.join("dst");
+    copy_dir(&src, &dst).expect("copy dir");
+
+    let mode = fs::metadata(dst.join("run.sh"))
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0o111, "executable bit must survive the copy");
+}
+
+// Oracle: kasetto src/fsops/copy.rs::tests::copy_dir_follows_symlinked_directories.
+#[cfg(unix)]
+#[test]
+fn parity_copy_dir_follows_symlinked_directories() {
+    use std::os::unix::fs::symlink;
+    let root = tmp("copy-symlink");
+    let src = root.join("src");
+    let refs_dir = src.join("references");
+    fs::create_dir_all(&refs_dir).expect("create refs");
+    fs::write(refs_dir.join("guide.md"), "hello").expect("write file");
+    symlink("references", src.join("linked-references")).expect("create symlink");
+
+    let dst = root.join("dst");
+    copy_dir(&src, &dst).expect("copy dir");
+
+    assert!(dst.join("linked-references/guide.md").is_file());
+    assert!(dst.join("references/guide.md").is_file());
+}
+
+// Oracle: kasetto src/fsops/copy.rs (copy_dir contract: dst removed first).
+// Portable arm of the recursive-copy behavior — exercises remove-then-recreate.
+#[test]
+fn parity_copy_dir_removes_existing_destination_first() {
+    let root = tmp("copy-replace");
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(src.join("keep.txt"), "new").expect("write");
+
+    let dst = root.join("dst");
+    fs::create_dir_all(&dst).expect("create dst");
+    // A stale file that must NOT survive the copy (dst is wiped first).
+    fs::write(dst.join("stale.txt"), "old").expect("write stale");
+
+    copy_dir(&src, &dst).expect("copy dir");
+    assert!(dst.join("keep.txt").is_file());
+    assert!(
+        !dst.join("stale.txt").exists(),
+        "destination must be removed before copy"
+    );
+}
+
+// ───────────────────────────── F-04 · SettingsFile ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::tests::{settings_file_load_creates_empty_for_missing_file,
+// settings_file_load_parses_existing_json, settings_file_save_creates_parent_dirs,
+// settings_file_load_rejects_invalid_json}.
+#[test]
+fn parity_settings_file_load_save() {
+    let root = tmp("settings");
+
+    // load(missing) → empty {}.
+    let missing = root.join("nonexistent.json");
+    let sf = SettingsFile::load(&missing).expect("load");
+    assert_eq!(sf.data, serde_json::json!({}));
+
+    // load(existing) → parsed.
+    let existing = root.join("settings.json");
+    fs::write(&existing, r#"{"mcpServers":{}}"#).unwrap();
+    let sf = SettingsFile::load(&existing).expect("load");
+    assert!(sf.data["mcpServers"].is_object());
+
+    // save() pretty-prints and creates parent dirs.
+    let nested = root.join("deep").join("path").join("settings.json");
+    let mut sf = SettingsFile::load(&nested).expect("load");
+    sf.data["key"] = serde_json::json!("value");
+    sf.save().expect("save");
+    let text = fs::read_to_string(&nested).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(val["key"], "value");
+
+    // load(invalid JSON) → err.
+    let bad = root.join("bad.json");
+    fs::write(&bad, "not valid json {{{").unwrap();
+    let result = SettingsFile::load(&bad);
+    assert!(result.is_err(), "invalid settings JSON must be rejected");
+}
+
+// ───────────────────────────── F-05 · resolve_path ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::tests::resolve_path_expands_only_leading_tilde.
+#[test]
+fn parity_resolve_path_expands_only_leading_tilde() {
+    let base = Path::new("/base");
+    let home = dirs_home().expect("home");
+    assert_eq!(resolve_path(base, "~/skills"), home.join("skills"));
+    assert_eq!(resolve_path(base, "~"), home);
+    // A `~` that is not the home prefix is an ordinary path character.
+    assert_eq!(
+        resolve_path(base, "backup~old/skills"),
+        Path::new("/base/backup~old/skills")
+    );
+    // Relative paths join onto base; absolute kept.
+    assert_eq!(resolve_path(base, "rel/dir"), Path::new("/base/rel/dir"));
+    assert_eq!(resolve_path(base, "/abs/dir"), Path::new("/abs/dir"));
+}
+
+// ───────────────────────────── F-06 · select_targets ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::tests::{select_targets_wildcard_is_sorted,
+// select_targets_reports_missing_skill, select_targets_prefers_explicit_path_override,
+// select_targets_resolves_relative_path_against_source_root}.
+#[test]
+fn parity_select_targets_wildcard_is_sorted() {
+    use std::collections::HashMap;
+    let mut available = HashMap::new();
+    for name in ["zeta", "alpha", "mid"] {
+        available.insert(name.to_string(), PathBuf::from(format!("/tmp/{name}")));
+    }
+    let sf = SkillsField::Wildcard("*".into());
+    let (targets, _) = select_targets(&sf, &available, Path::new("/tmp")).expect("select");
+    let names: Vec<&str> = targets.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["alpha", "mid", "zeta"]);
+}
+
+#[test]
+fn parity_select_targets_reports_missing_skill() {
+    use std::collections::HashMap;
+    let mut available = HashMap::new();
+    available.insert("present".to_string(), PathBuf::from("/tmp/present"));
+    let sf = SkillsField::List(vec![
+        SkillTarget::Name("present".to_string()),
+        SkillTarget::Name("missing".to_string()),
+    ]);
+    let (targets, broken): (_, Vec<BrokenSkill>) =
+        select_targets(&sf, &available, Path::new("/tmp")).expect("select");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].0, "present");
+    assert_eq!(broken.len(), 1);
+    assert_eq!(broken[0].name, "missing");
+    assert!(broken[0].reason.contains("skill not found"));
+}
+
+#[test]
+fn parity_select_targets_prefers_explicit_path_override() {
+    use std::collections::HashMap;
+    let root = tmp("targets");
+    let nested = root.join("skills-repo");
+    let skill_dir = nested.join("custom-skill");
+    fs::create_dir_all(&skill_dir).expect("create dirs");
+    fs::write(skill_dir.join("SKILL.md"), "# Custom\n\nDesc\n").expect("write skill");
+
+    let mut available = HashMap::new();
+    available.insert(
+        "custom-skill".to_string(),
+        PathBuf::from("/tmp/wrong-location"),
+    );
+    let sf = SkillsField::List(vec![SkillTarget::Obj {
+        name: "custom-skill".to_string(),
+        path: Some(nested.to_string_lossy().to_string()),
+    }]);
+    let (targets, broken) = select_targets(&sf, &available, Path::new("/tmp")).expect("select");
+    assert!(broken.is_empty());
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].0, "custom-skill");
+    assert_eq!(targets[0].1, skill_dir);
+}
+
+#[test]
+fn parity_select_targets_resolves_relative_path_against_source_root() {
+    use std::collections::HashMap;
+    let root = tmp("targets-rel");
+    let skill_dir = root.join("skills/productivity/grill-me");
+    fs::create_dir_all(&skill_dir).expect("create dirs");
+    fs::write(skill_dir.join("SKILL.md"), "# Grill\n\nDesc\n").expect("write skill");
+
+    let available = HashMap::new();
+    let sf = SkillsField::List(vec![SkillTarget::Obj {
+        name: "grill-me".to_string(),
+        path: Some("skills/productivity".to_string()),
+    }]);
+    let (targets, broken) = select_targets(&sf, &available, &root).expect("select");
+    assert!(broken.is_empty());
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].0, "grill-me");
+    assert_eq!(targets[0].1, skill_dir);
+}
+
+#[test]
+fn parity_select_targets_invalid_field_errors() {
+    use std::collections::HashMap;
+    // A non-`*` wildcard string is an error ("invalid skills field").
+    let available = HashMap::new();
+    let sf = SkillsField::Wildcard("everything".into());
+    let err = select_targets(&sf, &available, Path::new("/tmp")).unwrap_err();
+    assert!(err.to_string().contains("invalid skills field"));
+}
+
+// ───────────────────────────── F-07 · resolve_destinations ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::resolve_destinations (explicit destination →
+// [resolve_path]; else per-agent project/global by scope; ERR when no agents).
+// Agent path table per src/model/agent.rs::tests::agent_paths_cover_supported_presets.
+#[test]
+fn parity_resolve_destinations() {
+    let base = Path::new("/proj");
+
+    // Explicit destination wins, resolved against base.
+    let cfg: Config = serde_yaml::from_str("destination: ./skills\nskills: []\n").expect("parse");
+    let dests = resolve_destinations(base, &cfg, Scope::Project).expect("resolve");
+    assert_eq!(dests, vec![PathBuf::from("/proj/skills")]);
+
+    // No destination, project scope → per-agent project_path.
+    let cfg: Config = serde_yaml::from_str("agent: claude-code\nskills: []\n").expect("parse");
+    let dests = resolve_destinations(base, &cfg, Scope::Project).expect("resolve");
+    assert_eq!(dests, vec![PathBuf::from("/proj/.claude/skills")]);
+
+    // Global scope → per-agent global_path (under HOME).
+    let home = dirs_home().expect("home");
+    let cfg: Config = serde_yaml::from_str("agent: codex\nskills: []\n").expect("parse");
+    let dests = resolve_destinations(base, &cfg, Scope::Global).expect("resolve");
+    assert_eq!(dests, vec![home.join(".codex/skills")]);
+
+    // No destination, no agent → error.
+    let cfg: Config = serde_yaml::from_str("skills: []\n").expect("parse");
+    let err = resolve_destinations(base, &cfg, Scope::Project).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("must define either destination or a supported agent preset"));
+}
+
+// ───────────────────────────── F-08 · resolve_mcp_settings_targets ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::resolve_mcp_settings_targets (per-agent mcp
+// target by scope, dedup by path; empty agents → []).
+#[test]
+fn parity_resolve_mcp_settings_targets() {
+    let proj = Path::new("/proj");
+
+    // No agents → empty (not an error).
+    let cfg: Config = serde_yaml::from_str("destination: ./skills\nskills: []\n").expect("parse");
+    let out = resolve_mcp_settings_targets(&cfg, Scope::Project, proj).expect("resolve");
+    assert!(out.is_empty());
+
+    // Single agent → exactly one target.
+    let cfg: Config = serde_yaml::from_str("agent: claude-code\nskills: []\n").expect("parse");
+    let out = resolve_mcp_settings_targets(&cfg, Scope::Project, proj).expect("resolve");
+    assert_eq!(out.len(), 1);
+
+    // Dedup by path: claude-code listed twice collapses to one target.
+    let cfg: Config =
+        serde_yaml::from_str("agent:\n  - claude-code\n  - claude-code\nskills: []\n")
+            .expect("parse");
+    let out = resolve_mcp_settings_targets(&cfg, Scope::Project, proj).expect("resolve");
+    assert_eq!(out.len(), 1, "duplicate agents dedup by path");
+}
+
+// ───────────────────────────── F-09 · resolve_command_targets ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::resolve_command_targets (per-agent command
+// target by scope, FILTER unsupported (None), dedup; empty → []). Cursor has NO
+// global command path (src/model/agent.rs::commands_global_path → None for Cursor).
+#[test]
+fn parity_resolve_command_targets() {
+    let proj = Path::new("/proj");
+
+    // No agents → empty.
+    let cfg: Config = serde_yaml::from_str("destination: ./skills\nskills: []\n").expect("parse");
+    let out = resolve_command_targets(&cfg, Scope::Global, proj).expect("resolve");
+    assert!(out.is_empty());
+
+    // [claude-code, cursor] at GLOBAL scope: cursor has no global command dir →
+    // filtered out, leaving exactly one target (claude-code).
+    let cfg: Config =
+        serde_yaml::from_str("agent:\n  - claude-code\n  - cursor\nskills: []\n").expect("parse");
+    let out = resolve_command_targets(&cfg, Scope::Global, proj).expect("resolve");
+    assert_eq!(out.len(), 1, "unsupported (None) command target filtered");
+}
+
+// ───────────────────────────── F-10 · scope_root / relativize_dest / resolve_dest ─────────────────────────────
+// Oracle: kasetto src/fsops/mod.rs::{scope_root,relativize_dest,resolve_dest}.
+// Lock-portability core: store install paths relative to a scope root, resolve back.
+#[test]
+fn parity_scope_root_relativize_resolve_dest() {
+    let proj = Path::new("/proj");
+
+    // scope_root: Project → project_root; Global → home.
+    assert_eq!(
+        scope_root(Scope::Project, proj).expect("scope_root"),
+        PathBuf::from("/proj")
+    );
+    assert_eq!(
+        scope_root(Scope::Global, proj).expect("scope_root"),
+        dirs_home().expect("home")
+    );
+
+    // relativize_dest: under-root → relative; outside-root → absolute kept.
+    let root = Path::new("/proj");
+    assert_eq!(
+        relativize_dest(Path::new("/proj/.claude/skills"), root),
+        ".claude/skills"
+    );
+    assert_eq!(
+        relativize_dest(Path::new("/elsewhere/skills"), root),
+        "/elsewhere/skills"
+    );
+
+    // resolve_dest is the inverse: relative → root.join; absolute kept.
+    assert_eq!(
+        resolve_dest(".claude/skills", root),
+        PathBuf::from("/proj/.claude/skills")
+    );
+    assert_eq!(
+        resolve_dest("/elsewhere/skills", root),
+        PathBuf::from("/elsewhere/skills")
+    );
+
+    // Round-trip: resolve_dest(relativize_dest(p)) == p for under-root paths.
+    let p = Path::new("/proj/.claude/skills");
+    assert_eq!(resolve_dest(&relativize_dest(p, root), root), p);
+}
+
+// ───────────────────────────── FE-01 · edit value types ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs (Section::key/singular; Pin/Selector/
+// SourceItem/RemoveOutcome shapes — exercised via the public mutation API below).
+#[test]
+fn parity_config_edit_value_types() {
+    assert_eq!(Section::Skills.key(), "skills");
+    assert_eq!(Section::Mcps.key(), "mcps");
+    assert_eq!(Section::Commands.key(), "commands");
+    assert_eq!(Section::Skills.singular(), "skill");
+    assert_eq!(Section::Mcps.singular(), "mcp");
+    assert_eq!(Section::Commands.singular(), "command");
+
+    // RemoveOutcome value identity (PartialEq, as used by remove_names callers).
+    assert_eq!(
+        RemoveOutcome::Names(vec!["a".into()]),
+        RemoveOutcome::Names(vec!["a".into()])
+    );
+    assert_ne!(RemoveOutcome::WholeItem, RemoveOutcome::NotFound);
+
+    // SourceItem assembles from Pin + Selector + sub_dir (constructible publicly).
+    let item = SourceItem {
+        source: "https://x/a".into(),
+        pin: Pin::Ref("v1".into()),
+        sub_dir: Some("pack".into()),
+        selector: Selector::Names(vec!["alpha".into()]),
+    };
+    assert_eq!(item.source, "https://x/a");
+    assert!(matches!(item.pin, Pin::Ref(ref r) if r == "v1"));
+}
+
+fn wildcard_item(source: &str) -> SourceItem {
+    SourceItem {
+        source: source.to_string(),
+        pin: Pin::None,
+        sub_dir: None,
+        selector: Selector::Wildcard,
+    }
+}
+
+// ───────────────────────────── FE-02 · insert_item ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs::tests::{insert_appends_under_existing_section_preserving_comments,
+// insert_creates_section_when_absent, insert_normalizes_inline_empty_list,
+// insert_into_empty_file, insert_with_ref_and_named_list, insert_keeps_trailing_comment_after_new_item,
+// remove_then_insert_round_trips_indentation}.
+#[test]
+fn parity_insert_appends_preserving_comments() {
+    let text = "# my config\nskills:\n  - source: https://x/a\n    skills: \"*\"\n";
+    let out = insert_item(text, Section::Skills, &wildcard_item("https://x/b")).unwrap();
+    assert_eq!(
+        out,
+        "# my config\n\
+         skills:\n\
+         \x20 - source: https://x/a\n\
+         \x20\x20\x20 skills: \"*\"\n\
+         \x20 - source: https://x/b\n\
+         \x20\x20\x20 skills: \"*\"\n"
+    );
+}
+
+#[test]
+fn parity_insert_creates_section_when_absent() {
+    let text = "agent: claude-code\n";
+    let out = insert_item(text, Section::Mcps, &wildcard_item("https://x/m")).unwrap();
+    assert_eq!(
+        out,
+        "agent: claude-code\n\nmcps:\n  - source: https://x/m\n    mcps: \"*\"\n"
+    );
+}
+
+#[test]
+fn parity_insert_normalizes_inline_empty_list() {
+    let text = "skills: []\n";
+    let out = insert_item(text, Section::Skills, &wildcard_item("https://x/a")).unwrap();
+    assert_eq!(out, "skills:\n  - source: https://x/a\n    skills: \"*\"\n");
+}
+
+#[test]
+fn parity_insert_into_empty_file() {
+    let out = insert_item("", Section::Commands, &wildcard_item("https://x/c")).unwrap();
+    assert_eq!(
+        out,
+        "commands:\n  - source: https://x/c\n    commands: \"*\"\n"
+    );
+}
+
+#[test]
+fn parity_insert_with_ref_and_named_list() {
+    let item = SourceItem {
+        source: "https://x/a".into(),
+        pin: Pin::Ref("v2.0".into()),
+        sub_dir: Some("pack".into()),
+        selector: Selector::Names(vec!["alpha".into(), "beta".into()]),
+    };
+    let out = insert_item("skills: []\n", Section::Skills, &item).unwrap();
+    assert_eq!(
+        out,
+        "skills:\n\
+         \x20 - source: https://x/a\n\
+         \x20\x20\x20 ref: v2.0\n\
+         \x20\x20\x20 sub-dir: pack\n\
+         \x20\x20\x20 skills:\n\
+         \x20\x20\x20\x20\x20 - alpha\n\
+         \x20\x20\x20\x20\x20 - beta\n"
+    );
+}
+
+#[test]
+fn parity_insert_keeps_trailing_comment_after_new_item() {
+    let text =
+        "skills:\n  - source: https://x/a\n    skills: \"*\"\n\n# trailing note\nagent: cursor\n";
+    let out = insert_item(text, Section::Skills, &wildcard_item("https://x/b")).unwrap();
+    assert!(out.contains("- source: https://x/b"));
+    let b_pos = out.find("https://x/b").unwrap();
+    let note_pos = out.find("# trailing note").unwrap();
+    assert!(b_pos < note_pos);
+    assert!(out.contains("\nagent: cursor\n"));
+}
+
+#[test]
+fn parity_insert_rejects_inline_non_empty_list() {
+    // FE-02 ERR arm: inline non-empty list cannot be edited in place.
+    let text = "skills: [a, b]\n";
+    let err = insert_item(text, Section::Skills, &wildcard_item("https://x/c")).unwrap_err();
+    assert!(err.to_string().contains("inline list"));
+}
+
+#[test]
+fn parity_insert_round_trips_four_space_indent() {
+    // FE-06 indent_of/indent-inheritance: new item adopts the existing 4-space dash indent.
+    let text = "skills:\n    - source: https://x/a\n      skills: \"*\"\n";
+    let out = insert_item(text, Section::Skills, &wildcard_item("https://x/b")).unwrap();
+    assert!(out.contains("\n    - source: https://x/b"));
+    assert!(out.contains("\n      skills: \"*\""));
+}
+
+// ───────────────────────────── FE-03 · remove_item + find_match ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs::tests::{remove_deletes_only_the_matching_item,
+// remove_absent_source_is_noop, remove_ambiguous_without_pin_errors, remove_disambiguates_by_pin,
+// remove_ambiguous_same_pin_different_sub_dir_errors, remove_disambiguates_by_sub_dir,
+// remove_sub_dir_empty_matches_entry_without_sub_dir}.
+#[test]
+fn parity_remove_item_and_find_match() {
+    // Deletes only the matching item.
+    let text = "skills:\n  - source: https://x/a\n    skills: \"*\"\n  - source: https://x/b\n    skills: \"*\"\n";
+    let (out, removed) = remove_item(text, Section::Skills, "https://x/a", None, None).unwrap();
+    assert!(removed);
+    assert_eq!(out, "skills:\n  - source: https://x/b\n    skills: \"*\"\n");
+
+    // Absent source is a no-op (Ok(false)).
+    let text = "skills:\n  - source: https://x/a\n    skills: \"*\"\n";
+    let (out, removed) = remove_item(text, Section::Skills, "https://x/z", None, None).unwrap();
+    assert!(!removed);
+    assert_eq!(out, text);
+
+    // Ambiguous without pin → "disambiguate" error.
+    let text = "skills:\n  - source: https://x/a\n    ref: v1\n    skills: \"*\"\n  - source: https://x/a\n    ref: v2\n    skills: \"*\"\n";
+    let err = remove_item(text, Section::Skills, "https://x/a", None, None).unwrap_err();
+    assert!(err.to_string().contains("disambiguate"));
+
+    // Disambiguate by pin.
+    let (out, removed) =
+        remove_item(text, Section::Skills, "https://x/a", Some("v1"), None).unwrap();
+    assert!(removed);
+    assert!(out.contains("ref: v2"));
+    assert!(!out.contains("ref: v1"));
+
+    // Ambiguous same pin, different sub-dir → "disambiguate".
+    let text = "skills:\n  - source: https://x/a\n    sub-dir: pack-a\n    skills: \"*\"\n  - source: https://x/a\n    sub-dir: pack-b\n    skills: \"*\"\n";
+    let err = remove_item(text, Section::Skills, "https://x/a", None, None).unwrap_err();
+    assert!(err.to_string().contains("disambiguate"));
+
+    // Disambiguate by sub-dir.
+    let (out, removed) =
+        remove_item(text, Section::Skills, "https://x/a", None, Some("pack-a")).unwrap();
+    assert!(removed);
+    assert!(out.contains("sub-dir: pack-b"));
+    assert!(!out.contains("sub-dir: pack-a"));
+
+    // sub_dir == Some("") matches an entry that has NO sub-dir field.
+    let text = "skills:\n  - source: https://x/a\n    sub-dir: pack-a\n    skills: \"*\"\n  - source: https://x/a\n    skills: \"*\"\n";
+    let (out, removed) = remove_item(text, Section::Skills, "https://x/a", None, Some("")).unwrap();
+    assert!(removed);
+    assert!(out.contains("sub-dir: pack-a"));
+}
+
+#[test]
+fn parity_remove_last_item_leaves_bare_section_header() {
+    // Oracle: kasetto config_edit.rs::tests::remove_last_item_leaves_bare_section_header.
+    let text = "skills:\n  - source: https://x/a\n    skills: \"*\"\n";
+    let (out, removed) = remove_item(text, Section::Skills, "https://x/a", None, None).unwrap();
+    assert!(removed);
+    assert_eq!(out, "skills:\n");
+    let reinserted = insert_item(&out, Section::Skills, &wildcard_item("https://x/b")).unwrap();
+    assert_eq!(
+        reinserted,
+        "skills:\n  - source: https://x/b\n    skills: \"*\"\n"
+    );
+}
+
+// ───────────────────────────── FE-04 · remove_names ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs::tests::{remove_names_subtracts_one_keeps_entry,
+// remove_names_last_name_drops_whole_entry, remove_names_missing_name_errors_without_mutating,
+// remove_names_on_wildcard_errors, remove_names_object_form_errors,
+// remove_names_absent_source_is_not_found, remove_last_named_item_collapses_then_can_be_reused}.
+#[test]
+fn parity_remove_names() {
+    // Subtract one, keep entry.
+    let text = "skills:\n  - source: https://x/a\n    skills:\n      - alpha\n      - beta\n";
+    let (out, outcome) = remove_names(
+        text,
+        Section::Skills,
+        "https://x/a",
+        None,
+        None,
+        &["alpha".into()],
+    )
+    .unwrap();
+    assert_eq!(outcome, RemoveOutcome::Names(vec!["alpha".into()]));
+    assert_eq!(
+        out,
+        "skills:\n  - source: https://x/a\n    skills:\n      - beta\n"
+    );
+
+    // Last name → drop whole entry (WholeItem).
+    let text = "skills:\n  - source: https://x/a\n    skills:\n      - alpha\n";
+    let (out, outcome) = remove_names(
+        text,
+        Section::Skills,
+        "https://x/a",
+        None,
+        None,
+        &["alpha".into()],
+    )
+    .unwrap();
+    assert_eq!(outcome, RemoveOutcome::WholeItem);
+    assert_eq!(out, "skills:\n");
+
+    // Missing name → error, no mutation.
+    let text = "skills:\n  - source: https://x/a\n    skills:\n      - alpha\n";
+    let err = remove_names(
+        text,
+        Section::Skills,
+        "https://x/a",
+        None,
+        None,
+        &["ghost".into()],
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("not found"));
+
+    // Wildcard entry → error ("remove the whole entry").
+    let text = "skills:\n  - source: https://x/a\n    skills: \"*\"\n";
+    let err = remove_names(
+        text,
+        Section::Skills,
+        "https://x/a",
+        None,
+        None,
+        &["alpha".into()],
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("wildcard"));
+
+    // Object-form entry → error ("edit directly").
+    let text =
+        "skills:\n  - source: https://x/a\n    skills:\n      - name: alpha\n        path: lib\n";
+    let err = remove_names(
+        text,
+        Section::Skills,
+        "https://x/a",
+        None,
+        None,
+        &["alpha".into()],
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("object-form"));
+
+    // Absent source → NotFound.
+    let text = "skills:\n  - source: https://x/a\n    skills:\n      - alpha\n";
+    let (out, outcome) = remove_names(
+        text,
+        Section::Skills,
+        "https://x/z",
+        None,
+        None,
+        &["alpha".into()],
+    )
+    .unwrap();
+    assert_eq!(outcome, RemoveOutcome::NotFound);
+    assert_eq!(out, text);
+}
+
+#[test]
+fn parity_remove_last_named_item_collapses() {
+    // Oracle: kasetto config_edit.rs::tests::remove_last_named_item_collapses_then_can_be_reused.
+    let text = "mcps:\n  - source: https://x/a\n    mcps:\n      - foo\n";
+    let (out, outcome) = remove_names(
+        text,
+        Section::Mcps,
+        "https://x/a",
+        None,
+        None,
+        &["foo".into()],
+    )
+    .unwrap();
+    assert_eq!(outcome, RemoveOutcome::WholeItem);
+    assert_eq!(out, "mcps:\n");
+}
+
+// ───────────────────────────── FE-05 · item_exists + render_item ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs::tests::item_exists_matches_full_identity.
+// render_item is private; it is exercised by the FE-02 insert vectors above
+// (the exact `- source:`/ref/sub-dir/selector emission with indent).
+#[test]
+fn parity_item_exists_matches_full_identity() {
+    let text =
+        "skills:\n  - source: https://x/a\n    ref: v1\n    sub-dir: pack\n    skills: \"*\"\n";
+    let same = SourceItem {
+        source: "https://x/a".into(),
+        pin: Pin::Ref("v1".into()),
+        sub_dir: Some("pack".into()),
+        selector: Selector::Wildcard,
+    };
+    assert!(item_exists(text, Section::Skills, &same));
+
+    let diff_ref = SourceItem {
+        pin: Pin::Ref("v2".into()),
+        ..same
+    };
+    assert!(!item_exists(text, Section::Skills, &diff_ref));
+}
+
+// ───────────────────────────── FE-06 · raw-line YAML primitives ─────────────────────────────
+// Oracle: kasetto src/fsops/config_edit.rs (parse_items/find_top_level/indent_of/
+// section_inline_value/split_lines/join_lines/splice). These are PRIVATE `fn`s and
+// are not reachable through agent-env's public API; they are parity-proved
+// TRANSITIVELY through the FE-02/03/04 vectors that drive insert/remove and assert
+// exact byte-for-byte output (newline preservation, indent inheritance, inline-list
+// normalization, section creation, trailing-comment placement). See:
+//   - join_lines newline preservation: FE-02 every assert_eq ends with `\n` matching input.
+//   - find_top_level/next_top_level: FE-03 multi-item sections resolve the right ranges.
+//   - parse_items shallowest-dash + indent_of: FE-02 four-space round-trip.
+//   - section_inline_value normalization: FE-02 insert_normalizes_inline_empty_list.
+// A direct unit test of these helpers would require crate-internal access; recorded
+// here as covered-via-public-API to keep the parity surface honest.
+#[test]
+fn parity_config_edit_primitives_via_public_api() {
+    // join_lines: a file WITHOUT a trailing newline stays without one.
+    let no_nl = "skills:\n  - source: https://x/a\n    skills: \"*\"";
+    let out = insert_item(no_nl, Section::Skills, &wildcard_item("https://x/b")).unwrap();
+    assert!(
+        !out.ends_with('\n'),
+        "join_lines must not add a trailing newline when input had none"
+    );
+
+    // find_top_level over a non-section key + section creation appends at EOF.
+    let out = insert_item(
+        "agent: claude-code\n",
+        Section::Skills,
+        &wildcard_item("https://x/a"),
+    )
+    .unwrap();
+    assert!(out.contains("\nskills:\n  - source: https://x/a"));
+}
