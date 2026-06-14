@@ -24,8 +24,10 @@
 pub mod agent;
 pub mod config;
 pub mod extend;
+pub mod fsops;
 pub mod hash;
 pub mod lock;
+pub mod mcp;
 pub mod report;
 pub mod source;
 
@@ -39,9 +41,13 @@ pub use config::{
     McpEntry, McpSourceSpec, McpsField, Scope, SkillTarget, SkillsField, SourceSpec, AGENT_PRESETS,
 };
 pub use extend::{extract_extends, load_config_recursive, merge_yaml, MAX_EXTENDS_DEPTH};
+pub use fsops::SettingsFile;
 pub use hash::{hash_dir, hash_file, hash_str};
 pub use lock::{
     AgentLockEntry, AgentLockFile, AssetEntry, LockMode, AGENT_ASSETS_KEY, LOCK_VERSION,
+};
+pub use mcp::{
+    merge_mcp_config, read_source_mcp_servers, remove_mcp_server, servers_present_in_settings,
 };
 pub use report::{Action, InstalledSkill, Report, Summary, SyncFailure};
 pub use source::{
@@ -69,6 +75,13 @@ pub enum AgentEnvError {
     /// A YAML (de)serialization failure for config or lock files.
     #[error("yaml error: {0}")]
     Yaml(#[from] serde_yaml::Error),
+
+    /// A JSON (de)serialization failure for agent settings files.
+    ///
+    /// Mirrors kasetto's box-error auto-conversion of `serde_json::Error` via `?`
+    /// (e.g. `SettingsFile::save`'s `serde_json::to_string_pretty`).
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 /// Construct an [`AgentEnvError::Message`] — the string-message error channel that
